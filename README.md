@@ -15,16 +15,17 @@ Enables Minecraft servers running NeoForge mods to distribute world tick process
 
 ## Configuration
 
-Region threading is gated behind experimental server config options, **both defaulting to off**:
+Java startup arguments are no longer required, configuration and settings are now located in **config/neofolia.toml**
+
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `-Dneoforge.regionThreads=4` | Args | `0` | Number of native region worker threads. |
-| `-Dneoforge.regionizedChunkTicks=true` | Args | `false` | Enabling chunk ticks by region. |
-| `-Dneoforge.regionizedScheduledTicks=true` | Args | `false` | Enabling scheduled ticks by region. |
-| `-Dneoforge.regionizedBlockEntityTicks=true` | Args | `false` | Enable block ticks by region. |
-| `-Dneoforge.regionizedEntityTicks=true` | Args | `false` | Enabling entity ticks by region. |
-| `-Dneoforge.regionTaskTimeoutSeconds=60` | Args | `false` | Error message server shutdown timeout. |
+| `region_threads=0` | Args | `0` | Number of native region worker threads. |
+| `regionized_chunk_ticks` | Args | `true` | Enabling chunk ticks by region. |
+| `regionized_scheduled_ticks` | Args | `true` | Enabling scheduled ticks by region. |
+| `regionized_block_entity_ticks` | Args | `true` | Enable block ticks by region. |
+| `regionized_entity_ticks` | Args | `true` | Enabling entity ticks by region. |
+| `region_task_timeout_seconds` | Args | `60` | Error message server shutdown timeout. |
 
 ## Diagnostics
 
