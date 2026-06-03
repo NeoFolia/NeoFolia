@@ -1,6 +1,6 @@
 # NeoFolia — Minecraft 26.1.2
 
-A NeoForge fork porting [Folia](https://github.com/PaperMC/Folia)'s regionized multithreaded server model natively into the NeoForge modding ecosystem.
+An unofficial NeoForge fork that brings Folia's regionalized, multi-threaded server model to the NeoForge modding ecosystem. fork porting [Folia](https://github.com/PaperMC/Folia)'s regionized multithreaded server model natively into the NeoForge modding ecosystem.
 
 ## What It Does
 
