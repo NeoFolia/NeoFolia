@@ -33,4 +33,3 @@ Region threading is gated behind experimental server config options, **both defa
 ```
 
 Prints region count, running regions, sections, tracked entities, entity tasks, worker threads, global tick count, and last tick duration.
-```
