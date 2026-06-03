@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownSplashPotion.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownSplashPotion.java
+@@ -17,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.HitResult;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ThrownSplashPotion extends AbstractThrownPotion {
+     public ThrownSplashPotion(EntityType<? extends ThrownSplashPotion> type, Level level) {
+@@ -43,7 +_,8 @@
+         Iterable<MobEffectInstance> mobEffects = contents.getAllEffects();
+         AABB potionAabb = this.getBoundingBox().move(hitResult.getLocation().subtract(this.position()));
+         AABB effectAabb = potionAabb.inflate(4.0, 2.0, 4.0);
+-        List<LivingEntity> entities = this.level().getEntitiesOfClass(LivingEntity.class, effectAabb);
++        effectAabb = RegionizedWorldGuard.restrictToCurrentRegion(level, effectAabb);
++        List<LivingEntity> entities = effectAabb == null ? List.of() : this.level().getEntitiesOfClass(LivingEntity.class, effectAabb);
+         float margin = ProjectileUtil.computeMargin(this);
+         if (!entities.isEmpty()) {
+             Entity effectSource = this.getEffectSource();

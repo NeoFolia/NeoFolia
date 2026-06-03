@@ -1,0 +1,51 @@
+--- a/net/minecraft/world/level/block/entity/SpawnerBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/SpawnerBlockEntity.java
+@@ -37,6 +_,11 @@
+                 level.sendBlockUpdated(pos, state, state, 260);
+             }
+         }
++
++        @Override
++        public com.mojang.datafixers.util.Either<net.minecraft.world.level.block.entity.BlockEntity, net.minecraft.world.entity.Entity> getOwner() {
++            return com.mojang.datafixers.util.Either.left(SpawnerBlockEntity.this);
++        }
+     };
+ 
+     public SpawnerBlockEntity(BlockPos worldPosition, BlockState blockState) {
+@@ -44,13 +_,13 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.spawner.load(this.level, this.worldPosition, input);
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         this.spawner.save(output);
+     }
+@@ -75,17 +_,17 @@
+     }
+ 
+     @Override
+-    public boolean triggerEvent(int b0, int b1) {
++    public synchronized boolean triggerEvent(int b0, int b1) {
+         return this.spawner.onEventTriggered(this.level, b0) ? true : super.triggerEvent(b0, b1);
+     }
+ 
+     @Override
+-    public void setEntityId(EntityType<?> type, RandomSource random) {
++    public synchronized void setEntityId(EntityType<?> type, RandomSource random) {
+         this.spawner.setEntityId(type, this.level, random, this.worldPosition);
+         this.setChanged();
+     }
+ 
+-    public BaseSpawner getSpawner() {
++    public synchronized BaseSpawner getSpawner() {
+         return this.spawner;
+     }
+ }

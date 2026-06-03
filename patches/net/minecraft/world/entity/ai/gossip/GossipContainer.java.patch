@@ -1,0 +1,169 @@
+--- a/net/minecraft/world/entity/ai/gossip/GossipContainer.java
++++ b/net/minecraft/world/entity/ai/gossip/GossipContainer.java
+@@ -40,16 +_,16 @@
+     }
+ 
+     @VisibleForDebug
+-    public Map<UUID, Object2IntMap<GossipType>> getGossipEntries() {
++    public synchronized Map<UUID, Object2IntMap<GossipType>> getGossipEntries() {
+         Map<UUID, Object2IntMap<GossipType>> result = Maps.newHashMap();
+         this.gossips.keySet().forEach(uuid -> {
+             GossipContainer.EntityGossips entityGossips = this.gossips.get(uuid);
+-            result.put(uuid, entityGossips.entries);
++            result.put(uuid, entityGossips.copyEntries());
+         });
+         return result;
+     }
+ 
+-    public void decay() {
++    public synchronized void decay() {
+         Iterator<GossipContainer.EntityGossips> iterator = this.gossips.values().iterator();
+ 
+         while (iterator.hasNext()) {
+@@ -61,11 +_,11 @@
+         }
+     }
+ 
+-    private Stream<GossipContainer.GossipEntry> unpack() {
+-        return this.gossips.entrySet().stream().flatMap(e -> e.getValue().unpack(e.getKey()));
++    private synchronized Stream<GossipContainer.GossipEntry> unpack() {
++        return this.gossips.entrySet().stream().flatMap(e -> e.getValue().unpack(e.getKey())).toList().stream();
+     }
+ 
+-    private Collection<GossipContainer.GossipEntry> selectGossipsForTransfer(RandomSource random, int maxCount) {
++    private synchronized Collection<GossipContainer.GossipEntry> selectGossipsForTransfer(RandomSource random, int maxCount) {
+         List<GossipContainer.GossipEntry> entries = this.unpack().toList();
+         if (entries.isEmpty()) {
+             return Collections.emptyList();
+@@ -91,11 +_,11 @@
+         }
+     }
+ 
+-    private GossipContainer.EntityGossips getOrCreate(UUID target) {
++    private synchronized GossipContainer.EntityGossips getOrCreate(UUID target) {
+         return this.gossips.computeIfAbsent(target, uuid -> new GossipContainer.EntityGossips());
+     }
+ 
+-    public void transferFrom(GossipContainer source, RandomSource random, int maxCount) {
++    public synchronized void transferFrom(GossipContainer source, RandomSource random, int maxCount) {
+         Collection<GossipContainer.GossipEntry> newGossips = source.selectGossipsForTransfer(random, maxCount);
+         newGossips.forEach(newGossip -> {
+             int decayedValue = newGossip.value - newGossip.type.decayPerTransfer;
+@@ -105,16 +_,16 @@
+         });
+     }
+ 
+-    public int getReputation(UUID entity, Predicate<GossipType> types) {
++    public synchronized int getReputation(UUID entity, Predicate<GossipType> types) {
+         GossipContainer.EntityGossips entry = this.gossips.get(entity);
+         return entry != null ? entry.weightedValue(types) : 0;
+     }
+ 
+-    public long getCountForType(GossipType type, DoublePredicate valueTest) {
++    public synchronized long getCountForType(GossipType type, DoublePredicate valueTest) {
+         return this.gossips.values().stream().filter(e -> valueTest.test(e.entries.getOrDefault(type, 0) * type.weight)).count();
+     }
+ 
+-    public void add(UUID target, GossipType type, int amountToAdd) {
++    public synchronized void add(UUID target, GossipType type, int amountToAdd) {
+         GossipContainer.EntityGossips entityGossips = this.getOrCreate(target);
+         entityGossips.entries.mergeInt(type, amountToAdd, (o, n) -> this.mergeValuesForAddition(type, o, n));
+         entityGossips.makeSureValueIsntTooLowOrTooHigh(type);
+@@ -123,11 +_,11 @@
+         }
+     }
+ 
+-    public void remove(UUID target, GossipType type, int amountToRemove) {
++    public synchronized void remove(UUID target, GossipType type, int amountToRemove) {
+         this.add(target, type, -amountToRemove);
+     }
+ 
+-    public void remove(UUID target, GossipType type) {
++    public synchronized void remove(UUID target, GossipType type) {
+         GossipContainer.EntityGossips entityGossips = this.gossips.get(target);
+         if (entityGossips != null) {
+             entityGossips.remove(type);
+@@ -137,7 +_,7 @@
+         }
+     }
+ 
+-    public void remove(GossipType type) {
++    public synchronized void remove(GossipType type) {
+         Iterator<GossipContainer.EntityGossips> iterator = this.gossips.values().iterator();
+ 
+         while (iterator.hasNext()) {
+@@ -149,12 +_,14 @@
+         }
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.gossips.clear();
+     }
+ 
+-    public void putAll(GossipContainer container) {
+-        container.gossips.forEach((target, gossips) -> this.getOrCreate(target).entries.putAll(gossips.entries));
++    public synchronized void putAll(GossipContainer container) {
++        synchronized (container) {
++            container.gossips.forEach((target, gossips) -> this.getOrCreate(target).entries.putAll(gossips.copyEntries()));
++        }
+     }
+ 
+     private static int mergeValuesForTransfer(int oldValue, int newValue) {
+@@ -166,7 +_,7 @@
+         return sum > type.max ? Math.max(type.max, oldValue) : sum;
+     }
+ 
+-    public GossipContainer copy() {
++    public synchronized GossipContainer copy() {
+         GossipContainer container = new GossipContainer();
+         container.putAll(this);
+         return container;
+@@ -175,15 +_,15 @@
+     private static class EntityGossips {
+         private final Object2IntMap<GossipType> entries = new Object2IntOpenHashMap<>();
+ 
+-        public int weightedValue(Predicate<GossipType> types) {
++        public synchronized int weightedValue(Predicate<GossipType> types) {
+             return this.entries.object2IntEntrySet().stream().filter(e -> types.test(e.getKey())).mapToInt(e -> e.getIntValue() * e.getKey().weight).sum();
+         }
+ 
+-        public Stream<GossipContainer.GossipEntry> unpack(UUID target) {
+-            return this.entries.object2IntEntrySet().stream().map(e -> new GossipContainer.GossipEntry(target, e.getKey(), e.getIntValue()));
++        public synchronized Stream<GossipContainer.GossipEntry> unpack(UUID target) {
++            return this.entries.object2IntEntrySet().stream().map(e -> new GossipContainer.GossipEntry(target, e.getKey(), e.getIntValue())).toList().stream();
+         }
+ 
+-        public void decay() {
++        public synchronized void decay() {
+             ObjectIterator<Entry<GossipType>> it = this.entries.object2IntEntrySet().iterator();
+ 
+             while (it.hasNext()) {
+@@ -197,11 +_,11 @@
+             }
+         }
+ 
+-        public boolean isEmpty() {
++        public synchronized boolean isEmpty() {
+             return this.entries.isEmpty();
+         }
+ 
+-        public void makeSureValueIsntTooLowOrTooHigh(GossipType type) {
++        public synchronized void makeSureValueIsntTooLowOrTooHigh(GossipType type) {
+             int value = this.entries.getInt(type);
+             if (value > type.max) {
+                 this.entries.put(type, type.max);
+@@ -212,8 +_,12 @@
+             }
+         }
+ 
+-        public void remove(GossipType type) {
++        public synchronized void remove(GossipType type) {
+             this.entries.removeInt(type);
++        }
++
++        public synchronized Object2IntMap<GossipType> copyEntries() {
++            return new Object2IntOpenHashMap<>(this.entries);
+         }
+     }
+ 

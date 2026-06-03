@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/entity/ai/behavior/EntityTracker.java
++++ b/net/minecraft/world/entity/ai/behavior/EntityTracker.java
+@@ -6,7 +_,10 @@
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.memory.NearestVisibleLivingEntities;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class EntityTracker implements PositionTracker {
+     private final Entity entity;
+@@ -24,35 +_,47 @@
+     }
+ 
+     @Override
+-    public Vec3 currentPosition() {
++    public synchronized Vec3 currentPosition() {
+         return this.trackEyeHeight ? this.entity.position().add(0.0, this.entity.getEyeHeight(), 0.0) : this.entity.position();
+     }
+ 
+     @Override
+-    public BlockPos currentBlockPosition() {
++    public synchronized BlockPos currentBlockPosition() {
+         return this.targetEyeHeight ? BlockPos.containing(this.entity.getEyePosition()) : this.entity.blockPosition();
+     }
+ 
+     @Override
+-    public boolean isVisibleBy(LivingEntity body) {
++    public synchronized boolean isVisibleBy(LivingEntity body) {
++        if (!this.isRegionSafeFor(body)) {
++            return false;
++        }
++
+         if (this.entity instanceof LivingEntity livingEntity) {
+             if (!livingEntity.isAlive()) {
+                 return false;
+             } else {
+                 Optional<NearestVisibleLivingEntities> visibleEntities = body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES);
+-                return visibleEntities.isPresent() && visibleEntities.get().contains(livingEntity);
++                return visibleEntities.map(entities -> entities.contains(livingEntity)).orElse(false);
+             }
+         } else {
+             return true;
+         }
+     }
+ 
+-    public Entity getEntity() {
++    public synchronized boolean isRegionSafeFor(LivingEntity body) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(body.level(), this.entity) != null;
++    }
++
++    public synchronized Entity getEntity() {
+         return this.entity;
+     }
+ 
++    public synchronized @Nullable Entity getEntityIfRegionSafe(Level level) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(level, this.entity);
++    }
++
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return "EntityTracker for " + this.entity;
+     }
+ }

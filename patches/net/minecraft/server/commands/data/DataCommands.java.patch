@@ -1,0 +1,292 @@
+--- a/net/minecraft/server/commands/data/DataCommands.java
++++ b/net/minecraft/server/commands/data/DataCommands.java
+@@ -33,6 +_,7 @@
+ import net.minecraft.nbt.Tag;
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.util.Mth;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class DataCommands {
+     private static final SimpleCommandExceptionType ERROR_MERGE_UNCHANGED = new SimpleCommandExceptionType(Component.translatable("commands.data.merge.failed"));
+@@ -52,6 +_,9 @@
+     private static final Dynamic2CommandExceptionType ERROR_INVALID_SUBSTRING = new Dynamic2CommandExceptionType(
+         (start, end) -> Component.translatableEscape("commands.data.modify.invalid_substring", start, end)
+     );
++    private static final SimpleCommandExceptionType ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL = new SimpleCommandExceptionType(
++        Component.literal("This data command must run on the global server thread while regionized ticking is active")
++    );
+     public static final List<Function<String, DataCommands.DataProvider>> ALL_PROVIDERS = ImmutableList.of(
+         EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER, StorageDataAccessor.PROVIDER
+     );
+@@ -71,25 +_,38 @@
+                         Commands.literal("merge"),
+                         p -> p.then(
+                             Commands.argument("nbt", CompoundTagArgument.compoundTag())
+-                                .executes(c -> mergeData(c.getSource(), targetProvider.access(c), CompoundTagArgument.getCompoundTag(c, "nbt")))
++                                .executes(
++                                    c -> runDataCommand(
++                                        c,
++                                        () -> mergeData(c.getSource(), targetProvider.access(c), CompoundTagArgument.getCompoundTag(c, "nbt"))
++                                    )
++                                )
+                         )
+                     )
+                 )
+                 .then(
+                     targetProvider.wrap(
+                         Commands.literal("get"),
+-                        p -> p.executes(c -> getData(c.getSource(), targetProvider.access(c)))
++                        p -> p.executes(c -> runDataCommand(c, () -> getData(c.getSource(), targetProvider.access(c))))
+                             .then(
+                                 Commands.argument("path", NbtPathArgument.nbtPath())
+-                                    .executes(c -> getData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path")))
++                                    .executes(
++                                        c -> runDataCommand(
++                                            c,
++                                            () -> getData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path"))
++                                        )
++                                    )
+                                     .then(
+                                         Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                             .executes(
+-                                                c -> getNumeric(
+-                                                    c.getSource(),
+-                                                    targetProvider.access(c),
+-                                                    NbtPathArgument.getPath(c, "path"),
+-                                                    DoubleArgumentType.getDouble(c, "scale")
++                                                c -> runDataCommand(
++                                                    c,
++                                                    () -> getNumeric(
++                                                        c.getSource(),
++                                                        targetProvider.access(c),
++                                                        NbtPathArgument.getPath(c, "path"),
++                                                        DoubleArgumentType.getDouble(c, "scale")
++                                                    )
+                                                 )
+                                             )
+                                     )
+@@ -101,7 +_,12 @@
+                         Commands.literal("remove"),
+                         p -> p.then(
+                             Commands.argument("path", NbtPathArgument.nbtPath())
+-                                .executes(c -> removeData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path")))
++                                .executes(
++                                    c -> runDataCommand(
++                                        c,
++                                        () -> removeData(c.getSource(), targetProvider.access(c), NbtPathArgument.getPath(c, "path"))
++                                    )
++                                )
+                         )
+                     )
+                 )
+@@ -198,10 +_,17 @@
+                             targetPathNode,
+                             manipulator -> sourceProvider.wrap(
+                                 Commands.literal("from"),
+-                                s -> s.executes(c -> manipulateData(c, targetProvider, manipulator, getSingletonSource(c, sourceProvider)))
++                                s -> s.executes(
++                                        c -> runDataCommand(c, () -> manipulateData(c, targetProvider, manipulator, getSingletonSource(c, sourceProvider)))
++                                    )
+                                     .then(
+                                         Commands.argument("sourcePath", NbtPathArgument.nbtPath())
+-                                            .executes(c -> manipulateData(c, targetProvider, manipulator, resolveSourcePath(c, sourceProvider)))
++                                            .executes(
++                                                c -> runDataCommand(
++                                                    c,
++                                                    () -> manipulateData(c, targetProvider, manipulator, resolveSourcePath(c, sourceProvider))
++                                                )
++                                            )
+                                     )
+                             )
+                         );
+@@ -210,41 +_,61 @@
+                             manipulator -> sourceProvider.wrap(
+                                 Commands.literal("string"),
+                                 s -> s.executes(
+-                                        c -> manipulateData(c, targetProvider, manipulator, stringifyTagList(getSingletonSource(c, sourceProvider), str -> str))
++                                        c -> runDataCommand(
++                                            c,
++                                            () -> manipulateData(
++                                                c,
++                                                targetProvider,
++                                                manipulator,
++                                                stringifyTagList(getSingletonSource(c, sourceProvider), str -> str)
++                                            )
++                                        )
+                                     )
+                                     .then(
+                                         Commands.argument("sourcePath", NbtPathArgument.nbtPath())
+                                             .executes(
+-                                                c -> manipulateData(
+-                                                    c, targetProvider, manipulator, stringifyTagList(resolveSourcePath(c, sourceProvider), str -> str)
++                                                c -> runDataCommand(
++                                                    c,
++                                                    () -> manipulateData(
++                                                        c,
++                                                        targetProvider,
++                                                        manipulator,
++                                                        stringifyTagList(resolveSourcePath(c, sourceProvider), str -> str)
++                                                    )
+                                                 )
+                                             )
+                                             .then(
+                                                 Commands.argument("start", IntegerArgumentType.integer())
+                                                     .executes(
+-                                                        c -> manipulateData(
++                                                        c -> runDataCommand(
+                                                             c,
+-                                                            targetProvider,
+-                                                            manipulator,
+-                                                            stringifyTagList(
+-                                                                resolveSourcePath(c, sourceProvider),
+-                                                                str -> substring(str, IntegerArgumentType.getInteger(c, "start"))
++                                                            () -> manipulateData(
++                                                                c,
++                                                                targetProvider,
++                                                                manipulator,
++                                                                stringifyTagList(
++                                                                    resolveSourcePath(c, sourceProvider),
++                                                                    str -> substring(str, IntegerArgumentType.getInteger(c, "start"))
++                                                                )
+                                                             )
+                                                         )
+                                                     )
+                                                     .then(
+                                                         Commands.argument("end", IntegerArgumentType.integer())
+                                                             .executes(
+-                                                                c -> manipulateData(
++                                                                c -> runDataCommand(
+                                                                     c,
+-                                                                    targetProvider,
+-                                                                    manipulator,
+-                                                                    stringifyTagList(
+-                                                                        resolveSourcePath(c, sourceProvider),
+-                                                                        str -> substring(
+-                                                                            str,
+-                                                                            IntegerArgumentType.getInteger(c, "start"),
+-                                                                            IntegerArgumentType.getInteger(c, "end")
++                                                                    () -> manipulateData(
++                                                                        c,
++                                                                        targetProvider,
++                                                                        manipulator,
++                                                                        stringifyTagList(
++                                                                            resolveSourcePath(c, sourceProvider),
++                                                                            str -> substring(
++                                                                                str,
++                                                                                IntegerArgumentType.getInteger(c, "start"),
++                                                                                IntegerArgumentType.getInteger(c, "end")
++                                                                            )
+                                                                         )
+                                                                     )
+                                                                 )
+@@ -259,7 +_,7 @@
+                     nodeSupplier.accept(
+                         targetPathNode, manipulator -> Commands.literal("value").then(Commands.argument("value", NbtTagArgument.nbtTag()).executes(c -> {
+                             List<Tag> source = Collections.singletonList(NbtTagArgument.getNbtTag(c, "value"));
+-                            return manipulateData(c, targetProvider, manipulator, source);
++                            return runDataCommand(c, () -> manipulateData(c, targetProvider, manipulator, source));
+                         }))
+                     );
+                     return t.then(targetPathNode);
+@@ -290,16 +_,42 @@
+         return validatedSubstring(input, getOffset(start, length), length);
+     }
+ 
++    private static int runDataCommand(CommandContext<CommandSourceStack> context, DataCommands.CommandTask task) throws CommandSyntaxException {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return task.run();
++        }
++
++        CommandSourceStack source = context.getSource();
++        if (!source.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> {
++            try {
++                task.run();
++            } catch (CommandSyntaxException ex) {
++                source.sendFailure(Component.literal(ex.getMessage()));
++            }
++        })) {
++            source.sendFailure(Component.literal("Region dispatcher is not running"));
++        }
++        return 0;
++    }
++
++    private static void requireGlobalDataCommand(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL.create();
++        }
++    }
++
+     private static int getOffset(int index, int length) {
+         return index >= 0 ? index : length + index;
+     }
+ 
+     private static List<Tag> getSingletonSource(CommandContext<CommandSourceStack> context, DataCommands.DataProvider sourceProvider) throws CommandSyntaxException {
++        requireGlobalDataCommand(context.getSource());
+         DataAccessor source = sourceProvider.access(context);
+         return Collections.singletonList(source.getData());
+     }
+ 
+     private static List<Tag> resolveSourcePath(CommandContext<CommandSourceStack> context, DataCommands.DataProvider sourceProvider) throws CommandSyntaxException {
++        requireGlobalDataCommand(context.getSource());
+         DataAccessor source = sourceProvider.access(context);
+         NbtPathArgument.NbtPath sourcePath = NbtPathArgument.getPath(context, "sourcePath");
+         return sourcePath.get(source.getData());
+@@ -308,6 +_,7 @@
+     private static int manipulateData(
+         CommandContext<CommandSourceStack> context, DataCommands.DataProvider targetProvider, DataCommands.DataManipulator manipulator, List<Tag> source
+     ) throws CommandSyntaxException {
++        requireGlobalDataCommand(context.getSource());
+         DataAccessor target = targetProvider.access(context);
+         NbtPathArgument.NbtPath targetPath = NbtPathArgument.getPath(context, "targetPath");
+         CompoundTag targetData = target.getData();
+@@ -322,6 +_,7 @@
+     }
+ 
+     private static int removeData(CommandSourceStack source, DataAccessor accessor, NbtPathArgument.NbtPath path) throws CommandSyntaxException {
++        requireGlobalDataCommand(source);
+         CompoundTag result = accessor.getData();
+         int count = path.remove(result);
+         if (count == 0) {
+@@ -345,6 +_,7 @@
+     }
+ 
+     private static int getData(CommandSourceStack source, DataAccessor accessor, NbtPathArgument.NbtPath path) throws CommandSyntaxException {
++        requireGlobalDataCommand(source);
+         Tag tag = getSingleTag(path, accessor);
+ 
+         int result = switch (tag) {
+@@ -360,6 +_,7 @@
+     }
+ 
+     private static int getNumeric(CommandSourceStack source, DataAccessor accessor, NbtPathArgument.NbtPath path, double scale) throws CommandSyntaxException {
++        requireGlobalDataCommand(source);
+         Tag tag = getSingleTag(path, accessor);
+         if (!(tag instanceof NumericTag)) {
+             throw ERROR_GET_NOT_NUMBER.create(path.toString());
+@@ -371,12 +_,14 @@
+     }
+ 
+     private static int getData(CommandSourceStack source, DataAccessor accessor) throws CommandSyntaxException {
++        requireGlobalDataCommand(source);
+         CompoundTag data = accessor.getData();
+         source.sendSuccess(() -> accessor.getPrintSuccess(data), false);
+         return 1;
+     }
+ 
+     private static int mergeData(CommandSourceStack source, DataAccessor accessor, CompoundTag nbt) throws CommandSyntaxException {
++        requireGlobalDataCommand(source);
+         CompoundTag old = accessor.getData();
+         if (NbtPathArgument.NbtPath.isTooDeep(nbt, 0)) {
+             throw NbtPathArgument.ERROR_DATA_TOO_DEEP.create();
+@@ -395,6 +_,11 @@
+     @FunctionalInterface
+     private interface DataManipulator {
+         int modify(CommandContext<CommandSourceStack> context, CompoundTag targetData, NbtPathArgument.NbtPath targetPath, List<Tag> source) throws CommandSyntaxException;
++    }
++
++    @FunctionalInterface
++    private interface CommandTask {
++        int run() throws CommandSyntaxException;
+     }
+ 
+     @FunctionalInterface

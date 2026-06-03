@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetClosestHomeAsWalkTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/SetClosestHomeAsWalkTarget.java
+@@ -26,7 +_,7 @@
+     private static final int RATE = 20;
+     private static final int OK_DISTANCE_SQR = 4;
+ 
+-    public static BehaviorControl<PathfinderMob> create(float speedModifier) {
++    public static synchronized BehaviorControl<PathfinderMob> create(float speedModifier) {
+         Long2LongMap batchCache = new Long2LongOpenHashMap();
+         MutableLong lastUpdate = new MutableLong(0L);
+         return BehaviorBuilder.create(
+@@ -39,18 +_,20 @@
+                         } else {
+                             PoiManager poiManager = level.getPoiManager();
+                             Optional<BlockPos> closest = poiManager.findClosest(p -> p.is(PoiTypes.HOME), body.blockPosition(), 48, PoiManager.Occupancy.ANY);
+-                            if (!closest.isEmpty() && !(closest.get().distSqr(body.blockPosition()) <= 4.0)) {
++                            if (closest.isPresent() && !(closest.orElseThrow().distSqr(body.blockPosition()) <= 4.0)) {
+                                 MutableInt triedCount = new MutableInt(0);
+-                                lastUpdate.setValue(level.getGameTime() + level.getRandom().nextInt(20));
++                                lastUpdate.setValue(level.getGameTime() + body.getRandom().nextInt(20));
+                                 Predicate<BlockPos> cacheTest = pos -> {
+-                                    long key = pos.asLong();
+-                                    if (batchCache.containsKey(key)) {
+-                                        return false;
+-                                    } else if (triedCount.incrementAndGet() >= 5) {
+-                                        return false;
+-                                    } else {
+-                                        batchCache.put(key, lastUpdate.longValue() + 40L);
+-                                        return true;
++                                    synchronized (batchCache) {
++                                        long key = pos.asLong();
++                                        if (batchCache.containsKey(key)) {
++                                            return false;
++                                        } else if (triedCount.incrementAndGet() >= 5) {
++                                            return false;
++                                        } else {
++                                            batchCache.put(key, lastUpdate.longValue() + 40L);
++                                            return true;
++                                        }
+                                     }
+                                 };
+                                 Set<Pair<Holder<PoiType>, BlockPos>> pois = poiManager.findAllWithType(
+@@ -66,7 +_,9 @@
+                                         level.debugSynchronizers().updatePoi(targetPos);
+                                     }
+                                 } else if (triedCount.intValue() < 5) {
+-                                    batchCache.long2LongEntrySet().removeIf(entry -> entry.getLongValue() < lastUpdate.longValue());
++                                    synchronized (batchCache) {
++                                        batchCache.long2LongEntrySet().removeIf(entry -> entry.getLongValue() < lastUpdate.longValue());
++                                    }
+                                 }
+ 
+                                 return true;

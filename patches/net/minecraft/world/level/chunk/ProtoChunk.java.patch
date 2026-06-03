@@ -1,0 +1,68 @@
+--- a/net/minecraft/world/level/chunk/ProtoChunk.java
++++ b/net/minecraft/world/level/chunk/ProtoChunk.java
+@@ -3,7 +_,6 @@
+ import com.google.common.collect.Lists;
+ import com.mojang.logging.LogUtils;
+ import it.unimi.dsi.fastutil.shorts.ShortList;
+-import java.util.Collections;
+ import java.util.EnumSet;
+ import java.util.List;
+ import java.util.Map;
+@@ -136,7 +_,7 @@
+                         this.lightEngine.updateSectionStatus(pos, isEmpty);
+                     }
+ 
+-                    if (LightEngine.hasDifferentLightProperties(oldState, state)) {
++                    if (LightEngine.hasDifferentLightProperties(this, pos, oldState, state)) {
+                         this.skyLightSources.update(this, localX, y, localZ);
+                         this.lightEngine.checkBlock(pos);
+                     }
+@@ -170,21 +_,21 @@
+     }
+ 
+     @Override
+-    public void setBlockEntity(BlockEntity blockEntity) {
++    public synchronized void setBlockEntity(BlockEntity blockEntity) {
+         this.pendingBlockEntities.remove(blockEntity.getBlockPos());
+         this.blockEntities.put(blockEntity.getBlockPos(), blockEntity);
+     }
+ 
+     @Override
+-    public @Nullable BlockEntity getBlockEntity(BlockPos pos) {
++    public synchronized @Nullable BlockEntity getBlockEntity(BlockPos pos) {
+         return this.blockEntities.get(pos);
+     }
+ 
+-    public Map<BlockPos, BlockEntity> getBlockEntities() {
+-        return this.blockEntities;
++    public synchronized Map<BlockPos, BlockEntity> getBlockEntities() {
++        return Map.copyOf(this.blockEntities);
+     }
+ 
+-    public void addEntity(CompoundTag tag) {
++    public synchronized void addEntity(CompoundTag tag) {
+         this.entities.add(tag);
+     }
+ 
+@@ -213,8 +_,8 @@
+         super.setStartForStructure(structure, structureStart);
+     }
+ 
+-    public List<CompoundTag> getEntities() {
+-        return this.entities;
++    public synchronized List<CompoundTag> getEntities() {
++        return List.copyOf(this.entities);
+     }
+ 
+     @Override
+@@ -269,8 +_,8 @@
+         ChunkAccess.getOrCreateOffsetList(this.postProcessing, sectionIndex).addAll(packedOffsets);
+     }
+ 
+-    public Map<BlockPos, CompoundTag> getBlockEntityNbts() {
+-        return Collections.unmodifiableMap(this.pendingBlockEntities);
++    public synchronized Map<BlockPos, CompoundTag> getBlockEntityNbts() {
++        return Map.copyOf(this.pendingBlockEntities);
+     }
+ 
+     @Override

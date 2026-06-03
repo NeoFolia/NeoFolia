@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/entity/ai/sensing/BreezeAttackEntitySensor.java
++++ b/net/minecraft/world/entity/ai/sensing/BreezeAttackEntitySensor.java
+@@ -20,6 +_,7 @@
+         super.doTick(level, breeze);
+         breeze.getBrain()
+             .getMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES)
++            .map(List::copyOf)
+             .stream()
+             .flatMap(Collection::stream)
+             .filter(EntitySelector.NO_CREATIVE_OR_SPECTATOR)

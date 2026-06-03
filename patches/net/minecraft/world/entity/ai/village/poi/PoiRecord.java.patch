@@ -1,0 +1,56 @@
+--- a/net/minecraft/world/entity/ai/village/poi/PoiRecord.java
++++ b/net/minecraft/world/entity/ai/village/poi/PoiRecord.java
+@@ -26,17 +_,17 @@
+         this(pos, poiType, poiType.value().maxTickets(), setDirty);
+     }
+ 
+-    public PoiRecord.Packed pack() {
++    public synchronized PoiRecord.Packed pack() {
+         return new PoiRecord.Packed(this.pos, this.poiType, this.freeTickets);
+     }
+ 
+     @Deprecated
+     @VisibleForDebug
+-    public int getFreeTickets() {
++    public synchronized int getFreeTickets() {
+         return this.freeTickets;
+     }
+ 
+-    protected boolean acquireTicket() {
++    protected synchronized boolean acquireTicket() {
+         if (this.freeTickets <= 0) {
+             return false;
+         } else {
+@@ -46,7 +_,7 @@
+         }
+     }
+ 
+-    protected boolean releaseTicket() {
++    protected synchronized boolean releaseTicket() {
+         if (this.freeTickets >= this.poiType.value().maxTickets()) {
+             return false;
+         } else {
+@@ -56,19 +_,19 @@
+         }
+     }
+ 
+-    public boolean hasSpace() {
++    public synchronized boolean hasSpace() {
+         return this.freeTickets > 0;
+     }
+ 
+-    public boolean isOccupied() {
++    public synchronized boolean isOccupied() {
+         return this.freeTickets != this.poiType.value().maxTickets();
+     }
+ 
+-    public BlockPos getPos() {
++    public synchronized BlockPos getPos() {
+         return this.pos;
+     }
+ 
+-    public Holder<PoiType> getPoiType() {
++    public synchronized Holder<PoiType> getPoiType() {
+         return this.poiType;
+     }
+ 

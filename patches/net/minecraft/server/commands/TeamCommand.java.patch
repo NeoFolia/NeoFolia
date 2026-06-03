@@ -1,0 +1,155 @@
+--- a/net/minecraft/server/commands/TeamCommand.java
++++ b/net/minecraft/server/commands/TeamCommand.java
+@@ -269,6 +_,10 @@
+     }
+ 
+     private static int leaveTeam(CommandSourceStack source, Collection<ScoreHolder> members) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> leaveTeam(source, members))) {
++            return 0;
++        }
++
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+ 
+         for (ScoreHolder member : members) {
+@@ -285,6 +_,10 @@
+     }
+ 
+     private static int joinTeam(CommandSourceStack source, PlayerTeam team, Collection<ScoreHolder> members) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> joinTeam(source, team, members))) {
++            return 0;
++        }
++
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+ 
+         for (ScoreHolder member : members) {
+@@ -303,6 +_,10 @@
+     }
+ 
+     private static int setNametagVisibility(CommandSourceStack source, PlayerTeam team, Team.Visibility visibility) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setNametagVisibility(source, team, visibility))) {
++            return 0;
++        }
++
+         if (team.getNameTagVisibility() == visibility) {
+             throw ERROR_TEAM_NAMETAG_VISIBLITY_UNCHANGED.create();
+         } else {
+@@ -316,6 +_,10 @@
+     }
+ 
+     private static int setDeathMessageVisibility(CommandSourceStack source, PlayerTeam team, Team.Visibility visibility) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setDeathMessageVisibility(source, team, visibility))) {
++            return 0;
++        }
++
+         if (team.getDeathMessageVisibility() == visibility) {
+             throw ERROR_TEAM_DEATH_MESSAGE_VISIBLITY_UNCHANGED.create();
+         } else {
+@@ -329,6 +_,10 @@
+     }
+ 
+     private static int setCollision(CommandSourceStack source, PlayerTeam team, Team.CollisionRule collision) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setCollision(source, team, collision))) {
++            return 0;
++        }
++
+         if (team.getCollisionRule() == collision) {
+             throw ERROR_TEAM_COLLISION_UNCHANGED.create();
+         } else {
+@@ -341,6 +_,10 @@
+     }
+ 
+     private static int setFriendlySight(CommandSourceStack source, PlayerTeam team, boolean allowed) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setFriendlySight(source, team, allowed))) {
++            return 0;
++        }
++
+         if (team.canSeeFriendlyInvisibles() == allowed) {
+             if (allowed) {
+                 throw ERROR_TEAM_ALREADY_FRIENDLYINVISIBLES_ENABLED.create();
+@@ -358,6 +_,10 @@
+     }
+ 
+     private static int setFriendlyFire(CommandSourceStack source, PlayerTeam team, boolean allowed) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setFriendlyFire(source, team, allowed))) {
++            return 0;
++        }
++
+         if (team.isAllowFriendlyFire() == allowed) {
+             if (allowed) {
+                 throw ERROR_TEAM_ALREADY_FRIENDLYFIRE_ENABLED.create();
+@@ -374,6 +_,10 @@
+     }
+ 
+     private static int setDisplayName(CommandSourceStack source, PlayerTeam team, Component displayName) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setDisplayName(source, team, displayName))) {
++            return 0;
++        }
++
+         if (team.getDisplayName().equals(displayName)) {
+             throw ERROR_TEAM_ALREADY_NAME.create();
+         } else {
+@@ -384,6 +_,10 @@
+     }
+ 
+     private static int setColor(CommandSourceStack source, PlayerTeam team, ChatFormatting color) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setColor(source, team, color))) {
++            return 0;
++        }
++
+         if (team.getColor() == color) {
+             throw ERROR_TEAM_ALREADY_COLOR.create();
+         } else {
+@@ -394,6 +_,10 @@
+     }
+ 
+     private static int emptyTeam(CommandSourceStack source, PlayerTeam team) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> emptyTeam(source, team))) {
++            return 0;
++        }
++
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+         Collection<String> members = Lists.newArrayList(team.getPlayers());
+         if (members.isEmpty()) {
+@@ -409,6 +_,10 @@
+     }
+ 
+     private static int deleteTeam(CommandSourceStack source, PlayerTeam team) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> deleteTeam(source, team))) {
++            return 0;
++        }
++
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+         scoreboard.removePlayerTeam(team);
+         source.sendSuccess(() -> Component.translatable("commands.team.remove.success", team.getFormattedDisplayName()), true);
+@@ -420,6 +_,10 @@
+     }
+ 
+     private static int createTeam(CommandSourceStack source, String name, Component displayName) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> createTeam(source, name, displayName))) {
++            return 0;
++        }
++
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+         if (scoreboard.getPlayerTeam(name) != null) {
+             throw ERROR_TEAM_ALREADY_EXISTS.create();
+@@ -464,12 +_,20 @@
+     }
+ 
+     private static int setPrefix(CommandSourceStack source, PlayerTeam team, Component prefix) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setPrefix(source, team, prefix))) {
++            return 0;
++        }
++
+         team.setPlayerPrefix(prefix);
+         source.sendSuccess(() -> Component.translatable("commands.team.option.prefix.success", prefix), false);
+         return 1;
+     }
+ 
+     private static int setSuffix(CommandSourceStack source, PlayerTeam team, Component suffix) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setSuffix(source, team, suffix))) {
++            return 0;
++        }
++
+         team.setPlayerSuffix(suffix);
+         source.sendSuccess(() -> Component.translatable("commands.team.option.suffix.success", suffix), false);
+         return 1;

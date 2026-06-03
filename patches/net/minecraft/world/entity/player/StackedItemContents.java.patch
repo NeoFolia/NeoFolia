@@ -1,0 +1,61 @@
+--- a/net/minecraft/world/entity/player/StackedItemContents.java
++++ b/net/minecraft/world/entity/player/StackedItemContents.java
+@@ -11,33 +_,33 @@
+ public class StackedItemContents {
+     private final StackedContents<Holder<Item>> raw = new StackedContents<>();
+ 
+-    public void accountSimpleStack(ItemStack itemStack) {
++    public synchronized void accountSimpleStack(ItemStack itemStack) {
+         if (Inventory.isUsableForCrafting(itemStack)) {
+             this.accountStack(itemStack);
+         }
+     }
+ 
+-    public void accountStack(ItemStack itemStack) {
++    public synchronized void accountStack(ItemStack itemStack) {
+         this.accountStack(itemStack, itemStack.getMaxStackSize());
+     }
+ 
+-    public void accountStack(ItemStack itemStack, int maxCount) {
++    public synchronized void accountStack(ItemStack itemStack, int maxCount) {
+         if (!itemStack.isEmpty()) {
+             int count = Math.min(maxCount, itemStack.getCount());
+             this.raw.account(itemStack.typeHolder(), count);
+         }
+     }
+ 
+-    public boolean canCraft(Recipe<?> recipe, StackedContents.@Nullable Output<Holder<Item>> output) {
++    public synchronized boolean canCraft(Recipe<?> recipe, StackedContents.@Nullable Output<Holder<Item>> output) {
+         return this.canCraft(recipe, 1, output);
+     }
+ 
+-    public boolean canCraft(Recipe<?> recipe, int amount, StackedContents.@Nullable Output<Holder<Item>> output) {
++    public synchronized boolean canCraft(Recipe<?> recipe, int amount, StackedContents.@Nullable Output<Holder<Item>> output) {
+         PlacementInfo placementInfo = recipe.placementInfo();
+         return placementInfo.isImpossibleToPlace() ? false : this.canCraft(placementInfo.ingredients(), amount, output);
+     }
+ 
+-    public boolean canCraft(List<? extends StackedContents.IngredientInfo<Holder<Item>>> contents, StackedContents.@Nullable Output<Holder<Item>> output) {
++    public synchronized boolean canCraft(List<? extends StackedContents.IngredientInfo<Holder<Item>>> contents, StackedContents.@Nullable Output<Holder<Item>> output) {
+         return this.canCraft(contents, 1, output);
+     }
+ 
+@@ -47,15 +_,15 @@
+         return this.raw.tryPick(contents, amount, output);
+     }
+ 
+-    public int getBiggestCraftableStack(Recipe<?> recipe, StackedContents.@Nullable Output<Holder<Item>> output) {
++    public synchronized int getBiggestCraftableStack(Recipe<?> recipe, StackedContents.@Nullable Output<Holder<Item>> output) {
+         return this.getBiggestCraftableStack(recipe, Integer.MAX_VALUE, output);
+     }
+ 
+-    public int getBiggestCraftableStack(Recipe<?> recipe, int maxSize, StackedContents.@Nullable Output<Holder<Item>> output) {
++    public synchronized int getBiggestCraftableStack(Recipe<?> recipe, int maxSize, StackedContents.@Nullable Output<Holder<Item>> output) {
+         return this.raw.tryPickAll(recipe.placementInfo().ingredients(), maxSize, output);
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.raw.clear();
+     }
+ }

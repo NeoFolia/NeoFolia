@@ -1,0 +1,39 @@
+--- a/net/minecraft/world/level/block/WitherSkullBlock.java
++++ b/net/minecraft/world/level/block/WitherSkullBlock.java
+@@ -21,6 +_,8 @@
+ import net.minecraft.world.level.block.state.pattern.BlockPattern;
+ import net.minecraft.world.level.block.state.pattern.BlockPatternBuilder;
+ import net.minecraft.world.level.block.state.predicate.BlockStatePredicate;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class WitherSkullBlock extends SkullBlock {
+@@ -69,8 +_,11 @@
+                         witherBoss.yBodyRot = match.getForwards().getAxis() == Direction.Axis.X ? 0.0F : 90.0F;
+                         witherBoss.makeInvulnerable();
+ 
+-                        for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class, witherBoss.getBoundingBox().inflate(50.0))) {
+-                            CriteriaTriggers.SUMMONED_ENTITY.trigger(player, witherBoss);
++                        AABB triggerBox = RegionizedWorldGuard.restrictToCurrentRegion(level, witherBoss.getBoundingBox().inflate(50.0));
++                        if (triggerBox != null) {
++                            for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class, triggerBox)) {
++                                triggerSummonedEntity(player, witherBoss);
++                            }
+                         }
+ 
+                         level.addFreshEntity(witherBoss);
+@@ -78,6 +_,13 @@
+                     }
+                 }
+             }
++        }
++    }
++
++    private static void triggerSummonedEntity(ServerPlayer player, WitherBoss witherBoss) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.SUMMONED_ENTITY.trigger(player, witherBoss));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(witherBoss.level(), "Summoned wither advancement", trigger)) {
++            trigger.run();
+         }
+     }
+ 

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/ResetProfession.java
++++ b/net/minecraft/world/entity/ai/behavior/ResetProfession.java
+@@ -7,7 +_,7 @@
+ import net.minecraft.world.entity.npc.villager.VillagerProfession;
+ 
+ public class ResetProfession {
+-    public static BehaviorControl<Villager> create() {
++    public static synchronized BehaviorControl<Villager> create() {
+         return BehaviorBuilder.create(i -> i.group(i.absent(MemoryModuleType.JOB_SITE)).apply(i, jobSite -> (level, body, timestamp) -> {
+             VillagerData bodyData = body.getVillagerData();
+             boolean canBeFired = !bodyData.profession().is(VillagerProfession.NONE) && !bodyData.profession().is(VillagerProfession.NITWIT);

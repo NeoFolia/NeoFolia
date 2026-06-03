@@ -1,0 +1,92 @@
+--- a/net/minecraft/world/level/pathfinder/FlyNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/FlyNodeEvaluator.java
+@@ -19,21 +_,21 @@
+     private static final int MAX_START_NODE_CANDIDATES = 10;
+ 
+     @Override
+-    public void prepare(PathNavigationRegion level, Mob entity) {
++    public synchronized void prepare(PathNavigationRegion level, Mob entity) {
+         super.prepare(level, entity);
+         this.pathTypeByPosCache.clear();
+         entity.onPathfindingStart();
+     }
+ 
+     @Override
+-    public void done() {
++    public synchronized void done() {
+         this.mob.onPathfindingDone();
+         this.pathTypeByPosCache.clear();
+         super.done();
+     }
+ 
+     @Override
+-    public Node getStart() {
++    public synchronized Node getStart() {
+         int startY;
+         if (this.canFloat() && this.mob.isInWater()) {
+             startY = this.mob.getBlockY();
+@@ -62,18 +_,18 @@
+     }
+ 
+     @Override
+-    protected boolean canStartAt(BlockPos pos) {
++    protected synchronized boolean canStartAt(BlockPos pos) {
+         PathType blockPathType = this.getCachedPathType(pos.getX(), pos.getY(), pos.getZ());
+         return this.mob.getPathfindingMalus(blockPathType) >= 0.0F;
+     }
+ 
+     @Override
+-    public Target getTarget(double x, double y, double z) {
++    public synchronized Target getTarget(double x, double y, double z) {
+         return this.getTargetNodeAt(x, y, z);
+     }
+ 
+     @Override
+-    public int getNeighbors(Node[] neighbors, Node pos) {
++    public synchronized int getNeighbors(Node[] neighbors, Node pos) {
+         int count = 0;
+         Node south = this.findAcceptedNode(pos.x, pos.y, pos.z + 1);
+         if (this.isOpen(south)) {
+@@ -256,15 +_,15 @@
+         return count;
+     }
+ 
+-    private boolean hasMalus(@Nullable Node node) {
++    private synchronized boolean hasMalus(@Nullable Node node) {
+         return node != null && node.costMalus >= 0.0F;
+     }
+ 
+-    private boolean isOpen(@Nullable Node node) {
++    private synchronized boolean isOpen(@Nullable Node node) {
+         return node != null && !node.closed;
+     }
+ 
+-    protected @Nullable Node findAcceptedNode(int x, int y, int z) {
++    protected synchronized @Nullable Node findAcceptedNode(int x, int y, int z) {
+         Node best = null;
+         PathType pathType = this.getCachedPathType(x, y, z);
+         float pathCost = this.mob.getPathfindingMalus(pathType);
+@@ -281,12 +_,12 @@
+     }
+ 
+     @Override
+-    protected PathType getCachedPathType(int x, int y, int z) {
++    protected synchronized PathType getCachedPathType(int x, int y, int z) {
+         return this.pathTypeByPosCache.computeIfAbsent(BlockPos.asLong(x, y, z), key -> this.getPathTypeOfMob(this.currentContext, x, y, z, this.mob));
+     }
+ 
+     @Override
+-    public PathType getPathType(PathfindingContext context, int x, int y, int z) {
++    public synchronized PathType getPathType(PathfindingContext context, int x, int y, int z) {
+         PathType blockPathType = context.getPathTypeFromState(x, y, z);
+         if (blockPathType == PathType.OPEN && y >= context.level().getMinY() + 1) {
+             BlockPos belowPos = new BlockPos(x, y - 1, z);
+@@ -313,7 +_,7 @@
+         return blockPathType;
+     }
+ 
+-    private Iterable<BlockPos> iteratePathfindingStartNodeCandidatePositions(Mob mob) {
++    private synchronized Iterable<BlockPos> iteratePathfindingStartNodeCandidatePositions(Mob mob) {
+         AABB boundingBox = mob.getBoundingBox();
+         boolean isSmallMob = boundingBox.getSize() < 1.0;
+         if (!isSmallMob) {

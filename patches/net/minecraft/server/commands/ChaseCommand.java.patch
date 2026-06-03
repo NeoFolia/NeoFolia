@@ -1,0 +1,35 @@
+--- a/net/minecraft/server/commands/ChaseCommand.java
++++ b/net/minecraft/server/commands/ChaseCommand.java
+@@ -63,6 +_,10 @@
+     }
+ 
+     private static int stop(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> stop(source))) {
++            return 0;
++        }
++
+         if (chaseClient != null) {
+             chaseClient.stop();
+             source.sendSuccess(() -> Component.literal("You have now stopped chasing"), false);
+@@ -91,6 +_,10 @@
+     }
+ 
+     private static int lead(CommandSourceStack source, String serverBindAddress, int port) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> lead(source, serverBindAddress, port))) {
++            return 0;
++        }
++
+         if (alreadyRunning(source)) {
+             return 0;
+         } else {
+@@ -112,6 +_,10 @@
+     }
+ 
+     private static int follow(CommandSourceStack source, String host, int port) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> follow(source, host, port))) {
++            return 0;
++        }
++
+         if (alreadyRunning(source)) {
+             return 0;
+         } else {

@@ -1,0 +1,28 @@
+--- a/net/minecraft/server/commands/BanPlayerCommands.java
++++ b/net/minecraft/server/commands/BanPlayerCommands.java
+@@ -36,6 +_,10 @@
+     }
+ 
+     private static int banPlayers(CommandSourceStack source, Collection<NameAndId> players, @Nullable Component reason) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> banPlayers(source, players, reason))) {
++            return players.size();
++        }
++
+         UserBanList list = source.getServer().getPlayerList().getBans();
+         int count = 0;
+ 
+@@ -45,9 +_,12 @@
+                 list.add(entry);
+                 count++;
+                 source.sendSuccess(() -> Component.translatable("commands.ban.success", Component.literal(player.name()), entry.getReasonMessage()), true);
+-                ServerPlayer online = source.getServer().getPlayerList().getPlayer(player.id());
++                ServerPlayer online = source.getServer().getPlayerList().getAllPlayer(player.id());
+                 if (online != null) {
+-                    online.connection.disconnect(Component.translatable("multiplayer.disconnect.banned"));
++                    RegionizedCommandHelper.callOnPlayerRegion(source, online, () -> {
++                        online.connection.disconnect(Component.translatable("multiplayer.disconnect.banned"));
++                        return null;
++                    });
+                 }
+             }
+         }

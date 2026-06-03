@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/level/EntityBasedExplosionDamageCalculator.java
++++ b/net/minecraft/world/level/EntityBasedExplosionDamageCalculator.java
+@@ -5,6 +_,8 @@
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.material.FluidState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class EntityBasedExplosionDamageCalculator extends ExplosionDamageCalculator {
+     private final Entity source;
+@@ -13,14 +_,24 @@
+         this.source = source;
+     }
+ 
++    private @Nullable Entity regionSafeSource() {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.source.level(), this.source);
++    }
++
+     @Override
+     public Optional<Float> getBlockExplosionResistance(Explosion explosion, BlockGetter level, BlockPos pos, BlockState block, FluidState fluid) {
++        Entity source = this.regionSafeSource();
++        if (source == null) {
++            return super.getBlockExplosionResistance(explosion, level, pos, block, fluid);
++        }
++
+         return super.getBlockExplosionResistance(explosion, level, pos, block, fluid)
+-            .map(resistance -> this.source.getBlockExplosionResistance(explosion, level, pos, block, fluid, resistance));
++            .map(resistance -> source.getBlockExplosionResistance(explosion, level, pos, block, fluid, resistance));
+     }
+ 
+     @Override
+     public boolean shouldBlockExplode(Explosion explosion, BlockGetter level, BlockPos pos, BlockState state, float power) {
+-        return this.source.shouldBlockExplode(explosion, level, pos, state, power);
++        Entity source = this.regionSafeSource();
++        return source == null ? super.shouldBlockExplode(explosion, level, pos, state, power) : source.shouldBlockExplode(explosion, level, pos, state, power);
+     }
+ }

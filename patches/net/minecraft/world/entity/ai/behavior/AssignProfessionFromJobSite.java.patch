@@ -1,0 +1,81 @@
+--- a/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+@@ -5,14 +_,16 @@
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.village.poi.PoiType;
+ import net.minecraft.world.entity.npc.villager.Villager;
+ import net.minecraft.world.entity.npc.villager.VillagerProfession;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class AssignProfessionFromJobSite {
+-    public static BehaviorControl<Villager> create() {
++    public static synchronized BehaviorControl<Villager> create() {
+         return BehaviorBuilder.create(
+             i -> i.group(i.present(MemoryModuleType.POTENTIAL_JOB_SITE), i.registered(MemoryModuleType.JOB_SITE))
+                 .apply(
+@@ -28,24 +_,47 @@
+                             if (!body.getVillagerData().profession().is(VillagerProfession.NONE)) {
+                                 return true;
+                             } else {
+-                                MinecraftServer server = level.getServer();
+-                                Optional.ofNullable(server.getLevel(pos.dimension()))
+-                                    .flatMap(l -> l.getPoiManager().getType(pos.pos()))
+-                                    .flatMap(
+-                                        poiType -> BuiltInRegistries.VILLAGER_PROFESSION
+-                                            .listElements()
+-                                            .filter(profession -> profession.value().heldJobSite().test((Holder<PoiType>)poiType))
+-                                            .findFirst()
+-                                    )
+-                                    .ifPresent(profession -> {
+-                                        body.setVillagerData(body.getVillagerData().withProfession(profession));
+-                                        body.refreshBrain(level);
+-                                    });
++                                assignProfessionFromJobSite(level, body, pos);
+                                 return true;
+                             }
+                         }
+                     }
+                 )
+         );
++    }
++
++    private static void assignProfessionFromJobSite(ServerLevel level, Villager body, GlobalPos pos) {
++        MinecraftServer server = level.getServer();
++        ServerLevel poiLevel = server.getLevel(pos.dimension());
++        if (poiLevel == null) {
++            return;
++        }
++
++        if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(
++            poiLevel, pos.pos(), "Villager profession assignment", () -> assignProfessionFromJobSite(level, body, pos)
++        )) {
++            return;
++        }
++
++        poiLevel.getPoiManager()
++            .getType(pos.pos())
++            .flatMap(
++                poiType -> BuiltInRegistries.VILLAGER_PROFESSION
++                    .listElements()
++                    .filter(profession -> profession.value().heldJobSite().test((Holder<PoiType>)poiType))
++                    .findFirst()
++            )
++            .ifPresent(profession -> applyProfessionOnEntityRegion(level, body, profession));
++    }
++
++    private static void applyProfessionOnEntityRegion(ServerLevel level, Villager body, Holder<VillagerProfession> profession) {
++        if (RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(
++            level, body, "Villager profession assignment apply", () -> applyProfessionOnEntityRegion(level, body, profession)
++        )) {
++            return;
++        }
++
++        body.setVillagerData(body.getVillagerData().withProfession(profession));
++        body.refreshBrain(level);
+     }
+ }

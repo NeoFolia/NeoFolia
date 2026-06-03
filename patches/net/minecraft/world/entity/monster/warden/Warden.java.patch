@@ -1,0 +1,73 @@
+--- a/net/minecraft/world/entity/monster/warden/Warden.java
++++ b/net/minecraft/world/entity/monster/warden/Warden.java
+@@ -70,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -390,10 +_,11 @@
+ 
+     @Contract("null->false")
+     public boolean canTargetEntity(@Nullable Entity entity) {
+-        return entity instanceof LivingEntity livingEntity
+-            && this.level() == entity.level()
+-            && EntitySelector.NO_CREATIVE_OR_SPECTATOR.test(entity)
+-            && !this.isAlliedTo(entity)
++        Entity safeEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), entity);
++        return safeEntity instanceof LivingEntity livingEntity
++            && this.level() == safeEntity.level()
++            && EntitySelector.NO_CREATIVE_OR_SPECTATOR.test(safeEntity)
++            && !this.isAlliedTo(safeEntity)
+             && !livingEntity.is(EntityType.ARMOR_STAND)
+             && !livingEntity.is(EntityType.WARDEN)
+             && !livingEntity.isInvulnerable()
+@@ -432,8 +_,12 @@
+         return AngerLevel.byAnger(this.getActiveAnger());
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     private int getActiveAnger() {
+-        return this.angerManagement.getActiveAnger(this.getTarget());
++        return this.angerManagement.getActiveAnger(this.regionSafeTarget(this.getTarget()));
+     }
+ 
+     public void clearAnger(Entity entity) {
+@@ -448,7 +_,7 @@
+     public void increaseAngerAt(@Nullable Entity entity, int amount, boolean playSound) {
+         if (!this.isNoAi() && this.canTargetEntity(entity)) {
+             WardenAi.setDigCooldown(this);
+-            boolean maybeSwitchTarget = !(this.getTarget() instanceof Player);
++            boolean maybeSwitchTarget = !(this.regionSafeTarget(this.getTarget()) instanceof Player);
+             int newAnger = this.angerManagement.increaseAnger(entity, amount);
+             if (entity instanceof Player && maybeSwitchTarget && AngerLevel.byAnger(newAnger).isAngry()) {
+                 this.getBrain().eraseMemory(MemoryModuleType.ATTACK_TARGET);
+@@ -492,7 +_,7 @@
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+         boolean wasHurt = super.hurtServer(level, source, damage);
+         if (!this.isNoAi() && !this.isDiggingOrEmerging()) {
+-            Entity attacker = source.getEntity();
++            Entity attacker = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+             this.increaseAngerAt(attacker, AngerLevel.ANGRY.getMinimumAnger() + 20, false);
+             if (this.brain.getMemory(MemoryModuleType.ATTACK_TARGET).isEmpty()
+                 && attacker instanceof LivingEntity livingAttacker
+@@ -505,8 +_,13 @@
+     }
+ 
+     public void setAttackTarget(LivingEntity target) {
++        LivingEntity safeTarget = this.regionSafeTarget(target);
++        if (safeTarget == null) {
++            return;
++        }
++
+         this.getBrain().eraseMemory(MemoryModuleType.ROAR_TARGET);
+-        this.getBrain().setMemory(MemoryModuleType.ATTACK_TARGET, target);
++        this.getBrain().setMemory(MemoryModuleType.ATTACK_TARGET, safeTarget);
+         this.getBrain().eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+         SonicBoom.setCooldown(this, 200);
+     }

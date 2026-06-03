@@ -1,0 +1,91 @@
+--- a/net/minecraft/server/level/ThreadedLevelLightEngine.java
++++ b/net/minecraft/server/level/ThreadedLevelLightEngine.java
+@@ -5,6 +_,8 @@
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+ import it.unimi.dsi.fastutil.objects.ObjectList;
+ import it.unimi.dsi.fastutil.objects.ObjectListIterator;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.atomic.AtomicBoolean;
+ import java.util.function.IntSupplier;
+@@ -123,8 +_,13 @@
+ 
+     private void addTask(int chunkX, int chunkZ, IntSupplier level, ThreadedLevelLightEngine.TaskType type, Runnable runnable) {
+         this.taskDispatcher.submit(() -> {
+-            this.lightTasks.add(Pair.of(type, runnable));
+-            if (this.lightTasks.size() >= 1000) {
++            boolean shouldRunUpdate;
++            synchronized (this.lightTasks) {
++                this.lightTasks.add(Pair.of(type, runnable));
++                shouldRunUpdate = this.lightTasks.size() >= this.taskPerBatch;
++            }
++
++            if (shouldRunUpdate) {
+                 this.runUpdate();
+             }
+         }, ChunkPos.pack(chunkX, chunkZ), level);
+@@ -176,7 +_,7 @@
+     }
+ 
+     public void tryScheduleUpdate() {
+-        if ((!this.lightTasks.isEmpty() || super.hasLightWork()) && this.scheduled.compareAndSet(false, true)) {
++        if ((this.hasPendingLightTasks() || super.hasLightWork()) && this.scheduled.compareAndSet(false, true)) {
+             this.consecutiveExecutor.schedule(() -> {
+                 this.runUpdate();
+                 this.scheduled.set(false);
+@@ -184,28 +_,42 @@
+         }
+     }
+ 
+-    private void runUpdate() {
+-        int totalSize = Math.min(this.lightTasks.size(), 1000);
+-        ObjectListIterator<Pair<ThreadedLevelLightEngine.TaskType, Runnable>> iterator = this.lightTasks.iterator();
+-
+-        int count;
+-        for (count = 0; iterator.hasNext() && count < totalSize; count++) {
+-            Pair<ThreadedLevelLightEngine.TaskType, Runnable> task = iterator.next();
++    private boolean hasPendingLightTasks() {
++        synchronized (this.lightTasks) {
++            return !this.lightTasks.isEmpty();
++        }
++    }
++
++    private List<Pair<ThreadedLevelLightEngine.TaskType, Runnable>> pollLightTaskBatch() {
++        synchronized (this.lightTasks) {
++            int totalSize = Math.min(this.lightTasks.size(), this.taskPerBatch);
++            List<Pair<ThreadedLevelLightEngine.TaskType, Runnable>> tasks = new ArrayList<>(totalSize);
++            ObjectListIterator<Pair<ThreadedLevelLightEngine.TaskType, Runnable>> iterator = this.lightTasks.iterator();
++
++            for (int count = 0; iterator.hasNext() && count < totalSize; count++) {
++                tasks.add(iterator.next());
++                iterator.remove();
++            }
++
++            return tasks;
++        }
++    }
++
++    private synchronized void runUpdate() {
++        List<Pair<ThreadedLevelLightEngine.TaskType, Runnable>> tasks = this.pollLightTaskBatch();
++
++        for (Pair<ThreadedLevelLightEngine.TaskType, Runnable> task : tasks) {
+             if (task.getFirst() == ThreadedLevelLightEngine.TaskType.PRE_UPDATE) {
+                 task.getSecond().run();
+             }
+         }
+ 
+-        iterator.back(count);
+         super.runLightUpdates();
+ 
+-        for (int var5 = 0; iterator.hasNext() && var5 < totalSize; var5++) {
+-            Pair<ThreadedLevelLightEngine.TaskType, Runnable> task = iterator.next();
++        for (Pair<ThreadedLevelLightEngine.TaskType, Runnable> task : tasks) {
+             if (task.getFirst() == ThreadedLevelLightEngine.TaskType.POST_UPDATE) {
+                 task.getSecond().run();
+             }
+-
+-            iterator.remove();
+         }
+     }
+ 

@@ -1,0 +1,56 @@
+--- a/net/minecraft/world/entity/ai/behavior/FollowTemptation.java
++++ b/net/minecraft/world/entity/ai/behavior/FollowTemptation.java
+@@ -48,30 +_,30 @@
+         this.lookInTheEyes = lookInTheEyes;
+     }
+ 
+-    protected float getSpeedModifier(PathfinderMob body) {
++    protected synchronized float getSpeedModifier(PathfinderMob body) {
+         return this.speedModifier.apply(body);
+     }
+ 
+-    private Optional<Player> getTemptingPlayer(PathfinderMob body) {
+-        return body.getBrain().getMemory(MemoryModuleType.TEMPTING_PLAYER);
++    private synchronized Optional<Player> getTemptingPlayer(PathfinderMob body) {
++        return body.getBrain().getMemory(MemoryModuleType.TEMPTING_PLAYER).filter(player -> BehaviorUtils.regionSafeEntity(body, player) != null);
+     }
+ 
+     @Override
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return false;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
+         return this.getTemptingPlayer(body).isPresent()
+             && !body.getBrain().hasMemoryValue(MemoryModuleType.BREED_TARGET)
+             && !body.getBrain().hasMemoryValue(MemoryModuleType.IS_PANICKING);
+     }
+ 
+-    protected void start(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void start(ServerLevel level, PathfinderMob body, long timestamp) {
+         body.getBrain().setMemory(MemoryModuleType.IS_TEMPTED, true);
+     }
+ 
+-    protected void stop(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, PathfinderMob body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+         brain.setMemory(MemoryModuleType.TEMPTATION_COOLDOWN_TICKS, 100);
+         brain.eraseMemory(MemoryModuleType.IS_TEMPTED);
+@@ -79,8 +_,13 @@
+         brain.eraseMemory(MemoryModuleType.LOOK_TARGET);
+     }
+ 
+-    protected void tick(ServerLevel level, PathfinderMob body, long timestamp) {
+-        Player player = this.getTemptingPlayer(body).get();
++    protected synchronized void tick(ServerLevel level, PathfinderMob body, long timestamp) {
++        Optional<Player> temptingPlayer = this.getTemptingPlayer(body);
++        if (temptingPlayer.isEmpty()) {
++            return;
++        }
++
++        Player player = temptingPlayer.get();
+         Brain<?> brain = body.getBrain();
+         brain.setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(player, true));
+         double closeEnough = this.closeEnoughDistance.apply(body);

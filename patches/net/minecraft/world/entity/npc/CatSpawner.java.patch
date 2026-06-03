@@ -1,0 +1,68 @@
+--- a/net/minecraft/world/entity/npc/CatSpawner.java
++++ b/net/minecraft/world/entity/npc/CatSpawner.java
+@@ -14,6 +_,8 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.CustomSpawner;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class CatSpawner implements CustomSpawner {
+     private static final int TICK_DELAY = 1200;
+@@ -26,12 +_,15 @@
+             this.nextTick = 1200;
+             Player player = level.getRandomPlayer();
+             if (player != null) {
+-                RandomSource random = level.getRandom();
++                RandomSource random = RegionizedTickContext.currentRandom().orElse(level.getRandom());
+                 int x = (8 + random.nextInt(24)) * (random.nextBoolean() ? -1 : 1);
+                 int z = (8 + random.nextInt(24)) * (random.nextBoolean() ? -1 : 1);
+                 BlockPos spawnPos = player.blockPosition().offset(x, 0, z);
+                 int delta = 10;
+-                if (level.hasChunksAt(spawnPos.getX() - 10, spawnPos.getZ() - 10, spawnPos.getX() + 10, spawnPos.getZ() + 10)) {
++                if (
++                    RegionizedWorldGuard.shouldLoadChunk(level, spawnPos.getX() >> 4, spawnPos.getZ() >> 4)
++                        && level.hasChunksAt(spawnPos.getX() - 10, spawnPos.getZ() - 10, spawnPos.getX() + 10, spawnPos.getZ() + 10)
++                ) {
+                     if (SpawnPlacements.isSpawnPositionOk(EntityType.CAT, level, spawnPos)) {
+                         if (level.isCloseToVillage(spawnPos, 2)) {
+                             this.spawnInVillage(level, spawnPos);
+@@ -47,7 +_,8 @@
+     private void spawnInVillage(ServerLevel serverLevel, BlockPos spawnPos) {
+         int radius = 48;
+         if (serverLevel.getPoiManager().getCountInRange(p -> p.is(PoiTypes.HOME), spawnPos, 48, PoiManager.Occupancy.IS_OCCUPIED) > 4L) {
+-            List<Cat> cats = serverLevel.getEntitiesOfClass(Cat.class, new AABB(spawnPos).inflate(48.0, 8.0, 48.0));
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(serverLevel, new AABB(spawnPos).inflate(48.0, 8.0, 48.0));
++            List<Cat> cats = regionBox == null ? List.of() : serverLevel.getEntitiesOfClass(Cat.class, regionBox);
+             if (cats.size() < 5) {
+                 this.spawnCat(spawnPos, serverLevel, false);
+             }
+@@ -56,21 +_,26 @@
+ 
+     private void spawnInHut(ServerLevel level, BlockPos spawnPos) {
+         int radius = 16;
+-        List<Cat> cats = level.getEntitiesOfClass(Cat.class, new AABB(spawnPos).inflate(16.0, 8.0, 16.0));
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, new AABB(spawnPos).inflate(16.0, 8.0, 16.0));
++        List<Cat> cats = regionBox == null ? List.of() : level.getEntitiesOfClass(Cat.class, regionBox);
+         if (cats.isEmpty()) {
+             this.spawnCat(spawnPos, level, true);
+         }
+     }
+ 
+     private void spawnCat(BlockPos spawnPos, ServerLevel level, boolean makePersistent) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(level, spawnPos.getX() >> 4, spawnPos.getZ() >> 4)) {
++            return;
++        }
++
+         Cat cat = EntityType.CAT.create(level, EntitySpawnReason.NATURAL);
+         if (cat != null) {
++            cat.snapTo(spawnPos, 0.0F, 0.0F); // Fix MC-147659: Some witch huts spawn the incorrect cat
+             cat.finalizeSpawn(level, level.getCurrentDifficultyAt(spawnPos), EntitySpawnReason.NATURAL, null);
+             if (makePersistent) {
+                 cat.setPersistenceRequired();
+             }
+ 
+-            cat.snapTo(spawnPos, 0.0F, 0.0F);
+             level.addFreshEntityWithPassengers(cat);
+         }
+     }

@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/monster/illager/SpellcasterIllager.java
++++ b/net/minecraft/world/entity/monster/illager/SpellcasterIllager.java
+@@ -18,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class SpellcasterIllager extends AbstractIllager {
+@@ -120,6 +_,11 @@
+ 
+     protected abstract SoundEvent getCastingSoundEvent();
+ 
++    @Override
++    protected @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     protected static enum IllagerSpell {
+         NONE(0, 0.0, 0.0, 0.0),
+         SUMMON_VEX(1, 0.7, 0.7, 0.8),
+@@ -168,9 +_,10 @@
+ 
+         @Override
+         public void tick() {
+-            if (SpellcasterIllager.this.getTarget() != null) {
++            LivingEntity target = SpellcasterIllager.this.regionSafeTarget(SpellcasterIllager.this.getTarget());
++            if (target != null) {
+                 SpellcasterIllager.this.getLookControl()
+-                    .setLookAt(SpellcasterIllager.this.getTarget(), SpellcasterIllager.this.getMaxHeadYRot(), SpellcasterIllager.this.getMaxHeadXRot());
++                    .setLookAt(target, SpellcasterIllager.this.getMaxHeadYRot(), SpellcasterIllager.this.getMaxHeadXRot());
+             }
+         }
+     }
+@@ -186,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity target = SpellcasterIllager.this.getTarget();
++            LivingEntity target = SpellcasterIllager.this.regionSafeTarget(SpellcasterIllager.this.getTarget());
+             if (target == null || !target.isAlive()) {
+                 return false;
+             } else {
+@@ -196,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            LivingEntity target = SpellcasterIllager.this.getTarget();
++            LivingEntity target = SpellcasterIllager.this.regionSafeTarget(SpellcasterIllager.this.getTarget());
+             return target != null && target.isAlive() && this.attackWarmupDelay > 0;
+         }
+ 

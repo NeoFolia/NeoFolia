@@ -1,0 +1,138 @@
+--- a/net/minecraft/world/entity/monster/Vex.java
++++ b/net/minecraft/world/entity/monster/Vex.java
+@@ -41,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Vex extends Monster implements TraceableEntity {
+@@ -59,6 +_,10 @@
+         this.xpReward = 3;
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public boolean isFlapping() {
+         return this.tickCount % TICKS_PER_FLAP == 0;
+@@ -132,7 +_,7 @@
+     }
+ 
+     public @Nullable Mob getOwner() {
+-        return EntityReference.get(this.owner, this.level(), Mob.class);
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), EntityReference.get(this.owner, this.level(), Mob.class));
+     }
+ 
+     public @Nullable BlockPos getBoundOrigin() {
+@@ -176,6 +_,14 @@
+         this.limitedLifeTicks = lifeTicks;
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
++    private @Nullable Mob regionSafeOwner(@Nullable Mob owner) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), owner);
++    }
++
+     @Override
+     protected SoundEvent getAmbientSound() {
+         return SoundEvents.VEX_AMBIENT;
+@@ -200,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         this.populateDefaultEquipmentSlots(random, difficulty);
+         this.populateDefaultEquipmentEnchantments(level, random, difficulty);
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+@@ -221,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity target = Vex.this.getTarget();
++            LivingEntity target = Vex.this.regionSafeTarget(Vex.this.getTarget());
+             return target != null && target.isAlive() && !Vex.this.getMoveControl().hasWanted() && Vex.this.random.nextInt(reducedTickDelay(7)) == 0
+                 ? Vex.this.distanceToSqr(target) > 4.0
+                 : false;
+@@ -229,12 +_,13 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            return Vex.this.getMoveControl().hasWanted() && Vex.this.isCharging() && Vex.this.getTarget() != null && Vex.this.getTarget().isAlive();
++            LivingEntity target = Vex.this.regionSafeTarget(Vex.this.getTarget());
++            return Vex.this.getMoveControl().hasWanted() && Vex.this.isCharging() && target != null && target.isAlive();
+         }
+ 
+         @Override
+         public void start() {
+-            LivingEntity attackTarget = Vex.this.getTarget();
++            LivingEntity attackTarget = Vex.this.regionSafeTarget(Vex.this.getTarget());
+             if (attackTarget != null) {
+                 Vec3 eyePosition = attackTarget.getEyePosition();
+                 Vex.this.moveControl.setWantedPosition(eyePosition.x, eyePosition.y, eyePosition.z, 1.0);
+@@ -256,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity attackTarget = Vex.this.getTarget();
++            LivingEntity attackTarget = Vex.this.regionSafeTarget(Vex.this.getTarget());
+             if (attackTarget != null) {
+                 if (Vex.this.getBoundingBox().intersects(attackTarget.getBoundingBox())) {
+                     Vex.this.doHurtTarget(getServerLevel(Vex.this.level()), attackTarget);
+@@ -283,14 +_,15 @@
+ 
+         @Override
+         public boolean canUse() {
+-            Mob owner = Vex.this.getOwner();
+-            return owner != null && owner.getTarget() != null && this.canAttack(owner.getTarget(), this.copyOwnerTargeting);
++            Mob owner = Vex.this.regionSafeOwner(Vex.this.getOwner());
++            LivingEntity ownerTarget = owner == null ? null : Vex.this.regionSafeTarget(owner.getTarget());
++            return ownerTarget != null && this.canAttack(ownerTarget, this.copyOwnerTargeting);
+         }
+ 
+         @Override
+         public void start() {
+-            Mob owner = Vex.this.getOwner();
+-            Vex.this.setTarget(owner != null ? owner.getTarget() : null);
++            Mob owner = Vex.this.regionSafeOwner(Vex.this.getOwner());
++            Vex.this.setTarget(owner != null ? Vex.this.regionSafeTarget(owner.getTarget()) : null);
+             super.start();
+         }
+     }
+@@ -311,13 +_,14 @@
+                     Vex.this.setDeltaMovement(Vex.this.getDeltaMovement().scale(0.5));
+                 } else {
+                     Vex.this.setDeltaMovement(Vex.this.getDeltaMovement().add(delta.scale(this.speedModifier * 0.05 / deltaLength)));
+-                    if (Vex.this.getTarget() == null) {
++                    LivingEntity target = Vex.this.regionSafeTarget(Vex.this.getTarget());
++                    if (target == null) {
+                         Vec3 movement = Vex.this.getDeltaMovement();
+                         Vex.this.setYRot(-((float)Mth.atan2(movement.x, movement.z)) * (180.0F / (float)Math.PI));
+                         Vex.this.yBodyRot = Vex.this.getYRot();
+                     } else {
+-                        double tx = Vex.this.getTarget().getX() - Vex.this.getX();
+-                        double tz = Vex.this.getTarget().getZ() - Vex.this.getZ();
++                        double tx = target.getX() - Vex.this.getX();
++                        double tz = target.getZ() - Vex.this.getZ();
+                         Vex.this.setYRot(-((float)Mth.atan2(tx, tz)) * (180.0F / (float)Math.PI));
+                         Vex.this.yBodyRot = Vex.this.getYRot();
+                     }
+@@ -352,9 +_,9 @@
+ 
+             for (int attempts = 0; attempts < 3; attempts++) {
+                 BlockPos testPos = boundOrigin.offset(Vex.this.random.nextInt(15) - 7, Vex.this.random.nextInt(11) - 5, Vex.this.random.nextInt(15) - 7);
+-                if (Vex.this.level().isEmptyBlock(testPos)) {
++                if (Vex.canReadBlock(Vex.this.level(), testPos) && Vex.this.level().isEmptyBlock(testPos)) {
+                     Vex.this.moveControl.setWantedPosition(testPos.getX() + 0.5, testPos.getY() + 0.5, testPos.getZ() + 0.5, 0.25);
+-                    if (Vex.this.getTarget() == null) {
++                    if (Vex.this.regionSafeTarget(Vex.this.getTarget()) == null) {
+                         Vex.this.getLookControl().setLookAt(testPos.getX() + 0.5, testPos.getY() + 0.5, testPos.getZ() + 0.5, 180.0F, 20.0F);
+                     }
+                     break;

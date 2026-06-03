@@ -1,0 +1,79 @@
+--- a/net/minecraft/world/entity/ai/goal/PanicGoal.java
++++ b/net/minecraft/world/entity/ai/goal/PanicGoal.java
+@@ -11,7 +_,9 @@
+ import net.minecraft.world.entity.PathfinderMob;
+ import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+ import net.minecraft.world.level.BlockGetter;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PanicGoal extends Goal {
+@@ -40,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (!this.shouldPanic()) {
+             return false;
+         } else {
+@@ -58,11 +_,11 @@
+         }
+     }
+ 
+-    protected boolean shouldPanic() {
++    protected synchronized boolean shouldPanic() {
+         return this.mob.getLastDamageSource() != null && this.mob.getLastDamageSource().is(this.panicCausingDamageTypes.apply(this.mob));
+     }
+ 
+-    protected boolean findRandomPosition() {
++    protected synchronized boolean findRandomPosition() {
+         Vec3 pos = DefaultRandomPos.getPos(this.mob, 5, 4);
+         if (pos == null) {
+             return false;
+@@ -74,30 +_,36 @@
+         }
+     }
+ 
+-    public boolean isRunning() {
++    public synchronized boolean isRunning() {
+         return this.isRunning;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.mob.getNavigation().moveTo(this.posX, this.posY, this.posZ, this.speedModifier);
+         this.isRunning = true;
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.isRunning = false;
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return !this.mob.getNavigation().isDone();
+     }
+ 
+-    protected @Nullable BlockPos lookForWater(BlockGetter level, Entity mob, int xzDist) {
++    protected synchronized @Nullable BlockPos lookForWater(BlockGetter level, Entity mob, int xzDist) {
+         BlockPos mobPosition = mob.blockPosition();
+-        return !level.getBlockState(mobPosition).getCollisionShape(level, mobPosition).isEmpty()
++        return !canReadBlock(level, mobPosition) || !level.getBlockState(mobPosition).getCollisionShape(level, mobPosition).isEmpty()
+             ? null
+-            : BlockPos.findClosestMatch(mob.blockPosition(), xzDist, 1, pos -> level.getFluidState(pos).is(FluidTags.WATER)).orElse(null);
++            : BlockPos.findClosestMatch(mob.blockPosition(), xzDist, 1, pos -> canReadBlock(level, pos) && level.getFluidState(pos).is(FluidTags.WATER))
++                .orElse(null);
++    }
++
++    private static boolean canReadBlock(BlockGetter level, BlockPos pos) {
++        return !(level instanceof Level levelInstance)
++            || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

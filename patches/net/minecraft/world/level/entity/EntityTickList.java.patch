@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/level/entity/EntityTickList.java
++++ b/net/minecraft/world/level/entity/EntityTickList.java
+@@ -4,6 +_,8 @@
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap.Entry;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.function.Consumer;
+ import net.minecraft.world.entity.Entity;
+ import org.jspecify.annotations.Nullable;
+@@ -13,7 +_,7 @@
+     private Int2ObjectMap<Entity> passive = new Int2ObjectLinkedOpenHashMap<>();
+     private @Nullable Int2ObjectMap<Entity> iterated;
+ 
+-    private void ensureActiveIsNotIterated() {
++    private synchronized void ensureActiveIsNotIterated() {
+         if (this.iterated == this.active) {
+             this.passive.clear();
+ 
+@@ -27,33 +_,27 @@
+         }
+     }
+ 
+-    public void add(Entity entity) {
++    public synchronized void add(Entity entity) {
+         this.ensureActiveIsNotIterated();
+         this.active.put(entity.getId(), entity);
+     }
+ 
+-    public void remove(Entity entity) {
++    public synchronized void remove(Entity entity) {
+         this.ensureActiveIsNotIterated();
+         this.active.remove(entity.getId());
+     }
+ 
+-    public boolean contains(Entity entity) {
++    public synchronized boolean contains(Entity entity) {
+         return this.active.containsKey(entity.getId());
+     }
+ 
++    public synchronized List<Entity> snapshot() {
++        return new ArrayList<>(this.active.values());
++    }
++
+     public void forEach(Consumer<Entity> output) {
+-        if (this.iterated != null) {
+-            throw new UnsupportedOperationException("Only one concurrent iteration supported");
+-        } else {
+-            this.iterated = this.active;
+-
+-            try {
+-                for (Entity entity : this.active.values()) {
+-                    output.accept(entity);
+-                }
+-            } finally {
+-                this.iterated = null;
+-            }
++        for (Entity entity : this.snapshot()) {
++            output.accept(entity);
+         }
+     }
+ }

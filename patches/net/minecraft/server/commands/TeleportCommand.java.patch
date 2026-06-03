@@ -1,0 +1,377 @@
+--- a/net/minecraft/server/commands/TeleportCommand.java
++++ b/net/minecraft/server/commands/TeleportCommand.java
+@@ -1,14 +_,17 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import com.mojang.brigadier.tree.LiteralCommandNode;
+ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.EnumSet;
++import java.util.List;
+ import java.util.Locale;
+ import java.util.Set;
++import java.util.concurrent.atomic.AtomicReference;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.EntityAnchorArgument;
+@@ -27,6 +_,8 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class TeleportCommand {
+@@ -40,51 +_,20 @@
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                 .then(
+                     Commands.argument("location", Vec3Argument.vec3())
+-                        .executes(
+-                            c -> teleportToPos(
+-                                c.getSource(),
+-                                Collections.singleton(c.getSource().getEntityOrException()),
+-                                c.getSource().getLevel(),
+-                                Vec3Argument.getCoordinates(c, "location"),
+-                                null,
+-                                null
+-                            )
+-                        )
++                        .executes(c -> teleportSelfToPos(c))
+                 )
+                 .then(
+                     Commands.argument("destination", EntityArgument.entity())
+-                        .executes(
+-                            c -> teleportToEntity(
+-                                c.getSource(), Collections.singleton(c.getSource().getEntityOrException()), EntityArgument.getEntity(c, "destination")
+-                            )
+-                        )
++                        .executes(TeleportCommand::teleportSelfToEntity)
+                 )
+                 .then(
+                     Commands.argument("targets", EntityArgument.entities())
+                         .then(
+                             Commands.argument("location", Vec3Argument.vec3())
+-                                .executes(
+-                                    c -> teleportToPos(
+-                                        c.getSource(),
+-                                        EntityArgument.getEntities(c, "targets"),
+-                                        c.getSource().getLevel(),
+-                                        Vec3Argument.getCoordinates(c, "location"),
+-                                        null,
+-                                        null
+-                                    )
+-                                )
++                                .executes(c -> teleportTargetsToPos(c, TeleportCommand.PosMode.PLAIN))
+                                 .then(
+                                     Commands.argument("rotation", RotationArgument.rotation())
+-                                        .executes(
+-                                            c -> teleportToPos(
+-                                                c.getSource(),
+-                                                EntityArgument.getEntities(c, "targets"),
+-                                                c.getSource().getLevel(),
+-                                                Vec3Argument.getCoordinates(c, "location"),
+-                                                RotationArgument.getRotation(c, "rotation"),
+-                                                null
+-                                            )
+-                                        )
++                                        .executes(c -> teleportTargetsToPos(c, TeleportCommand.PosMode.ROTATION))
+                                 )
+                                 .then(
+                                     Commands.literal("facing")
+@@ -92,87 +_,126 @@
+                                             Commands.literal("entity")
+                                                 .then(
+                                                     Commands.argument("facingEntity", EntityArgument.entity())
+-                                                        .executes(
+-                                                            c -> teleportToPos(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getEntities(c, "targets"),
+-                                                                c.getSource().getLevel(),
+-                                                                Vec3Argument.getCoordinates(c, "location"),
+-                                                                null,
+-                                                                new LookAt.LookAtEntity(
+-                                                                    EntityArgument.getEntity(c, "facingEntity"), EntityAnchorArgument.Anchor.FEET
+-                                                                )
+-                                                            )
+-                                                        )
++                                                        .executes(c -> teleportTargetsToPos(c, TeleportCommand.PosMode.FACING_ENTITY))
+                                                         .then(
+                                                             Commands.argument("facingAnchor", EntityAnchorArgument.anchor())
+-                                                                .executes(
+-                                                                    c -> teleportToPos(
+-                                                                        c.getSource(),
+-                                                                        EntityArgument.getEntities(c, "targets"),
+-                                                                        c.getSource().getLevel(),
+-                                                                        Vec3Argument.getCoordinates(c, "location"),
+-                                                                        null,
+-                                                                        new LookAt.LookAtEntity(
+-                                                                            EntityArgument.getEntity(c, "facingEntity"),
+-                                                                            EntityAnchorArgument.getAnchor(c, "facingAnchor")
+-                                                                        )
+-                                                                    )
+-                                                                )
++                                                                .executes(c -> teleportTargetsToPos(c, TeleportCommand.PosMode.FACING_ENTITY_ANCHOR))
+                                                         )
+                                                 )
+                                         )
+                                         .then(
+                                             Commands.argument("facingLocation", Vec3Argument.vec3())
+-                                                .executes(
+-                                                    c -> teleportToPos(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getEntities(c, "targets"),
+-                                                        c.getSource().getLevel(),
+-                                                        Vec3Argument.getCoordinates(c, "location"),
+-                                                        null,
+-                                                        new LookAt.LookAtPosition(Vec3Argument.getVec3(c, "facingLocation"))
+-                                                    )
+-                                                )
++                                                .executes(c -> teleportTargetsToPos(c, TeleportCommand.PosMode.FACING_LOCATION))
+                                         )
+                                 )
+                         )
+                         .then(
+                             Commands.argument("destination", EntityArgument.entity())
+-                                .executes(
+-                                    c -> teleportToEntity(c.getSource(), EntityArgument.getEntities(c, "targets"), EntityArgument.getEntity(c, "destination"))
+-                                )
++                                .executes(TeleportCommand::teleportTargetsToEntity)
+                         )
+                 )
+         );
+         dispatcher.register(Commands.literal("tp").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).redirect(teleport));
+     }
+ 
++    private static int teleportSelfToPos(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> teleportSelfToPos(context))) {
++            return 0;
++        }
++
++        return teleportToPos(
++            source,
++            Collections.singleton(source.getEntityOrException()),
++            source.getLevel(),
++            Vec3Argument.getCoordinates(context, "location"),
++            null,
++            null
++        );
++    }
++
++    private static int teleportSelfToEntity(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> teleportSelfToEntity(context))) {
++            return 0;
++        }
++
++        return teleportToEntity(source, Collections.singleton(source.getEntityOrException()), EntityArgument.getEntity(context, "destination"));
++    }
++
++    private static int teleportTargetsToEntity(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> teleportTargetsToEntity(context))) {
++            return 0;
++        }
++
++        return teleportToEntity(source, EntityArgument.getEntities(context, "targets"), EntityArgument.getEntity(context, "destination"));
++    }
++
++    private static int teleportTargetsToPos(CommandContext<CommandSourceStack> context, TeleportCommand.PosMode mode) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> teleportTargetsToPos(context, mode))) {
++            return 0;
++        }
++
++        LookAt lookAt = switch (mode) {
++            case PLAIN, ROTATION -> null;
++            case FACING_ENTITY -> lookAtEntitySnapshot(source, EntityArgument.getEntity(context, "facingEntity"), EntityAnchorArgument.Anchor.FEET);
++            case FACING_ENTITY_ANCHOR -> lookAtEntitySnapshot(source, EntityArgument.getEntity(context, "facingEntity"), EntityAnchorArgument.getAnchor(context, "facingAnchor"));
++            case FACING_LOCATION -> new LookAt.LookAtPosition(Vec3Argument.getVec3(context, "facingLocation"));
++        };
++
++        return teleportToPos(
++            source,
++            EntityArgument.getEntities(context, "targets"),
++            source.getLevel(),
++            Vec3Argument.getCoordinates(context, "location"),
++            mode == TeleportCommand.PosMode.ROTATION ? RotationArgument.getRotation(context, "rotation") : null,
++            lookAt
++        );
++    }
++
+     private static int teleportToEntity(CommandSourceStack source, Collection<? extends Entity> entities, Entity destination) throws CommandSyntaxException {
+-        for (Entity entity : entities) {
+-            performTeleport(
+-                source,
+-                entity,
++        EntityTeleportTarget target = RegionizedCommandHelper.callOnEntityRegion(
++            source,
++            destination,
++            () -> new EntityTeleportTarget(
+                 (ServerLevel)destination.level(),
+                 destination.getX(),
+                 destination.getY(),
+                 destination.getZ(),
+-                EnumSet.noneOf(Relative.class),
+                 destination.getYRot(),
+                 destination.getXRot(),
++                destination.getDisplayName()
++            )
++        );
++        Component singleEntityName = null;
++        for (Entity entity : entities) {
++            singleEntityName = RegionizedCommandHelper.callOnEntityRegion(source, entity, entity::getDisplayName);
++            performTeleport(
++                source,
++                entity,
++                target.level(),
++                target.x(),
++                target.y(),
++                target.z(),
++                EnumSet.noneOf(Relative.class),
++                target.yRot(),
++                target.xRot(),
+                 null
+             );
+         }
+ 
+         if (entities.size() == 1) {
++            Component entityName = singleEntityName;
+             source.sendSuccess(
+                 () -> Component.translatable(
+-                    "commands.teleport.success.entity.single", entities.iterator().next().getDisplayName(), destination.getDisplayName()
++                    "commands.teleport.success.entity.single", entityName, target.name()
+                 ),
+                 true
+             );
+         } else {
+-            source.sendSuccess(() -> Component.translatable("commands.teleport.success.entity.multiple", entities.size(), destination.getDisplayName()), true);
++            source.sendSuccess(() -> Component.translatable("commands.teleport.success.entity.multiple", entities.size(), target.name()), true);
+         }
+ 
+         return entities.size();
+@@ -188,21 +_,29 @@
+     ) throws CommandSyntaxException {
+         Vec3 pos = destination.getPosition(source);
+         Vec2 rot = rotation == null ? null : rotation.getRotation(source);
++        Component singleEntityName = null;
+ 
+         for (Entity entity : entities) {
+-            Set<Relative> relatives = getRelatives(destination, rotation, entity.level().dimension() == level.dimension());
++            TeleportEntityState entityState = RegionizedCommandHelper.callOnEntityRegion(
++                source,
++                entity,
++                () -> new TeleportEntityState(entity.level().dimension() == level.dimension(), entity.getYRot(), entity.getXRot(), entity.getDisplayName())
++            );
++            singleEntityName = entityState.name();
++            Set<Relative> relatives = getRelatives(destination, rotation, entityState.sameDimension());
+             if (rot == null) {
+-                performTeleport(source, entity, level, pos.x, pos.y, pos.z, relatives, entity.getYRot(), entity.getXRot(), lookAt);
++                performTeleport(source, entity, level, pos.x, pos.y, pos.z, relatives, entityState.yRot(), entityState.xRot(), lookAt);
+             } else {
+                 performTeleport(source, entity, level, pos.x, pos.y, pos.z, relatives, rot.y, rot.x, lookAt);
+             }
+         }
+ 
+         if (entities.size() == 1) {
++            Component entityName = singleEntityName;
+             source.sendSuccess(
+                 () -> Component.translatable(
+                     "commands.teleport.success.location.single",
+-                    entities.iterator().next().getDisplayName(),
++                    entityName,
+                     formatDouble(pos.x),
+                     formatDouble(pos.y),
+                     formatDouble(pos.z)
+@@ -221,6 +_,10 @@
+         return entities.size();
+     }
+ 
++    private static LookAt lookAtEntitySnapshot(CommandSourceStack source, Entity entity, EntityAnchorArgument.Anchor anchor) {
++        return new LookAt.LookAtPosition(RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> anchor.apply(entity)));
++    }
++
+     private static Set<Relative> getRelatives(Coordinates destination, @Nullable Coordinates rotation, boolean sameDimension) {
+         Set<Relative> dir = Relative.direction(destination.isXRelative(), destination.isYRelative(), destination.isZRelative());
+         Set<Relative> pos = sameDimension ? Relative.position(destination.isXRelative(), destination.isYRelative(), destination.isZRelative()) : Set.of();
+@@ -244,6 +_,55 @@
+         float xRot,
+         @Nullable LookAt lookAt
+     ) throws CommandSyntaxException {
++        double targetX = x;
++        double targetY = y;
++        double targetZ = z;
++        if (victim.level() == level && source.getServer().regionizedTaskDispatcher().isRunning()) {
++            RegionKey victimRegion = RegionizedWorldGuard.regionFor(level, victim.blockPosition());
++            RegionKey targetRegion = RegionizedWorldGuard.regionFor(level, BlockPos.containing(targetX, targetY, targetZ));
++            if (!victimRegion.equals(targetRegion)) {
++                AtomicReference<CommandSyntaxException> failure = new AtomicReference<>();
++                source.getServer().regionizedTaskDispatcher().awaitRegions("teleport command", List.of(victimRegion, targetRegion), victimRegion, () -> {
++                    try {
++                        performTeleportOnRegion(source, victim, level, targetX, targetY, targetZ, relatives, yRot, xRot, lookAt);
++                    } catch (CommandSyntaxException ex) {
++                        failure.set(ex);
++                    }
++                });
++                if (failure.get() != null) {
++                    throw failure.get();
++                }
++
++                return;
++            }
++        }
++
++        RegionizedCommandHelper.callOnEntityRegionThrowing(source, victim, () -> {
++            performTeleportOnRegion(source, victim, level, targetX, targetY, targetZ, relatives, yRot, xRot, lookAt);
++            return null;
++        });
++    }
++
++    private static void performTeleportOnRegion(
++        CommandSourceStack source,
++        Entity victim,
++        ServerLevel level,
++        double x,
++        double y,
++        double z,
++        Set<Relative> relatives,
++        float yRot,
++        float xRot,
++        @Nullable LookAt lookAt
++    ) throws CommandSyntaxException {
++        net.neoforged.neoforge.event.entity.EntityTeleportEvent.TeleportCommand event = net.neoforged.neoforge.event.EventHooks.onEntityTeleportCommand(victim, level,x, y, z);
++        if (event.isCanceled()) {
++             return;
++        }
++        x = event.getTargetX();
++        y = event.getTargetY();
++        z = event.getTargetZ();
++
+         BlockPos blockPos = BlockPos.containing(x, y, z);
+         if (!Level.isInSpawnableBounds(blockPos)) {
+             throw INVALID_POSITION.create();
+@@ -270,5 +_,19 @@
+                 }
+             }
+         }
++    }
++
++    private record EntityTeleportTarget(ServerLevel level, double x, double y, double z, float yRot, float xRot, Component name) {
++    }
++
++    private record TeleportEntityState(boolean sameDimension, float yRot, float xRot, Component name) {
++    }
++
++    private enum PosMode {
++        PLAIN,
++        ROTATION,
++        FACING_ENTITY,
++        FACING_ENTITY_ANCHOR,
++        FACING_LOCATION
+     }
+ }

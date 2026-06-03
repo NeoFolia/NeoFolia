@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/level/block/entity/vault/VaultSharedData.java
++++ b/net/minecraft/world/level/block/entity/vault/VaultSharedData.java
+@@ -37,34 +_,34 @@
+     VaultSharedData() {
+     }
+ 
+-    public ItemStack getDisplayItem() {
++    public synchronized ItemStack getDisplayItem() {
+         return this.displayItem;
+     }
+ 
+-    public boolean hasDisplayItem() {
++    public synchronized boolean hasDisplayItem() {
+         return !this.displayItem.isEmpty();
+     }
+ 
+-    public void setDisplayItem(ItemStack stack) {
++    public synchronized void setDisplayItem(ItemStack stack) {
+         if (!ItemStack.matches(this.displayItem, stack)) {
+             this.displayItem = stack.copy();
+             this.markDirty();
+         }
+     }
+ 
+-    boolean hasConnectedPlayers() {
++    synchronized boolean hasConnectedPlayers() {
+         return !this.connectedPlayers.isEmpty();
+     }
+ 
+-    Set<UUID> getConnectedPlayers() {
+-        return this.connectedPlayers;
++    synchronized Set<UUID> getConnectedPlayers() {
++        return Set.copyOf(this.connectedPlayers);
+     }
+ 
+-    double connectedParticlesRange() {
++    synchronized double connectedParticlesRange() {
+         return this.connectedParticlesRange;
+     }
+ 
+-    void updateConnectedPlayersWithinRange(ServerLevel serverLevel, BlockPos pos, VaultServerData serverData, VaultConfig config, double limit) {
++    synchronized void updateConnectedPlayersWithinRange(ServerLevel serverLevel, BlockPos pos, VaultServerData serverData, VaultConfig config, double limit) {
+         Set<UUID> currentConnectedPlayers = config.playerDetector()
+             .detect(serverLevel, config.entitySelector(), pos, limit, false)
+             .stream()
+@@ -76,11 +_,19 @@
+         }
+     }
+ 
+-    private void markDirty() {
++    private synchronized void markDirty() {
+         this.isDirty = true;
+     }
+ 
+-    void set(VaultSharedData from) {
++    synchronized boolean isDirty() {
++        return this.isDirty;
++    }
++
++    synchronized void clearDirty() {
++        this.isDirty = false;
++    }
++
++    synchronized void set(VaultSharedData from) {
+         this.displayItem = from.displayItem;
+         this.connectedPlayers = from.connectedPlayers;
+         this.connectedParticlesRange = from.connectedParticlesRange;

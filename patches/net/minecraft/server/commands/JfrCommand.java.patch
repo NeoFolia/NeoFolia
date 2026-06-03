@@ -1,0 +1,24 @@
+--- a/net/minecraft/server/commands/JfrCommand.java
++++ b/net/minecraft/server/commands/JfrCommand.java
+@@ -35,6 +_,10 @@
+     }
+ 
+     private static int startJfr(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> startJfr(source))) {
++            return 0;
++        }
++
+         Environment env = Environment.from(source.getServer());
+         if (!JvmProfiler.INSTANCE.start(env)) {
+             throw START_FAILED.create();
+@@ -45,6 +_,10 @@
+     }
+ 
+     private static int stopJfr(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> stopJfr(source))) {
++            return 0;
++        }
++
+         try {
+             Path savedRecording = Paths.get(".").relativize(JvmProfiler.INSTANCE.stop().normalize());
+             Path clipboardPath = source.getServer().isPublished() && !SharedConstants.IS_RUNNING_IN_IDE ? savedRecording : savedRecording.toAbsolutePath();

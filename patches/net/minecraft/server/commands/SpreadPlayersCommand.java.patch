@@ -1,0 +1,209 @@
+--- a/net/minecraft/server/commands/SpreadPlayersCommand.java
++++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
+@@ -6,6 +_,7 @@
+ import com.mojang.brigadier.arguments.BoolArgumentType;
+ import com.mojang.brigadier.arguments.FloatArgumentType;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.Dynamic4CommandExceptionType;
+@@ -30,6 +_,8 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.scores.Team;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class SpreadPlayersCommand {
+     private static final int MAX_ITERATION_COUNT = 10000;
+@@ -57,17 +_,7 @@
+                                             Commands.argument("respectTeams", BoolArgumentType.bool())
+                                                 .then(
+                                                     Commands.argument("targets", EntityArgument.entities())
+-                                                        .executes(
+-                                                            c -> spreadPlayers(
+-                                                                c.getSource(),
+-                                                                Vec2Argument.getVec2(c, "center"),
+-                                                                FloatArgumentType.getFloat(c, "spreadDistance"),
+-                                                                FloatArgumentType.getFloat(c, "maxRange"),
+-                                                                c.getSource().getLevel().getMaxY() + 1,
+-                                                                BoolArgumentType.getBool(c, "respectTeams"),
+-                                                                EntityArgument.getEntities(c, "targets")
+-                                                            )
+-                                                        )
++                                                        .executes(c -> spreadPlayers(c, false))
+                                                 )
+                                         )
+                                         .then(
+@@ -78,17 +_,7 @@
+                                                             Commands.argument("respectTeams", BoolArgumentType.bool())
+                                                                 .then(
+                                                                     Commands.argument("targets", EntityArgument.entities())
+-                                                                        .executes(
+-                                                                            c -> spreadPlayers(
+-                                                                                c.getSource(),
+-                                                                                Vec2Argument.getVec2(c, "center"),
+-                                                                                FloatArgumentType.getFloat(c, "spreadDistance"),
+-                                                                                FloatArgumentType.getFloat(c, "maxRange"),
+-                                                                                IntegerArgumentType.getInteger(c, "maxHeight"),
+-                                                                                BoolArgumentType.getBool(c, "respectTeams"),
+-                                                                                EntityArgument.getEntities(c, "targets")
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> spreadPlayers(c, true))
+                                                                 )
+                                                         )
+                                                 )
+@@ -99,6 +_,23 @@
+         );
+     }
+ 
++    private static int spreadPlayers(CommandContext<CommandSourceStack> context, boolean hasMaxHeight) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> spreadPlayers(context, hasMaxHeight))) {
++            return 0;
++        }
++
++        return spreadPlayers(
++            source,
++            Vec2Argument.getVec2(context, "center"),
++            FloatArgumentType.getFloat(context, "spreadDistance"),
++            FloatArgumentType.getFloat(context, "maxRange"),
++            hasMaxHeight ? IntegerArgumentType.getInteger(context, "maxHeight") : source.getLevel().getMaxY() + 1,
++            BoolArgumentType.getBool(context, "respectTeams"),
++            EntityArgument.getEntities(context, "targets")
++        );
++    }
++
+     private static int spreadPlayers(
+         CommandSourceStack source,
+         Vec2 center,
+@@ -108,6 +_,12 @@
+         boolean respectTeams,
+         Collection<? extends Entity> entities
+     ) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(
++            source, () -> spreadPlayers(source, center, spreadDistance, maxRange, maxHeight, respectTeams, entities)
++        )) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         int minY = level.getMinY();
+         if (maxHeight < minY) {
+@@ -119,10 +_,10 @@
+             double maxX = center.x + maxRange;
+             double maxZ = center.y + maxRange;
+             SpreadPlayersCommand.Position[] positions = createInitialPositions(
+-                random, respectTeams ? getNumberOfTeams(entities) : entities.size(), minX, minZ, maxX, maxZ
++                random, respectTeams ? getNumberOfTeams(source, entities) : entities.size(), minX, minZ, maxX, maxZ
+             );
+             spreadPositions(center, spreadDistance, level, random, minX, minZ, maxX, maxZ, maxHeight, positions, respectTeams);
+-            double distance = setPlayerPositions(entities, level, positions, maxHeight, respectTeams);
++            double distance = setPlayerPositions(source, entities, level, positions, maxHeight, respectTeams);
+             source.sendSuccess(
+                 () -> Component.translatable(
+                     "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"),
+@@ -137,15 +_,11 @@
+         }
+     }
+ 
+-    private static int getNumberOfTeams(Collection<? extends Entity> players) {
++    private static int getNumberOfTeams(CommandSourceStack source, Collection<? extends Entity> players) {
+         Set<Team> teams = Sets.newHashSet();
+ 
+         for (Entity player : players) {
+-            if (player instanceof Player) {
+-                teams.add(player.getTeam());
+-            } else {
+-                teams.add(null);
+-            }
++            teams.add(RegionizedCommandHelper.callOnEntityRegion(source, player, () -> player instanceof Player ? player.getTeam() : null));
+         }
+ 
+         return teams.size();
+@@ -233,7 +_,12 @@
+     }
+ 
+     private static double setPlayerPositions(
+-        Collection<? extends Entity> entities, ServerLevel level, SpreadPlayersCommand.Position[] positions, int maxHeight, boolean respectTeams
++        CommandSourceStack source,
++        Collection<? extends Entity> entities,
++        ServerLevel level,
++        SpreadPlayersCommand.Position[] positions,
++        int maxHeight,
++        boolean respectTeams
+     ) {
+         double avgDistance = 0.0;
+         int positionIndex = 0;
+@@ -242,7 +_,7 @@
+         for (Entity entity : entities) {
+             SpreadPlayersCommand.Position position;
+             if (respectTeams) {
+-                Team team = entity instanceof Player ? entity.getTeam() : null;
++                Team team = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> entity instanceof Player ? entity.getTeam() : null);
+                 if (!teamPositions.containsKey(team)) {
+                     teamPositions.put(team, positions[positionIndex++]);
+                 }
+@@ -252,16 +_,10 @@
+                 position = positions[positionIndex++];
+             }
+ 
+-            entity.teleportTo(
+-                level,
+-                Mth.floor(position.x) + 0.5,
+-                position.getSpawnY(level, maxHeight),
+-                Mth.floor(position.z) + 0.5,
+-                Set.of(),
+-                entity.getYRot(),
+-                entity.getXRot(),
+-                true
+-            );
++            double targetX = (double)Mth.floor(position.x) + 0.5;
++            double targetY = position.getSpawnY(level, maxHeight);
++            double targetZ = (double)Mth.floor(position.z) + 0.5;
++            teleportEntity(source, level, entity, targetX, targetY, targetZ);
+             double closest = Double.MAX_VALUE;
+ 
+             for (SpreadPlayersCommand.Position testPosition : positions) {
+@@ -275,6 +_,39 @@
+         }
+ 
+         return entities.size() < 2 ? 0.0 : avgDistance / entities.size();
++    }
++
++    private static void teleportEntity(CommandSourceStack source, ServerLevel level, Entity entity, double targetX, double targetY, double targetZ) {
++        if (entity.level() == level && source.getServer().regionizedTaskDispatcher().isRunning()) {
++            RegionKey entityRegion = RegionizedWorldGuard.regionFor(level, entity.blockPosition());
++            RegionKey targetRegion = RegionizedWorldGuard.regionFor(level, BlockPos.containing(targetX, targetY, targetZ));
++            if (!entityRegion.equals(targetRegion)) {
++                source.getServer()
++                    .regionizedTaskDispatcher()
++                    .awaitRegions("spread players teleport", Set.of(entityRegion, targetRegion), entityRegion, () -> {
++                        teleportEntityOnRegion(level, entity, targetX, targetY, targetZ);
++                    });
++                return;
++            }
++        }
++
++        RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> {
++            teleportEntityOnRegion(level, entity, targetX, targetY, targetZ);
++            return null;
++        });
++    }
++
++    private static void teleportEntityOnRegion(ServerLevel level, Entity entity, double targetX, double targetY, double targetZ) {
++        net.neoforged.neoforge.event.entity.EntityTeleportEvent.SpreadPlayersCommand event = net.neoforged.neoforge.event.EventHooks.onEntityTeleportSpreadPlayersCommand(
++            entity,
++            level,
++            targetX,
++            targetY,
++            targetZ
++        );
++        if (!event.isCanceled()) {
++            entity.teleportTo(level, event.getTargetX(), event.getTargetY(), event.getTargetZ(), Set.of(), entity.getYRot(), entity.getXRot(), true);
++        }
+     }
+ 
+     private static SpreadPlayersCommand.Position[] createInitialPositions(RandomSource random, int count, double minX, double minZ, double maxX, double maxZ) {

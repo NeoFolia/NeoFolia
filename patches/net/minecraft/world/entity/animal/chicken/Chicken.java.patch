@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/animal/chicken/Chicken.java
++++ b/net/minecraft/world/entity/animal/chicken/Chicken.java
+@@ -181,7 +_,7 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         VariantUtils.selectVariantToSpawn(SpawnContext.create(level, this.blockPosition()), Registries.CHICKEN_VARIANT).ifPresent(this::setVariant);
+-        this.setSoundVariant(ChickenSoundVariants.pickRandomSoundVariant(this.registryAccess(), level.getRandom()));
++        this.setSoundVariant(ChickenSoundVariants.pickRandomSoundVariant(this.registryAccess(), this.random));
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+     }
+ 

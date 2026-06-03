@@ -1,0 +1,80 @@
+--- a/net/minecraft/world/damagesource/DamageSource.java
++++ b/net/minecraft/world/damagesource/DamageSource.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class DamageSource {
+@@ -54,29 +_,36 @@
+         this(type, null, null, null);
+     }
+ 
++    private static @Nullable Entity regionSafeEntity(@Nullable Entity entity) {
++        return entity == null ? null : RegionizedWorldGuard.restrictEntityToCurrentRegion(entity.level(), entity);
++    }
++
+     public @Nullable Entity getDirectEntity() {
+-        return this.directEntity;
++        return regionSafeEntity(this.directEntity);
+     }
+ 
+     public @Nullable Entity getEntity() {
+-        return this.causingEntity;
++        return regionSafeEntity(this.causingEntity);
+     }
+ 
+     public @Nullable ItemStack getWeaponItem() {
+-        return this.directEntity != null ? this.directEntity.getWeaponItem() : null;
++        Entity directEntity = this.getDirectEntity();
++        return directEntity != null ? directEntity.getWeaponItem() : null;
+     }
+ 
+     public Component getLocalizedDeathMessage(LivingEntity victim) {
+         String deathMsg = "death.attack." + this.type().msgId();
+-        if (this.causingEntity == null && this.directEntity == null) {
++        Entity causingEntity = this.getEntity();
++        Entity directEntity = this.getDirectEntity();
++        if (causingEntity == null && directEntity == null) {
+             LivingEntity source = victim.getKillCredit();
+             String playerMsg = deathMsg + ".player";
+             return source != null
+                 ? Component.translatable(playerMsg, victim.getDisplayName(), source.getDisplayName())
+                 : Component.translatable(deathMsg, victim.getDisplayName());
+         } else {
+-            Component name = this.causingEntity == null ? this.directEntity.getDisplayName() : this.causingEntity.getDisplayName();
+-            ItemStack held = this.causingEntity instanceof LivingEntity livingEntity ? livingEntity.getMainHandItem() : ItemStack.EMPTY;
++            Component name = causingEntity == null ? directEntity.getDisplayName() : causingEntity.getDisplayName();
++            ItemStack held = causingEntity instanceof LivingEntity livingEntity ? livingEntity.getMainHandItem() : ItemStack.EMPTY;
+             return !held.isEmpty() && held.has(DataComponents.CUSTOM_NAME)
+                 ? Component.translatable(deathMsg + ".item", victim.getDisplayName(), name, held.getDisplayName())
+                 : Component.translatable(deathMsg, victim.getDisplayName(), name);
+@@ -87,10 +_,15 @@
+         return this.type().msgId();
+     }
+ 
++    /**
++     * @deprecated Use {@link DamageScaling#getScalingFunction()}
++     */
++    @Deprecated(since = "1.20.1")
+     public boolean scalesWithDifficulty() {
++        Entity causingEntity = this.getEntity();
+         return switch (this.type().scaling()) {
+             case NEVER -> false;
+-            case WHEN_CAUSED_BY_LIVING_NON_PLAYER -> this.causingEntity instanceof LivingEntity && !(this.causingEntity instanceof Player);
++            case WHEN_CAUSED_BY_LIVING_NON_PLAYER -> causingEntity instanceof LivingEntity && !(causingEntity instanceof Player);
+             case ALWAYS -> true;
+         };
+     }
+@@ -103,7 +_,8 @@
+         if (this.damageSourcePosition != null) {
+             return this.damageSourcePosition;
+         } else {
+-            return this.directEntity != null ? this.directEntity.position() : null;
++            Entity directEntity = this.getDirectEntity();
++            return directEntity != null ? directEntity.position() : null;
+         }
+     }
+ 

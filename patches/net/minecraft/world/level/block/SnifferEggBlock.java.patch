@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/level/block/SnifferEggBlock.java
++++ b/net/minecraft/world/level/block/SnifferEggBlock.java
+@@ -23,6 +_,7 @@
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class SnifferEggBlock extends Block {
+     public static final MapCodec<SnifferEggBlock> CODEC = simpleCodec(SnifferEggBlock::new);
+@@ -73,7 +_,7 @@
+             if (sniffer != null) {
+                 Vec3 spawnAt = position.getCenter();
+                 sniffer.setBaby(true);
+-                sniffer.snapTo(spawnAt.x(), spawnAt.y(), spawnAt.z(), Mth.wrapDegrees(level.getRandom().nextFloat() * 360.0F), 0.0F);
++                sniffer.snapTo(spawnAt.x(), spawnAt.y(), spawnAt.z(), Mth.wrapDegrees(random.nextFloat() * 360.0F), 0.0F);
+                 level.addFreshEntity(sniffer);
+             }
+         }
+@@ -89,7 +_,11 @@
+         int hatchTime = boosted ? 12000 : 24000;
+         int progressionTickDelay = hatchTime / 3;
+         level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(state));
+-        level.scheduleTick(pos, this, progressionTickDelay + level.getRandom().nextInt(300));
++        level.scheduleTick(pos, this, progressionTickDelay + snifferEggRandom(level).nextInt(300));
++    }
++
++    private static RandomSource snifferEggRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     @Override

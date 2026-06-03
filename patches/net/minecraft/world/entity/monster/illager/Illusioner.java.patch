@@ -1,0 +1,60 @@
+--- a/net/minecraft/world/entity/monster/illager/Illusioner.java
++++ b/net/minecraft/world/entity/monster/illager/Illusioner.java
+@@ -175,9 +_,16 @@
+ 
+     @Override
+     public void performRangedAttack(LivingEntity target, float power) {
+-        ItemStack bowItem = this.getItemInHand(ProjectileUtil.getWeaponHoldingHand(this, Items.BOW));
++        target = this.regionSafeTarget(target);
++        if (target == null) {
++            return;
++        }
++
++        ItemStack bowItem = this.getItemInHand(ProjectileUtil.getWeaponHoldingHand(this, item -> item instanceof net.minecraft.world.item.BowItem));
+         ItemStack projectile = this.getProjectile(bowItem);
+         AbstractArrow arrow = ProjectileUtil.getMobArrow(this, projectile, power, bowItem);
++        if (bowItem.getItem() instanceof net.minecraft.world.item.BowItem bowItemItem)
++            arrow = bowItemItem.customArrow(arrow, projectile, bowItem);
+         double xd = target.getX() - this.getX();
+         double yd = target.getY(0.3333333333333333) - arrow.getY();
+         double zd = target.getZ() - this.getZ();
+@@ -212,10 +_,13 @@
+         public boolean canUse() {
+             if (!super.canUse()) {
+                 return false;
+-            } else if (Illusioner.this.getTarget() == null) {
+-                return false;
+             } else {
+-                return Illusioner.this.getTarget().getId() == this.lastTargetId
++                LivingEntity target = Illusioner.this.regionSafeTarget(Illusioner.this.getTarget());
++                if (target == null) {
++                    return false;
++                }
++
++                return target.getId() == this.lastTargetId
+                     ? false
+                     : getServerLevel(Illusioner.this).getCurrentDifficultyAt(Illusioner.this.blockPosition()).isHarderThan(Difficulty.NORMAL.ordinal());
+             }
+@@ -224,7 +_,7 @@
+         @Override
+         public void start() {
+             super.start();
+-            LivingEntity target = Illusioner.this.getTarget();
++            LivingEntity target = Illusioner.this.regionSafeTarget(Illusioner.this.getTarget());
+             if (target != null) {
+                 this.lastTargetId = target.getId();
+             }
+@@ -242,7 +_,12 @@
+ 
+         @Override
+         protected void performSpellCasting() {
+-            Illusioner.this.getTarget().addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 400), Illusioner.this);
++            LivingEntity target = Illusioner.this.regionSafeTarget(Illusioner.this.getTarget());
++            if (target == null) {
++                return;
++            }
++
++            target.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 400), Illusioner.this);
+         }
+ 
+         @Override

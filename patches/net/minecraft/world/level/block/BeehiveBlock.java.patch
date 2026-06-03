@@ -1,0 +1,141 @@
+--- a/net/minecraft/world/level/block/BeehiveBlock.java
++++ b/net/minecraft/world/level/block/BeehiveBlock.java
+@@ -58,6 +_,8 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BeehiveBlock extends BaseEntityBlock {
+@@ -96,8 +_,18 @@
+                 this.angerNearbyBees(level, pos);
+             }
+ 
+-            CriteriaTriggers.BEE_NEST_DESTROYED.trigger((ServerPlayer)player, state, destroyedWith, beehiveBlockEntity.getOccupantCount());
++            if (player instanceof ServerPlayer serverPlayer) {
++                triggerBeeNestDestroyed(serverPlayer, state, destroyedWith, beehiveBlockEntity.getOccupantCount());
++            }
+         }
++    }
++
++    private static void triggerBeeNestDestroyed(ServerPlayer player, BlockState state, ItemStack destroyedWith, int occupantCount) {
++        ItemStack destroyedWithSnapshot = destroyedWith.copy();
++        RegionizedWorldGuard.executeOnPlayerRegion(
++            player,
++            () -> CriteriaTriggers.BEE_NEST_DESTROYED.trigger(player, state, destroyedWithSnapshot, occupantCount)
++        );
+     }
+ 
+     @Override
+@@ -108,22 +_,31 @@
+ 
+     private void angerNearbyBees(Level level, BlockPos pos) {
+         AABB areaAroundBeehive = new AABB(pos).inflate(8.0, 6.0, 8.0);
+-        List<Bee> beesToAnger = level.getEntitiesOfClass(Bee.class, areaAroundBeehive);
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, areaAroundBeehive);
++        if (regionBox == null) {
++            return;
++        }
++
++        List<Bee> beesToAnger = level.getEntitiesOfClass(Bee.class, regionBox);
+         if (!beesToAnger.isEmpty()) {
+-            List<Player> playersToBeAngryAt = level.getEntitiesOfClass(Player.class, areaAroundBeehive);
++            List<Player> playersToBeAngryAt = level.getEntitiesOfClass(Player.class, regionBox);
+             if (playersToBeAngryAt.isEmpty()) {
+                 return;
+             }
+ 
+             for (Bee bee : beesToAnger) {
+                 if (bee.getTarget() == null) {
+-                    Player angerTarget = Util.getRandom(playersToBeAngryAt, level.getRandom());
++                    Player angerTarget = Util.getRandom(playersToBeAngryAt, beehiveRandom(level));
+                     bee.setTarget(angerTarget);
+                 }
+             }
+         }
+     }
+ 
++    private static RandomSource beehiveRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
++    }
++
+     public static void dropHoneycomb(
+         ServerLevel level, ItemStack tool, BlockState blockState, @Nullable BlockEntity blockEntity, @Nullable Entity entity, BlockPos pos
+     ) {
+@@ -140,7 +_,7 @@
+         boolean hiveEmptied = false;
+         if (honeyLevel >= 5) {
+             Item item = itemStack.getItem();
+-            if (level instanceof ServerLevel serverLevel && itemStack.is(Items.SHEARS)) {
++            if (level instanceof ServerLevel serverLevel && itemStack.canPerformAction(net.neoforged.neoforge.common.ItemAbilities.SHEARS_HARVEST)) {
+                 dropHoneycomb(serverLevel, itemStack, state, level.getBlockEntity(pos), player, pos);
+                 level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.BEEHIVE_SHEAR, SoundSource.BLOCKS, 1.0F, 1.0F);
+                 itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot());
+@@ -160,7 +_,7 @@
+             }
+ 
+             if (!level.isClientSide() && hiveEmptied) {
+-                player.awardStat(Stats.ITEM_USED.get(item));
++                RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(item));
+             }
+         }
+ 
+@@ -202,46 +_,47 @@
+     public void animateTick(BlockState state, Level level, BlockPos pos, RandomSource random) {
+         if (state.getValue(HONEY_LEVEL) >= 5) {
+             for (int i = 0; i < random.nextInt(1) + 1; i++) {
+-                this.trySpawnDripParticles(level, pos, state);
++                this.trySpawnDripParticles(level, pos, state, random);
+             }
+         }
+     }
+ 
+-    private void trySpawnDripParticles(Level level, BlockPos pos, BlockState state) {
+-        if (state.getFluidState().isEmpty() && !(level.getRandom().nextFloat() < 0.3F)) {
++    private void trySpawnDripParticles(Level level, BlockPos pos, BlockState state, RandomSource random) {
++        if (state.getFluidState().isEmpty() && !(random.nextFloat() < 0.3F)) {
+             VoxelShape collisionShape = state.getCollisionShape(level, pos);
+             double topSideHeight = collisionShape.max(Direction.Axis.Y);
+             if (topSideHeight >= 1.0 && !state.is(BlockTags.IMPERMEABLE)) {
+                 double bottomSideHeight = collisionShape.min(Direction.Axis.Y);
+                 if (bottomSideHeight > 0.0) {
+-                    this.spawnParticle(level, pos, collisionShape, pos.getY() + bottomSideHeight - 0.05);
++                    this.spawnParticle(level, pos, collisionShape, pos.getY() + bottomSideHeight - 0.05, random);
+                 } else {
+                     BlockPos below = pos.below();
+                     BlockState belowState = level.getBlockState(below);
+                     VoxelShape belowShape = belowState.getCollisionShape(level, below);
+                     double belowTopSideHeight = belowShape.max(Direction.Axis.Y);
+                     if ((belowTopSideHeight < 1.0 || !belowState.isCollisionShapeFullBlock(level, below)) && belowState.getFluidState().isEmpty()) {
+-                        this.spawnParticle(level, pos, collisionShape, pos.getY() - 0.05);
++                        this.spawnParticle(level, pos, collisionShape, pos.getY() - 0.05, random);
+                     }
+                 }
+             }
+         }
+     }
+ 
+-    private void spawnParticle(Level level, BlockPos pos, VoxelShape dripShape, double height) {
++    private void spawnParticle(Level level, BlockPos pos, VoxelShape dripShape, double height, RandomSource random) {
+         this.spawnFluidParticle(
+             level,
+             pos.getX() + dripShape.min(Direction.Axis.X),
+             pos.getX() + dripShape.max(Direction.Axis.X),
+             pos.getZ() + dripShape.min(Direction.Axis.Z),
+             pos.getZ() + dripShape.max(Direction.Axis.Z),
+-            height
++            height,
++            random
+         );
+     }
+ 
+-    private void spawnFluidParticle(Level level, double x1, double x2, double z1, double z2, double y) {
++    private void spawnFluidParticle(Level level, double x1, double x2, double z1, double z2, double y, RandomSource random) {
+         level.addParticle(
+-            ParticleTypes.DRIPPING_HONEY, Mth.lerp(level.getRandom().nextDouble(), x1, x2), y, Mth.lerp(level.getRandom().nextDouble(), z1, z2), 0.0, 0.0, 0.0
++            ParticleTypes.DRIPPING_HONEY, Mth.lerp(random.nextDouble(), x1, x2), y, Mth.lerp(random.nextDouble(), z1, z2), 0.0, 0.0, 0.0
+         );
+     }
+ 

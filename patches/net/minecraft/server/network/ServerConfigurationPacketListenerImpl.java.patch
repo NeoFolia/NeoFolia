@@ -1,0 +1,185 @@
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -48,10 +_,10 @@
+     private static final Component DISCONNECT_REASON_CONFIGURATION_ERROR = Component.translatable("multiplayer.disconnect.configuration_error");
+     private final GameProfile gameProfile;
+     private final Queue<ConfigurationTask> configurationTasks = new ConcurrentLinkedQueue<>();
+-    private @Nullable ConfigurationTask currentTask;
+-    private ClientInformation clientInformation;
+-    private @Nullable SynchronizeRegistriesTask synchronizeRegistriesTask;
+-    private @Nullable PrepareSpawnTask prepareSpawnTask;
++    private volatile @Nullable ConfigurationTask currentTask;
++    private volatile ClientInformation clientInformation;
++    private volatile @Nullable SynchronizeRegistriesTask synchronizeRegistriesTask;
++    private volatile @Nullable PrepareSpawnTask prepareSpawnTask;
+ 
+     public ServerConfigurationPacketListenerImpl(MinecraftServer server, Connection connection, CommonListenerCookie cookie) {
+         super(server, connection, cookie);
+@@ -65,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void onDisconnect(DisconnectionDetails details) {
++    public synchronized void onDisconnect(DisconnectionDetails details) {
+         LOGGER.info("{} ({}) lost connection: {}", this.gameProfile.name(), this.gameProfile.id(), details.reason().getString());
+         if (this.prepareSpawnTask != null) {
+             this.prepareSpawnTask.close();
+@@ -81,6 +_,15 @@
+     }
+ 
+     public void startConfiguration() {
++        // Neo: Before starting vanilla configuration, reset ad-hoc channels and run modded channel negotiation.
++        this.send(new net.neoforged.neoforge.network.payload.MinecraftUnregisterPayload(net.neoforged.neoforge.network.registration.NetworkRegistry.getInitialServerUnregisterChannels()));
++        this.send(new net.neoforged.neoforge.network.payload.MinecraftRegisterPayload(net.neoforged.neoforge.network.registration.NetworkRegistry.getInitialListeningChannels(this.flow())));
++        this.send(new net.neoforged.neoforge.network.payload.ModdedNetworkQueryPayload(java.util.Map.of()));
++        this.send(new net.minecraft.network.protocol.common.ClientboundPingPacket(0));
++    }
++
++    // Neo: Hide vanilla's startConfiguration() in this method so we can call it in handlePong below.
++    private void runConfiguration() {
+         this.send(new ClientboundCustomPayloadPacket(new BrandPayload(this.server.getServerModName())));
+         ServerLinks serverLinks = this.server.serverLinks();
+         if (!serverLinks.isEmpty()) {
+@@ -94,6 +_,8 @@
+             .flatMap(packResources -> packResources.location().knownPackInfo().stream())
+             .toList();
+         this.send(new ClientboundUpdateEnabledFeaturesPacket(FeatureFlags.REGISTRY.toNames(this.server.getWorldData().enabledFeatures())));
++        // Neo: we must sync the registries before vanilla sends tags in SynchronizeRegistriesTask!
++        net.neoforged.neoforge.network.ConfigurationInitialization.configureEarlyTasks(this, this.configurationTasks::add);
+         this.synchronizeRegistriesTask = new SynchronizeRegistriesTask(knownPacks, registries);
+         this.configurationTasks.add(this.synchronizeRegistriesTask);
+         this.addOptionalTasks();
+@@ -125,6 +_,32 @@
+         }
+ 
+         this.server.getServerResourcePack().ifPresent(info -> this.configurationTasks.add(new ServerResourcePackConfigurationTask(info)));
++
++        // Neo: Gather modded configuration tasks and schedule them for execution
++        this.configurationTasks.addAll(net.neoforged.fml.ModLoader.postEventWithReturn(new net.neoforged.neoforge.network.event.RegisterConfigurationTasksEvent(this)).getConfigurationTasks());
++    }
++
++    @Override
++    public void handleCustomPayload(net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket packet) {
++        // Neo: Perform modded network initialization when the client sends their channel list.
++        if (packet.payload() instanceof net.neoforged.neoforge.network.payload.ModdedNetworkQueryPayload moddedEnvironmentPayload) {
++            this.connectionType = net.neoforged.neoforge.network.connection.ConnectionType.NEOFORGE;
++            net.neoforged.neoforge.network.registration.NetworkRegistry.initializeNeoForgeConnection(this, moddedEnvironmentPayload.queries());
++            return;
++        }
++        super.handleCustomPayload(packet); // Neo: Call super to invoke modded payload handling.
++    }
++
++    @Override
++    public void handlePong(net.minecraft.network.protocol.common.ServerboundPongPacket serverboundPongPacket) {
++        super.handlePong(serverboundPongPacket);
++        // During startConfiguration() we send a ping with id 0, if we get a pong back, we initiate the connection.
++        if (serverboundPongPacket.getId() == 0) {
++            if (!this.connectionType.isNeoForge() && !net.neoforged.neoforge.network.registration.NetworkRegistry.initializeOtherConnection(this)) {
++                return;
++            }
++            this.runConfiguration();
++        }
+     }
+ 
+     @Override
+@@ -160,11 +_,17 @@
+     public void handleConfigurationFinished(ServerboundFinishConfigurationPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
+         this.finishCurrentTask(JoinWorldTask.TYPE);
+-        this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++        this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess(), this.connectionType)));
++        // Packets can only be sent after the outbound protocol is set up again
++        if (this.connectionType == net.neoforged.neoforge.network.connection.ConnectionType.OTHER) {
++            //We need to also initialize this here, as the client may have sent the packet before we have finished our configuration.
++            net.neoforged.neoforge.network.registration.NetworkRegistry.initializeNeoForgeConnection(this, java.util.Map.of());
++        }
++        net.neoforged.neoforge.network.registration.NetworkRegistry.onConfigurationFinished(this);
+ 
+         try {
+             PlayerList playerList = this.server.getPlayerList();
+-            if (playerList.getPlayer(this.gameProfile.id()) != null) {
++            if (playerList.getAllPlayer(this.gameProfile.id()) != null) {
+                 this.disconnect(PlayerList.DUPLICATE_LOGIN_DISCONNECT_MESSAGE);
+                 return;
+             }
+@@ -175,7 +_,7 @@
+                 return;
+             }
+ 
+-            Objects.requireNonNull(this.prepareSpawnTask).spawnPlayer(this.connection, this.createCookie(this.clientInformation));
++            Objects.requireNonNull(this.prepareSpawnTask).spawnPlayer(this.connection, this.createCookie(this.clientInformation, this.connectionType));
+         } catch (Exception var4) {
+             LOGGER.error("Couldn't place player in world", (Throwable)var4);
+             this.disconnect(DISCONNECT_REASON_INVALID_DATA);
+@@ -197,36 +_,52 @@
+             }
+         }
+ 
+-        if (this.prepareSpawnTask != null) {
+-            this.prepareSpawnTask.keepAlive();
++        PrepareSpawnTask prepareSpawnTask = this.prepareSpawnTask;
++        if (prepareSpawnTask != null) {
++            prepareSpawnTask.keepAlive();
+         }
+     }
+ 
+     private void startNextTask() {
+-        if (this.currentTask != null) {
+-            throw new IllegalStateException("Task " + this.currentTask.type().id() + " has not finished yet");
+-        } else if (this.isAcceptingMessages()) {
+-            ConfigurationTask task = this.configurationTasks.poll();
+-            if (task != null) {
+-                this.currentTask = task;
+-
+-                try {
+-                    task.start(this::send);
+-                } catch (Exception var3) {
+-                    LOGGER.error("Failed to start configuration task {}", task.type(), var3);
+-                    this.disconnect(DISCONNECT_REASON_CONFIGURATION_ERROR);
++        ConfigurationTask task;
++        synchronized (this) {
++            if (this.currentTask != null) {
++                throw new IllegalStateException("Task " + this.currentTask.type().id() + " has not finished yet");
++            } else if (!this.isAcceptingMessages()) {
++                return;
++            }
++
++            task = this.configurationTasks.poll();
++            if (task == null) {
++                return;
++            }
++
++            this.currentTask = task;
++        }
++
++        try {
++            task.start(this::send);
++        } catch (Exception var3) {
++            LOGGER.error("Failed to start configuration task {}", task.type(), var3);
++            synchronized (this) {
++                if (this.currentTask == task) {
++                    this.currentTask = null;
+                 }
+             }
++            this.disconnect(DISCONNECT_REASON_CONFIGURATION_ERROR);
+         }
+     }
+ 
+     public void finishCurrentTask(ConfigurationTask.Type taskTypeToFinish) {
+-        ConfigurationTask.Type currentTaskType = this.currentTask != null ? this.currentTask.type() : null;
+-        if (!taskTypeToFinish.equals(currentTaskType)) {
+-            throw new IllegalStateException("Unexpected request for task finish, current task: " + currentTaskType + ", requested: " + taskTypeToFinish);
+-        } else {
++        synchronized (this) {
++            ConfigurationTask.Type currentTaskType = this.currentTask != null ? this.currentTask.type() : null;
++            if (!taskTypeToFinish.equals(currentTaskType)) {
++                throw new IllegalStateException("Unexpected request for task finish, current task: " + currentTaskType + ", requested: " + taskTypeToFinish);
++            }
++
+             this.currentTask = null;
+-            this.startNextTask();
+         }
++
++        this.startNextTask();
+     }
+ }

@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/monster/zombie/Husk.java
++++ b/net/minecraft/world/entity/monster/zombie/Husk.java
+@@ -79,6 +_,7 @@
+ 
+     @Override
+     protected void doUnderWaterConversion(ServerLevel level) {
++        if (!net.neoforged.neoforge.event.EventHooks.canLivingConvert(this, EntityType.ZOMBIE, (timer) -> this.conversionTime = timer)) return;
+         this.convertToZombieType(level, EntityType.ZOMBIE);
+         if (!this.isSilent()) {
+             level.levelEvent(null, 1041, this.blockPosition(), 0);
+@@ -89,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         groupData = super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+         float difficultyModifier = difficulty.getSpecialMultiplier();
+         if (spawnReason != EntitySpawnReason.CONVERSION) {

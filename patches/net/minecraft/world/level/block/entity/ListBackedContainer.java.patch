@@ -1,0 +1,94 @@
+--- a/net/minecraft/world/level/block/entity/ListBackedContainer.java
++++ b/net/minecraft/world/level/block/entity/ListBackedContainer.java
+@@ -10,32 +_,45 @@
+     NonNullList<ItemStack> getItems();
+ 
+     default int count() {
+-        return (int)this.getItems().stream().filter(Predicate.not(ItemStack::isEmpty)).count();
++        synchronized (this) {
++            return (int)this.getItems().stream().filter(Predicate.not(ItemStack::isEmpty)).count();
++        }
+     }
+ 
+     @Override
+     default int getContainerSize() {
+-        return this.getItems().size();
++        synchronized (this) {
++            return this.getItems().size();
++        }
+     }
+ 
+     @Override
+     default void clearContent() {
+-        this.getItems().clear();
++        synchronized (this) {
++            this.getItems().clear();
++        }
+     }
+ 
+     @Override
+     default boolean isEmpty() {
+-        return this.getItems().stream().allMatch(ItemStack::isEmpty);
++        synchronized (this) {
++            return this.getItems().stream().allMatch(ItemStack::isEmpty);
++        }
+     }
+ 
+     @Override
+     default ItemStack getItem(int slot) {
+-        return this.getItems().get(slot);
++        synchronized (this) {
++            return this.getItems().get(slot);
++        }
+     }
+ 
+     @Override
+     default ItemStack removeItem(int slot, int count) {
+-        ItemStack result = ContainerHelper.removeItem(this.getItems(), slot, count);
++        ItemStack result;
++        synchronized (this) {
++            result = ContainerHelper.removeItem(this.getItems(), slot, count);
++        }
+         if (!result.isEmpty()) {
+             this.setChanged();
+         }
+@@ -45,12 +_,17 @@
+ 
+     @Override
+     default ItemStack removeItemNoUpdate(int slot) {
+-        return ContainerHelper.removeItem(this.getItems(), slot, this.getMaxStackSize());
++        synchronized (this) {
++            return ContainerHelper.removeItem(this.getItems(), slot, this.getMaxStackSize());
++        }
+     }
+ 
+     @Override
+     default boolean canPlaceItem(int slot, ItemStack itemStack) {
+-        return this.acceptsItemType(itemStack) && (this.getItem(slot).isEmpty() || this.getItem(slot).getCount() < this.getMaxStackSize(itemStack));
++        synchronized (this) {
++            ItemStack current = this.getItems().get(slot);
++            return this.acceptsItemType(itemStack) && (current.isEmpty() || current.getCount() < this.getMaxStackSize(itemStack));
++        }
+     }
+ 
+     default boolean acceptsItemType(ItemStack itemStack) {
+@@ -59,12 +_,16 @@
+ 
+     @Override
+     default void setItem(int slot, ItemStack itemStack) {
+-        this.setItemNoUpdate(slot, itemStack);
++        synchronized (this) {
++            this.setItemNoUpdate(slot, itemStack);
++        }
+         this.setChanged();
+     }
+ 
+     default void setItemNoUpdate(int slot, ItemStack itemStack) {
+-        this.getItems().set(slot, itemStack);
+-        itemStack.limitSize(this.getMaxStackSize(itemStack));
++        synchronized (this) {
++            this.getItems().set(slot, itemStack);
++            itemStack.limitSize(this.getMaxStackSize(itemStack));
++        }
+     }
+ }

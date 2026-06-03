@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/entity/ai/behavior/DismountOrSkipMounting.java
++++ b/net/minecraft/world/entity/ai/behavior/DismountOrSkipMounting.java
+@@ -5,9 +_,10 @@
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class DismountOrSkipMounting {
+-    public static <E extends LivingEntity> BehaviorControl<E> create(int maxWalkDistToRideTarget, BiPredicate<E, Entity> dontRideIf) {
++    public static synchronized <E extends LivingEntity> BehaviorControl<E> create(int maxWalkDistToRideTarget, BiPredicate<E, Entity> dontRideIf) {
+         return BehaviorBuilder.create(i -> i.group(i.registered(MemoryModuleType.RIDE_TARGET)).apply(i, rideTarget -> (level, body, timestamp) -> {
+             Entity currentVehicle = body.getVehicle();
+             Entity targetVehicle = i.<Entity>tryGet(rideTarget).orElse(null);
+@@ -26,7 +_,8 @@
+         }));
+     }
+ 
+-    private static boolean isVehicleValid(LivingEntity body, Entity vehicle, int maxWalkDistToRideTarget) {
+-        return vehicle.isAlive() && vehicle.closerThan(body, maxWalkDistToRideTarget) && vehicle.level() == body.level();
++    private static synchronized boolean isVehicleValid(LivingEntity body, Entity vehicle, int maxWalkDistToRideTarget) {
++        Entity safeVehicle = RegionizedWorldGuard.restrictEntityToCurrentRegion(body.level(), vehicle);
++        return safeVehicle != null && safeVehicle.isAlive() && safeVehicle.closerThan(body, maxWalkDistToRideTarget) && safeVehicle.level() == body.level();
+     }
+ }

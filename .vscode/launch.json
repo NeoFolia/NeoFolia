@@ -1,0 +1,269 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "base - Client",
+      "presentation": {
+        "group": "Mod Development - base",
+        "order": 0
+      },
+      "projectName": "base",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\clientRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\clientRunVmArgs.txt",
+        "-Dfml.modFolders\u003d"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\base\\run\\client",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "base - ClientData",
+      "presentation": {
+        "group": "Mod Development - base",
+        "order": 1
+      },
+      "projectName": "base",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\clientDataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\clientDataRunVmArgs.txt",
+        "-Dfml.modFolders\u003d"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\base\\run\\clientData",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "base - Server",
+      "presentation": {
+        "group": "Mod Development - base",
+        "order": 2
+      },
+      "projectName": "base",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\serverRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\serverRunVmArgs.txt",
+        "-Dfml.modFolders\u003d"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\base\\run\\server",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "base - ServerData",
+      "presentation": {
+        "group": "Mod Development - base",
+        "order": 3
+      },
+      "projectName": "base",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\serverDataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\base\\build\\neodev\\serverDataRunVmArgs.txt",
+        "-Dfml.modFolders\u003d"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\base\\run\\serverData",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "neoforge - Client",
+      "presentation": {
+        "group": "Mod Development - neoforge",
+        "order": 0
+      },
+      "projectName": "neoforge",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\clientRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\clientRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;minecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\client;neoforge-coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\neoforge\\run\\client",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "neoforge - Data",
+      "presentation": {
+        "group": "Mod Development - neoforge",
+        "order": 1
+      },
+      "projectName": "neoforge",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\dataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\dataRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;minecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\client;neoforge-coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\neoforge\\run\\data",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "neoforge - GameTestServer",
+      "presentation": {
+        "group": "Mod Development - neoforge",
+        "order": 2
+      },
+      "projectName": "neoforge",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\gameTestServerRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\gameTestServerRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;neoforge-coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\neoforge\\run\\gameTestServer",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "neoforge - Server",
+      "presentation": {
+        "group": "Mod Development - neoforge",
+        "order": 3
+      },
+      "projectName": "neoforge",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\serverRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\build\\neodev\\serverRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;neoforge-coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\projects\\neoforge\\run\\server",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "tests - Client",
+      "presentation": {
+        "group": "Mod Development - tests",
+        "order": 0
+      },
+      "projectName": "tests",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\clientRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\clientRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;minecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\client;coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main;testframework%%C:\\FoliaNeoForge\\NeoFolia\\testframework\\bin\\main;neotests%%C:\\FoliaNeoForge\\NeoFolia\\tests\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\tests\\runs\\client",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "tests - Data",
+      "presentation": {
+        "group": "Mod Development - tests",
+        "order": 1
+      },
+      "projectName": "tests",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\dataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\dataRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;minecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\client;coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main;testframework%%C:\\FoliaNeoForge\\NeoFolia\\testframework\\bin\\main;neotests%%C:\\FoliaNeoForge\\NeoFolia\\tests\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\tests\\runs\\data",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "tests - GameTestServer",
+      "presentation": {
+        "group": "Mod Development - tests",
+        "order": 2
+      },
+      "projectName": "tests",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\gameTestServerRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\gameTestServerRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;minecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\client;coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main;testframework%%C:\\FoliaNeoForge\\NeoFolia\\testframework\\bin\\main;neotests%%C:\\FoliaNeoForge\\NeoFolia\\tests\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\tests\\runs\\gameTestServer",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "tests - Server",
+      "presentation": {
+        "group": "Mod Development - tests",
+        "order": 3
+      },
+      "projectName": "tests",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\serverRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@C:\\FoliaNeoForge\\NeoFolia\\tests\\build\\neodev\\serverRunVmArgs.txt",
+        "-Dfml.modFolders\u003dminecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\main;minecraft%%C:\\FoliaNeoForge\\NeoFolia\\projects\\neoforge\\bin\\client;coremods%%C:\\FoliaNeoForge\\NeoFolia\\coremods\\bin\\main;testframework%%C:\\FoliaNeoForge\\NeoFolia\\testframework\\bin\\main;neotests%%C:\\FoliaNeoForge\\NeoFolia\\tests\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\tests\\runs\\server",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+--- a/net/minecraft/server/commands/EmoteCommands.java
++++ b/net/minecraft/server/commands/EmoteCommands.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.MessageArgument;
+@@ -9,13 +_,19 @@
+ 
+ public class EmoteCommands {
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+-        dispatcher.register(Commands.literal("me").then(Commands.argument("action", MessageArgument.message()).executes(c -> {
+-            MessageArgument.resolveChatMessage(c, "action", message -> {
+-                CommandSourceStack source = c.getSource();
+-                PlayerList playerList = source.getServer().getPlayerList();
+-                playerList.broadcastChatMessage(message, source, ChatType.bind(ChatType.EMOTE_COMMAND, source));
+-            });
+-            return 1;
+-        })));
++        dispatcher.register(Commands.literal("me").then(Commands.argument("action", MessageArgument.message()).executes(EmoteCommands::emote)));
++    }
++
++    private static int emote(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> emote(context))) {
++            return 0;
++        }
++
++        MessageArgument.resolveChatMessage(context, "action", message -> {
++            PlayerList playerList = source.getServer().getPlayerList();
++            playerList.broadcastChatMessage(message, source, ChatType.bind(ChatType.EMOTE_COMMAND, source));
++        });
++        return 1;
+     }
+ }

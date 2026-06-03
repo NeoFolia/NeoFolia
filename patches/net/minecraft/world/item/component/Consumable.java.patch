@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/item/component/Consumable.java
++++ b/net/minecraft/world/item/component/Consumable.java
+@@ -28,6 +_,7 @@
+ import net.minecraft.world.item.consume_effects.PlaySoundConsumeEffect;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public record Consumable(
+     float consumeSeconds, ItemUseAnimation animation, Holder<SoundEvent> sound, boolean hasConsumeParticles, List<ConsumeEffect> onConsumeEffects
+@@ -78,8 +_,11 @@
+         RandomSource random = user.getRandom();
+         this.emitParticlesAndSounds(random, user, stack, 16);
+         if (user instanceof ServerPlayer serverPlayer) {
+-            serverPlayer.awardStat(Stats.ITEM_USED.get(stack.getItem()));
+-            CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, stack);
++            ItemStack consumedStack = stack.copy();
++            RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> {
++                RegionizedWorldGuard.awardStat(serverPlayer, Stats.ITEM_USED.get(consumedStack.getItem()));
++                CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, consumedStack);
++            });
+         }
+ 
+         stack.getAllOfType(ConsumableListener.class).forEach(component -> component.onConsume(level, user, stack, this));

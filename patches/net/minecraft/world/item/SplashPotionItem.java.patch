@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/item/SplashPotionItem.java
++++ b/net/minecraft/world/item/SplashPotionItem.java
+@@ -27,7 +_,7 @@
+             SoundEvents.SPLASH_POTION_THROW,
+             SoundSource.PLAYERS,
+             0.5F,
+-            0.4F / (level.getRandom().nextFloat() * 0.4F + 0.8F)
++            0.4F / (player.getRandom().nextFloat() * 0.4F + 0.8F)
+         );
+         return super.use(level, player, hand);
+     }

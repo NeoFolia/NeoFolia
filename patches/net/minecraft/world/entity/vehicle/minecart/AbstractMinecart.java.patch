@@ -1,0 +1,100 @@
+--- a/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
++++ b/net/minecraft/world/entity/vehicle/minecart/AbstractMinecart.java
+@@ -44,6 +_,8 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.minecraft.world.phys.shapes.Shapes;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class AbstractMinecart extends VehicleEntity {
+@@ -128,8 +_,10 @@
+             EntityType.createDefaultStackConfig(level, itemStack, player).accept(entity);
+             if (entity.getBehavior() instanceof NewMinecartBehavior newMinecartBehavior) {
+                 BlockPos currentPos = entity.getCurrentBlockPosOrRailBelow();
+-                BlockState currentState = level.getBlockState(currentPos);
+-                newMinecartBehavior.adjustToRails(currentPos, currentState, true);
++                if (entity.canReadBlock(currentPos)) {
++                    BlockState currentState = level.getBlockState(currentPos);
++                    newMinecartBehavior.adjustToRails(currentPos, currentState, true);
++                }
+             }
+         }
+ 
+@@ -217,7 +_,9 @@
+                 double poseHeight = passenger.getDimensions(pose).height();
+                 int blockCoverageY = Mth.ceil(vehicleTop - targetBlockPos.getY() + poseHeight);
+                 double ceilingAboveVehicle = DismountHelper.findCeilingFrom(
+-                    targetBlockPos, blockCoverageY, pos -> this.level().getBlockState(pos).getCollisionShape(this.level(), pos)
++                    targetBlockPos,
++                    blockCoverageY,
++                    pos -> this.canReadBlock(pos) ? this.level().getBlockState(pos).getCollisionShape(this.level(), pos) : Shapes.block()
+                 );
+                 if (vehicleTop + poseHeight <= ceilingAboveVehicle) {
+                     passenger.setPose(pose);
+@@ -231,7 +_,12 @@
+ 
+     @Override
+     protected float getBlockSpeedFactor() {
+-        BlockState blockState = this.level().getBlockState(this.blockPosition());
++        BlockPos blockPos = this.blockPosition();
++        if (!this.canReadBlock(blockPos)) {
++            return super.getBlockSpeedFactor();
++        }
++
++        BlockState blockState = this.level().getBlockState(blockPos);
+         return blockState.is(BlockTags.RAILS) ? 1.0F : super.getBlockSpeedFactor();
+     }
+ 
+@@ -295,11 +_,15 @@
+         int zt = Mth.floor(this.getZ());
+         if (useExperimentalMovement(this.level())) {
+             double y = this.getY() - 0.1 - 1.0E-5F;
+-            if (this.level().getBlockState(BlockPos.containing(xt, y, zt)).is(BlockTags.RAILS)) {
++            BlockPos railBelow = BlockPos.containing(xt, y, zt);
++            if (this.canReadBlock(railBelow) && this.level().getBlockState(railBelow).is(BlockTags.RAILS)) {
+                 yt = Mth.floor(y);
+             }
+-        } else if (this.level().getBlockState(new BlockPos(xt, yt - 1, zt)).is(BlockTags.RAILS)) {
+-            yt--;
++        } else {
++            BlockPos railBelow = new BlockPos(xt, yt - 1, zt);
++            if (this.canReadBlock(railBelow) && this.level().getBlockState(railBelow).is(BlockTags.RAILS)) {
++                yt--;
++            }
+         }
+ 
+         return new BlockPos(xt, yt, zt);
+@@ -422,9 +_,13 @@
+     }
+ 
+     public Vec3 getRedstoneDirection(BlockPos pos) {
++        if (!this.canReadBlock(pos)) {
++            return Vec3.ZERO;
++        }
++
+         BlockState state = this.level().getBlockState(pos);
+-        if (state.is(Blocks.POWERED_RAIL) && state.getValue(PoweredRailBlock.POWERED)) {
+-            RailShape shape = state.getValue(((BaseRailBlock)state.getBlock()).getShapeProperty());
++        if (state.getBlock() instanceof PoweredRailBlock poweredRail && !poweredRail.isActivatorRail() && state.getValue(PoweredRailBlock.POWERED)) {
++            RailShape shape = ((BaseRailBlock)state.getBlock()).getRailDirection(state, this.level(), pos, this);
+             if (shape == RailShape.EAST_WEST) {
+                 if (this.isRedstoneConductor(pos.west())) {
+                     return new Vec3(1.0, 0.0, 0.0);
+@@ -450,7 +_,15 @@
+     }
+ 
+     public boolean isRedstoneConductor(BlockPos pos) {
++        if (!this.canReadBlock(pos)) {
++            return false;
++        }
++
+         return this.level().getBlockState(pos).isRedstoneConductor(this.level(), pos);
++    }
++
++    boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     protected Vec3 applyNaturalSlowdown(Vec3 movement) {

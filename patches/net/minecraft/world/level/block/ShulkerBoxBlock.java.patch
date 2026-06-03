@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/ShulkerBoxBlock.java
++++ b/net/minecraft/world/level/block/ShulkerBoxBlock.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.world.Containers;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.item.ItemEntity;
+@@ -76,7 +_,7 @@
+             && level.getBlockEntity(pos) instanceof ShulkerBoxBlockEntity shulkerBoxBlockEntity
+             && canOpen(state, level, pos, shulkerBoxBlockEntity)) {
+             player.openMenu(shulkerBoxBlockEntity);
+-            player.awardStat(Stats.OPEN_SHULKER_BOX);
++            RegionizedWorldGuard.awardStat(player, Stats.OPEN_SHULKER_BOX);
+             PiglinAi.angerNearbyPiglins(serverLevel, player, true);
+         }
+ 

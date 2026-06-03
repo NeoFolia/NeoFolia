@@ -1,0 +1,162 @@
+--- a/net/minecraft/server/level/ChunkHolder.java
++++ b/net/minecraft/server/level/ChunkHolder.java
+@@ -27,6 +_,7 @@
+ import net.minecraft.world.level.chunk.LevelChunkSection;
+ import net.minecraft.world.level.chunk.status.ChunkStatus;
+ import net.minecraft.world.level.lighting.LevelLightEngine;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ChunkHolder extends GenerationChunkHolder {
+@@ -36,9 +_,9 @@
+     private volatile CompletableFuture<ChunkResult<LevelChunk>> fullChunkFuture = UNLOADED_LEVEL_CHUNK_FUTURE;
+     private volatile CompletableFuture<ChunkResult<LevelChunk>> tickingChunkFuture = UNLOADED_LEVEL_CHUNK_FUTURE;
+     private volatile CompletableFuture<ChunkResult<LevelChunk>> entityTickingChunkFuture = UNLOADED_LEVEL_CHUNK_FUTURE;
+-    private int oldTicketLevel;
+-    private int ticketLevel;
+-    private int queueLevel;
++    private volatile int oldTicketLevel;
++    private volatile int ticketLevel;
++    private volatile int queueLevel;
+     private boolean hasChangedSections;
+     private final @Nullable ShortSet[] changedBlocksPerSection;
+     private final BitSet blockChangedLightSectionFilter = new BitSet();
+@@ -46,10 +_,10 @@
+     private final LevelLightEngine lightEngine;
+     private final ChunkHolder.LevelChangeListener onLevelChange;
+     private final ChunkHolder.PlayerProvider playerProvider;
+-    private boolean wasAccessibleSinceLastSave;
+-    private CompletableFuture<?> pendingFullStateConfirmation = CompletableFuture.completedFuture(null);
+-    private CompletableFuture<?> sendSync = CompletableFuture.completedFuture(null);
+-    private CompletableFuture<?> saveSync = CompletableFuture.completedFuture(null);
++    private volatile boolean wasAccessibleSinceLastSave;
++    private volatile CompletableFuture<?> pendingFullStateConfirmation = CompletableFuture.completedFuture(null);
++    private volatile CompletableFuture<?> sendSync = CompletableFuture.completedFuture(null);
++    private volatile CompletableFuture<?> saveSync = CompletableFuture.completedFuture(null);
+ 
+     public ChunkHolder(
+         ChunkPos pos,
+@@ -91,11 +_,11 @@
+         return !this.sendSync.isDone() ? null : this.getTickingChunk();
+     }
+ 
+-    public CompletableFuture<?> getSendSyncFuture() {
++    public synchronized CompletableFuture<?> getSendSyncFuture() {
+         return this.sendSync;
+     }
+ 
+-    public void addSendDependency(CompletableFuture<?> sync) {
++    public synchronized void addSendDependency(CompletableFuture<?> sync) {
+         if (this.sendSync.isDone()) {
+             this.sendSync = sync;
+         } else {
+@@ -103,16 +_,16 @@
+         }
+     }
+ 
+-    public CompletableFuture<?> getSaveSyncFuture() {
++    public synchronized CompletableFuture<?> getSaveSyncFuture() {
+         return this.saveSync;
+     }
+ 
+-    public boolean isReadyForSaving() {
++    public synchronized boolean isReadyForSaving() {
+         return this.saveSync.isDone();
+     }
+ 
+     @Override
+-    protected void addSaveDependency(CompletableFuture<?> sync) {
++    protected synchronized void addSaveDependency(CompletableFuture<?> sync) {
+         if (this.saveSync.isDone()) {
+             this.saveSync = sync;
+         } else {
+@@ -120,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean blockChanged(BlockPos pos) {
++    public synchronized boolean blockChanged(BlockPos pos) {
+         LevelChunk chunk = this.getTickingChunk();
+         if (chunk == null) {
+             return false;
+@@ -139,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean sectionLightChanged(LightLayer layer, int chunkY) {
++    public synchronized boolean sectionLightChanged(LightLayer layer, int chunkY) {
+         ChunkAccess chunk = this.getChunkIfPresent(ChunkStatus.INITIALIZE_LIGHT);
+         if (chunk == null) {
+             return false;
+@@ -167,11 +_,11 @@
+         }
+     }
+ 
+-    public boolean hasChangesToBroadcast() {
++    public synchronized boolean hasChangesToBroadcast() {
+         return this.hasChangedSections || !this.skyChangedLightSectionFilter.isEmpty() || !this.blockChangedLightSectionFilter.isEmpty();
+     }
+ 
+-    public void broadcastChanges(LevelChunk chunk) {
++    public synchronized void broadcastChanges(LevelChunk chunk) {
+         if (this.hasChangesToBroadcast()) {
+             Level level = chunk.getLevel();
+             if (!this.skyChangedLightSectionFilter.isEmpty() || !this.blockChangedLightSectionFilter.isEmpty()) {
+@@ -230,28 +_,29 @@
+             if (packet != null) {
+                 this.broadcast(players, packet);
+             }
++            net.neoforged.neoforge.attachment.AttachmentSync.syncBlockEntityUpdates(blockEntity, players);
+         }
+     }
+ 
+     private void broadcast(List<ServerPlayer> players, Packet<?> packet) {
+-        players.forEach(player -> player.connection.send(packet));
++        players.forEach(player -> RegionizedWorldGuard.sendToPlayer(player, packet));
+     }
+ 
+     @Override
+-    public int getTicketLevel() {
++    public synchronized int getTicketLevel() {
+         return this.ticketLevel;
+     }
+ 
+     @Override
+-    public int getQueueLevel() {
++    public synchronized int getQueueLevel() {
+         return this.queueLevel;
+     }
+ 
+-    private void setQueueLevel(int queueLevel) {
++    private synchronized void setQueueLevel(int queueLevel) {
+         this.queueLevel = queueLevel;
+     }
+ 
+-    public void setTicketLevel(int ticketLevel) {
++    public synchronized void setTicketLevel(int ticketLevel) {
+         this.ticketLevel = ticketLevel;
+     }
+ 
+@@ -270,7 +_,7 @@
+         scheduler.onFullChunkStatusChange(this.pos, status);
+     }
+ 
+-    protected void updateFutures(ChunkMap scheduler, Executor mainThreadExecutor) {
++    protected synchronized void updateFutures(ChunkMap scheduler, Executor mainThreadExecutor) {
+         FullChunkStatus oldFullStatus = ChunkLevel.fullStatus(this.oldTicketLevel);
+         FullChunkStatus newFullStatus = ChunkLevel.fullStatus(this.ticketLevel);
+         boolean wasAccessible = oldFullStatus.isOrAfter(FullChunkStatus.FULL);
+@@ -325,11 +_,11 @@
+         this.oldTicketLevel = this.ticketLevel;
+     }
+ 
+-    public boolean wasAccessibleSinceLastSave() {
++    public synchronized boolean wasAccessibleSinceLastSave() {
+         return this.wasAccessibleSinceLastSave;
+     }
+ 
+-    public void refreshAccessibility() {
++    public synchronized void refreshAccessibility() {
+         this.wasAccessibleSinceLastSave = ChunkLevel.fullStatus(this.ticketLevel).isOrAfter(FullChunkStatus.FULL);
+     }
+ 

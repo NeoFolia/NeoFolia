@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/entity/ai/goal/TryFindWaterGoal.java
++++ b/net/minecraft/world/entity/ai/goal/TryFindWaterGoal.java
+@@ -4,6 +_,7 @@
+ import net.minecraft.tags.FluidTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.entity.PathfinderMob;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TryFindWaterGoal extends Goal {
+     private final PathfinderMob mob;
+@@ -13,12 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        return this.mob.onGround() && !this.mob.level().getFluidState(this.mob.blockPosition()).is(FluidTags.WATER);
++    public synchronized boolean canUse() {
++        BlockPos mobPos = this.mob.blockPosition();
++        return this.mob.onGround() && this.canReadBlock(mobPos) && !this.mob.level().getFluidState(mobPos).is(FluidTags.WATER);
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         BlockPos waterPos = null;
+ 
+         for (BlockPos pos : BlockPos.betweenClosed(
+@@ -29,8 +_,8 @@
+             this.mob.getBlockY(),
+             Mth.floor(this.mob.getZ() + 2.0)
+         )) {
+-            if (this.mob.level().getFluidState(pos).is(FluidTags.WATER)) {
+-                waterPos = pos;
++            if (this.canReadBlock(pos) && this.mob.level().getFluidState(pos).is(FluidTags.WATER)) {
++                waterPos = pos.immutable();
+                 break;
+             }
+         }
+@@ -38,5 +_,9 @@
+         if (waterPos != null) {
+             this.mob.getMoveControl().setWantedPosition(waterPos.getX(), waterPos.getY(), waterPos.getZ(), 1.0);
+         }
++    }
++
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.mob.level(), pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

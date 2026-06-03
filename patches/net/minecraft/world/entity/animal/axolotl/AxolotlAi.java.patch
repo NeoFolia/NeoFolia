@@ -1,0 +1,13 @@
+--- a/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
++++ b/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
+@@ -132,8 +_,8 @@
+     private static boolean canSetWalkTargetFromLookTarget(LivingEntity body) {
+         Level level = body.level();
+         Optional<PositionTracker> lookTarget = body.getBrain().getMemory(MemoryModuleType.LOOK_TARGET);
+-        if (lookTarget.isPresent()) {
+-            BlockPos pos = lookTarget.get().currentBlockPosition();
++        if (lookTarget.filter(target -> target.isVisibleBy(body)).isPresent()) {
++            BlockPos pos = lookTarget.orElseThrow().currentBlockPosition();
+             return level.isWaterAt(pos) == body.isInWater();
+         } else {
+             return false;

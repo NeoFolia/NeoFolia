@@ -1,0 +1,18 @@
+--- a/net/minecraft/world/scores/PlayerScores.java
++++ b/net/minecraft/world/scores/PlayerScores.java
+@@ -3,7 +_,6 @@
+ import it.unimi.dsi.fastutil.objects.Object2IntMap;
+ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
+-import java.util.Collections;
+ import java.util.Map;
+ import java.util.function.Consumer;
+ import org.jspecify.annotations.Nullable;
+@@ -42,6 +_,6 @@
+     }
+ 
+     Map<Objective, Score> listRawScores() {
+-        return Collections.unmodifiableMap(this.scores);
++        return Map.copyOf(this.scores);
+     }
+ }

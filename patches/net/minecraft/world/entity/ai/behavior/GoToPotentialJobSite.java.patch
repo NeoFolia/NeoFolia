@@ -1,0 +1,78 @@
+--- a/net/minecraft/world/entity/ai/behavior/GoToPotentialJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/GoToPotentialJobSite.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.entity.ai.village.poi.PoiManager;
+ import net.minecraft.world.entity.npc.villager.Villager;
+ import net.minecraft.world.entity.schedule.Activity;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class GoToPotentialJobSite extends Behavior<Villager> {
+     private static final int TICKS_UNTIL_TIMEOUT = 1200;
+@@ -20,35 +_,57 @@
+         this.speedModifier = speedModifier;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+         return body.getBrain()
+             .getActiveNonCoreActivity()
+             .map(activity -> activity == Activity.IDLE || activity == Activity.WORK || activity == Activity.PLAY)
+             .orElse(true);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return body.getBrain().hasMemoryValue(MemoryModuleType.POTENTIAL_JOB_SITE);
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
+-        BehaviorUtils.setWalkAndLookTargetMemories(body, body.getBrain().getMemory(MemoryModuleType.POTENTIAL_JOB_SITE).get().pos(), this.speedModifier, 1);
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
++        body.getBrain()
++            .getMemory(MemoryModuleType.POTENTIAL_JOB_SITE)
++            .ifPresent(globalPos -> BehaviorUtils.setWalkAndLookTargetMemories(body, globalPos.pos(), this.speedModifier, 1));
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         Optional<GlobalPos> potentialJobSitePos = body.getBrain().getMemory(MemoryModuleType.POTENTIAL_JOB_SITE);
+         potentialJobSitePos.ifPresent(globalPos -> {
+-            BlockPos pos = globalPos.pos();
++            BlockPos pos = globalPos.pos().immutable();
+             ServerLevel serverLevel = level.getServer().getLevel(globalPos.dimension());
+             if (serverLevel != null) {
+-                PoiManager manager = serverLevel.getPoiManager();
+-                if (manager.exists(pos, p -> true)) {
+-                    manager.release(pos);
++                if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(
++                    serverLevel, pos, "Villager potential job site release", () -> releasePotentialJobSite(serverLevel, pos)
++                )) {
++                    return;
+                 }
+ 
+-                level.debugSynchronizers().updatePoi(pos);
++                releasePotentialJobSite(serverLevel, pos);
+             }
+         });
++        erasePotentialJobSiteOnEntityRegion(level, body);
++    }
++
++    private static void releasePotentialJobSite(ServerLevel poiLevel, BlockPos pos) {
++        PoiManager manager = poiLevel.getPoiManager();
++        if (manager.exists(pos, p -> true)) {
++            manager.release(pos);
++        }
++
++        poiLevel.debugSynchronizers().updatePoi(pos);
++    }
++
++    private static void erasePotentialJobSiteOnEntityRegion(ServerLevel level, Villager body) {
++        if (RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(
++            level, body, "Villager potential job site memory erase", () -> erasePotentialJobSiteOnEntityRegion(level, body)
++        )) {
++            return;
++        }
++
+         body.getBrain().eraseMemory(MemoryModuleType.POTENTIAL_JOB_SITE);
+     }
+ }

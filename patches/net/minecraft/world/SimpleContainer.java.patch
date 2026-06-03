@@ -1,0 +1,174 @@
+--- a/net/minecraft/world/SimpleContainer.java
++++ b/net/minecraft/world/SimpleContainer.java
+@@ -26,18 +_,18 @@
+     }
+ 
+     @Override
+-    public ItemStack getItem(int slot) {
++    public synchronized ItemStack getItem(int slot) {
+         return slot >= 0 && slot < this.items.size() ? this.items.get(slot) : ItemStack.EMPTY;
+     }
+ 
+-    public List<ItemStack> removeAllItems() {
++    public synchronized List<ItemStack> removeAllItems() {
+         List<ItemStack> itemsRemoved = this.items.stream().filter(item -> !item.isEmpty()).collect(Collectors.toList());
+         this.clearContent();
+         return itemsRemoved;
+     }
+ 
+     @Override
+-    public ItemStack removeItem(int slot, int count) {
++    public synchronized ItemStack removeItem(int slot, int count) {
+         ItemStack result = ContainerHelper.removeItem(this.items, slot, count);
+         if (!result.isEmpty()) {
+             this.setChanged();
+@@ -46,7 +_,7 @@
+         return result;
+     }
+ 
+-    public ItemStack removeItemType(Item itemType, int count) {
++    public synchronized ItemStack removeItemType(Item itemType, int count) {
+         ItemStack removed = new ItemStack(itemType, 0);
+ 
+         for (int slot = this.size - 1; slot >= 0; slot--) {
+@@ -68,7 +_,7 @@
+         return removed;
+     }
+ 
+-    public ItemStack addItem(ItemStack itemStack) {
++    public synchronized ItemStack addItem(ItemStack itemStack) {
+         if (itemStack.isEmpty()) {
+             return ItemStack.EMPTY;
+         } else {
+@@ -83,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean canAddItem(ItemStack itemStack) {
++    public synchronized boolean canAddItem(ItemStack itemStack) {
+         boolean hasSpace = false;
+ 
+         for (ItemStack targetStack : this.items) {
+@@ -97,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack removeItemNoUpdate(int slot) {
++    public synchronized ItemStack removeItemNoUpdate(int slot) {
+         ItemStack itemStack = this.items.get(slot);
+         if (itemStack.isEmpty()) {
+             return ItemStack.EMPTY;
+@@ -108,23 +_,29 @@
+     }
+ 
+     @Override
+-    public void setItem(int slot, ItemStack itemStack) {
++    public synchronized void setItem(int slot, ItemStack itemStack) {
++        setItem(slot, itemStack, false);
++    }
++
++    @Override
++    public synchronized void setItem(int slot, ItemStack itemStack, boolean insideTransaction) {
+         this.items.set(slot, itemStack);
+         itemStack.limitSize(this.getMaxStackSize(itemStack));
++        if (!insideTransaction)
+         this.setChanged();
+     }
+ 
+     @Override
+-    public void setChanged() {
++    public synchronized void setChanged() {
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return this.size;
+     }
+ 
+     @Override
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         for (ItemStack itemStack : this.items) {
+             if (!itemStack.isEmpty()) {
+                 return false;
+@@ -135,29 +_,29 @@
+     }
+ 
+     @Override
+-    public boolean stillValid(Player player) {
++    public synchronized boolean stillValid(Player player) {
+         return true;
+     }
+ 
+     @Override
+-    public void clearContent() {
++    public synchronized void clearContent() {
+         this.items.clear();
+         this.setChanged();
+     }
+ 
+     @Override
+-    public void fillStackedContents(StackedItemContents contents) {
++    public synchronized void fillStackedContents(StackedItemContents contents) {
+         for (ItemStack itemStack : this.items) {
+             contents.accountStack(itemStack);
+         }
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return this.items.stream().filter(item -> !item.isEmpty()).toList().toString();
+     }
+ 
+-    private void moveItemToEmptySlots(ItemStack sourceStack) {
++    private synchronized void moveItemToEmptySlots(ItemStack sourceStack) {
+         for (int slot = 0; slot < this.size; slot++) {
+             ItemStack targetStack = this.getItem(slot);
+             if (targetStack.isEmpty()) {
+@@ -167,7 +_,7 @@
+         }
+     }
+ 
+-    private void moveItemToOccupiedSlotsWithSameType(ItemStack sourceStack) {
++    private synchronized void moveItemToOccupiedSlotsWithSameType(ItemStack sourceStack) {
+         for (int slot = 0; slot < this.size; slot++) {
+             ItemStack targetStack = this.getItem(slot);
+             if (ItemStack.isSameItemSameComponents(targetStack, sourceStack)) {
+@@ -179,7 +_,7 @@
+         }
+     }
+ 
+-    private void moveItemsBetweenStacks(ItemStack sourceStack, ItemStack targetStack) {
++    private synchronized void moveItemsBetweenStacks(ItemStack sourceStack, ItemStack targetStack) {
+         int maxCount = this.getMaxStackSize(targetStack);
+         int diff = Math.min(sourceStack.getCount(), maxCount - targetStack.getCount());
+         if (diff > 0) {
+@@ -189,7 +_,7 @@
+         }
+     }
+ 
+-    public void fromItemList(ValueInput.TypedInputList<ItemStack> items) {
++    public synchronized void fromItemList(ValueInput.TypedInputList<ItemStack> items) {
+         this.clearContent();
+ 
+         for (ItemStack stack : items) {
+@@ -197,7 +_,7 @@
+         }
+     }
+ 
+-    public void storeAsItemList(ValueOutput.TypedOutputList<ItemStack> output) {
++    public synchronized void storeAsItemList(ValueOutput.TypedOutputList<ItemStack> output) {
+         for (int i = 0; i < this.getContainerSize(); i++) {
+             ItemStack itemStack = this.getItem(i);
+             if (!itemStack.isEmpty()) {
+@@ -206,7 +_,7 @@
+         }
+     }
+ 
+-    public NonNullList<ItemStack> getItems() {
++    public synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ }

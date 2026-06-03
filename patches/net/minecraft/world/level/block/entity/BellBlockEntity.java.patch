@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/level/block/entity/BellBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BellBlockEntity.java
+@@ -16,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.mutable.MutableInt;
+ 
+ public class BellBlockEntity extends BlockEntity {
+@@ -103,7 +_,8 @@
+         if (this.level.getGameTime() > this.lastRingTimestamp + 60L || this.nearbyEntities == null) {
+             this.lastRingTimestamp = this.level.getGameTime();
+             AABB aabb = new AABB(blockPos).inflate(48.0);
+-            this.nearbyEntities = this.level.getEntitiesOfClass(LivingEntity.class, aabb);
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level, aabb);
++            this.nearbyEntities = regionBox == null ? List.of() : this.level.getEntitiesOfClass(LivingEntity.class, regionBox);
+         }
+ 
+         if (!this.level.isClientSide()) {

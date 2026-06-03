@@ -1,0 +1,618 @@
+--- a/net/minecraft/server/commands/ItemCommands.java
++++ b/net/minecraft/server/commands/ItemCommands.java
+@@ -4,6 +_,7 @@
+ import com.google.common.collect.Maps;
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.Dynamic3CommandExceptionType;
+@@ -73,25 +_,10 @@
+                                                     Commands.literal("with")
+                                                         .then(
+                                                             Commands.argument("item", ItemArgument.item(context))
+-                                                                .executes(
+-                                                                    c -> setBlockItem(
+-                                                                        c.getSource(),
+-                                                                        BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                        SlotArgument.getSlot(c, "slot"),
+-                                                                        ItemArgument.getItem(c, "item").createItemStack(1)
+-                                                                    )
+-                                                                )
++                                                                .executes(c -> setBlockItem(c, false))
+                                                                 .then(
+                                                                     Commands.argument("count", IntegerArgumentType.integer(1, 99))
+-                                                                        .executes(
+-                                                                            c -> setBlockItem(
+-                                                                                c.getSource(),
+-                                                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                                ItemArgument.getItem(c, "item")
+-                                                                                    .createItemStack(IntegerArgumentType.getInteger(c, "count"))
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> setBlockItem(c, true))
+                                                                 )
+                                                         )
+                                                 )
+@@ -103,27 +_,10 @@
+                                                                     Commands.argument("source", BlockPosArgument.blockPos())
+                                                                         .then(
+                                                                             Commands.argument("sourceSlot", SlotArgument.slot())
+-                                                                                .executes(
+-                                                                                    c -> blockToBlock(
+-                                                                                        c.getSource(),
+-                                                                                        BlockPosArgument.getLoadedBlockPos(c, "source"),
+-                                                                                        SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                        BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                                        SlotArgument.getSlot(c, "slot")
+-                                                                                    )
+-                                                                                )
++                                                                                .executes(c -> blockToBlock(c, false))
+                                                                                 .then(
+                                                                                     Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
+-                                                                                        .executes(
+-                                                                                            c -> blockToBlock(
+-                                                                                                (CommandSourceStack)c.getSource(),
+-                                                                                                BlockPosArgument.getLoadedBlockPos(c, "source"),
+-                                                                                                SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                                                ResourceOrIdArgument.getLootModifier(c, "modifier")
+-                                                                                            )
+-                                                                                        )
++                                                                                        .executes(c -> blockToBlock(c, true))
+                                                                                 )
+                                                                         )
+                                                                 )
+@@ -134,27 +_,10 @@
+                                                                     Commands.argument("source", EntityArgument.entity())
+                                                                         .then(
+                                                                             Commands.argument("sourceSlot", SlotArgument.slot())
+-                                                                                .executes(
+-                                                                                    c -> entityToBlock(
+-                                                                                        c.getSource(),
+-                                                                                        EntityArgument.getEntity(c, "source"),
+-                                                                                        SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                        BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                                        SlotArgument.getSlot(c, "slot")
+-                                                                                    )
+-                                                                                )
++                                                                                .executes(c -> entityToBlock(c, false))
+                                                                                 .then(
+                                                                                     Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
+-                                                                                        .executes(
+-                                                                                            c -> entityToBlock(
+-                                                                                                (CommandSourceStack)c.getSource(),
+-                                                                                                EntityArgument.getEntity(c, "source"),
+-                                                                                                SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                                                ResourceOrIdArgument.getLootModifier(c, "modifier")
+-                                                                                            )
+-                                                                                        )
++                                                                                        .executes(c -> entityToBlock(c, true))
+                                                                                 )
+                                                                         )
+                                                                 )
+@@ -173,25 +_,10 @@
+                                                     Commands.literal("with")
+                                                         .then(
+                                                             Commands.argument("item", ItemArgument.item(context))
+-                                                                .executes(
+-                                                                    c -> setEntityItem(
+-                                                                        c.getSource(),
+-                                                                        EntityArgument.getEntities(c, "targets"),
+-                                                                        SlotArgument.getSlot(c, "slot"),
+-                                                                        ItemArgument.getItem(c, "item").createItemStack(1)
+-                                                                    )
+-                                                                )
++                                                                .executes(c -> setEntityItem(c, false))
+                                                                 .then(
+                                                                     Commands.argument("count", IntegerArgumentType.integer(1, 99))
+-                                                                        .executes(
+-                                                                            c -> setEntityItem(
+-                                                                                c.getSource(),
+-                                                                                EntityArgument.getEntities(c, "targets"),
+-                                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                                ItemArgument.getItem(c, "item")
+-                                                                                    .createItemStack(IntegerArgumentType.getInteger(c, "count"))
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> setEntityItem(c, true))
+                                                                 )
+                                                         )
+                                                 )
+@@ -203,27 +_,10 @@
+                                                                     Commands.argument("source", BlockPosArgument.blockPos())
+                                                                         .then(
+                                                                             Commands.argument("sourceSlot", SlotArgument.slot())
+-                                                                                .executes(
+-                                                                                    c -> blockToEntities(
+-                                                                                        c.getSource(),
+-                                                                                        BlockPosArgument.getLoadedBlockPos(c, "source"),
+-                                                                                        SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                        EntityArgument.getEntities(c, "targets"),
+-                                                                                        SlotArgument.getSlot(c, "slot")
+-                                                                                    )
+-                                                                                )
++                                                                                .executes(c -> blockToEntities(c, false))
+                                                                                 .then(
+                                                                                     Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
+-                                                                                        .executes(
+-                                                                                            c -> blockToEntities(
+-                                                                                                (CommandSourceStack)c.getSource(),
+-                                                                                                BlockPosArgument.getLoadedBlockPos(c, "source"),
+-                                                                                                SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                                EntityArgument.getEntities(c, "targets"),
+-                                                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                                                ResourceOrIdArgument.getLootModifier(c, "modifier")
+-                                                                                            )
+-                                                                                        )
++                                                                                        .executes(c -> blockToEntities(c, true))
+                                                                                 )
+                                                                         )
+                                                                 )
+@@ -234,27 +_,10 @@
+                                                                     Commands.argument("source", EntityArgument.entity())
+                                                                         .then(
+                                                                             Commands.argument("sourceSlot", SlotArgument.slot())
+-                                                                                .executes(
+-                                                                                    c -> entityToEntities(
+-                                                                                        c.getSource(),
+-                                                                                        EntityArgument.getEntity(c, "source"),
+-                                                                                        SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                        EntityArgument.getEntities(c, "targets"),
+-                                                                                        SlotArgument.getSlot(c, "slot")
+-                                                                                    )
+-                                                                                )
++                                                                                .executes(c -> entityToEntities(c, false))
+                                                                                 .then(
+                                                                                     Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
+-                                                                                        .executes(
+-                                                                                            c -> entityToEntities(
+-                                                                                                (CommandSourceStack)c.getSource(),
+-                                                                                                EntityArgument.getEntity(c, "source"),
+-                                                                                                SlotArgument.getSlot(c, "sourceSlot"),
+-                                                                                                EntityArgument.getEntities(c, "targets"),
+-                                                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                                                ResourceOrIdArgument.getLootModifier(c, "modifier")
+-                                                                                            )
+-                                                                                        )
++                                                                                        .executes(c -> entityToEntities(c, true))
+                                                                                 )
+                                                                         )
+                                                                 )
+@@ -273,15 +_,8 @@
+                                         .then(
+                                             Commands.argument("slot", SlotArgument.slot())
+                                                 .then(
+-                                                    Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
+-                                                        .executes(
+-                                                            c -> modifyBlockItem(
+-                                                                (CommandSourceStack)c.getSource(),
+-                                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                ResourceOrIdArgument.getLootModifier(c, "modifier")
+-                                                            )
+-                                                        )
++                                            Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
++                                                        .executes(ItemCommands::modifyBlockItem)
+                                                 )
+                                         )
+                                 )
+@@ -293,50 +_,78 @@
+                                         .then(
+                                             Commands.argument("slot", SlotArgument.slot())
+                                                 .then(
+-                                                    Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
+-                                                        .executes(
+-                                                            c -> modifyEntityItem(
+-                                                                (CommandSourceStack)c.getSource(),
+-                                                                EntityArgument.getEntities(c, "targets"),
+-                                                                SlotArgument.getSlot(c, "slot"),
+-                                                                ResourceOrIdArgument.getLootModifier(c, "modifier")
+-                                                            )
+-                                                        )
++                                            Commands.argument("modifier", ResourceOrIdArgument.lootModifier(context))
++                                                        .executes(ItemCommands::modifyEntityItem)
+                                                 )
+                                         )
+                                 )
+                         )
+                 )
++        );
++    }
++
++    private static int modifyBlockItem(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> modifyBlockItem(context))) {
++            return 0;
++        }
++
++        return modifyBlockItem(
++            source,
++            BlockPosArgument.getLoadedBlockPos(context, "pos"),
++            SlotArgument.getSlot(context, "slot"),
++            ResourceOrIdArgument.getLootModifier(context, "modifier")
+         );
+     }
+ 
+     private static int modifyBlockItem(CommandSourceStack source, BlockPos pos, int slot, Holder<LootItemFunction> modifier) throws CommandSyntaxException {
+-        Container container = getContainer(source, pos, ERROR_TARGET_NOT_A_CONTAINER);
+-        if (slot >= 0 && slot < container.getContainerSize()) {
+-            ItemStack itemStack = applyModifier(source, modifier, container.getItem(slot));
++        ItemStack current = getBlockItem(source, pos, slot, ERROR_TARGET_NOT_A_CONTAINER, ERROR_TARGET_INAPPLICABLE_SLOT);
++        ItemStack itemStack = applyModifier(source, modifier, current);
++        RegionizedCommandHelper.callOnRegionThrowing(source, source.getLevel(), pos, () -> {
++            Container container = getContainer(source, pos, ERROR_TARGET_NOT_A_CONTAINER);
++            validateSlot(slot, container, ERROR_TARGET_INAPPLICABLE_SLOT);
+             container.setItem(slot, itemStack);
+-            source.sendSuccess(
+-                () -> Component.translatable("commands.item.block.set.success", pos.getX(), pos.getY(), pos.getZ(), itemStack.getDisplayName()), true
+-            );
+-            return 1;
+-        } else {
+-            throw ERROR_TARGET_INAPPLICABLE_SLOT.create(slot);
++            return null;
++        });
++        source.sendSuccess(
++            () -> Component.translatable("commands.item.block.set.success", pos.getX(), pos.getY(), pos.getZ(), itemStack.getDisplayName()), true
++        );
++        return 1;
++    }
++
++    private static int modifyEntityItem(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> modifyEntityItem(context))) {
++            return 0;
+         }
++
++        return modifyEntityItem(
++            source,
++            EntityArgument.getEntities(context, "targets"),
++            SlotArgument.getSlot(context, "slot"),
++            ResourceOrIdArgument.getLootModifier(context, "modifier")
++        );
+     }
+ 
+     private static int modifyEntityItem(CommandSourceStack source, Collection<? extends Entity> entities, int slot, Holder<LootItemFunction> modifier) throws CommandSyntaxException {
+-        Map<Entity, ItemStack> changedEntities = Maps.newHashMapWithExpectedSize(entities.size());
++        List<EntityItemResult> changedEntities = Lists.newArrayListWithCapacity(entities.size());
+ 
+         for (Entity entity : entities) {
+-            SlotAccess slotAccess = entity.getSlot(slot);
+-            if (slotAccess != null) {
+-                ItemStack itemStack = applyModifier(source, modifier, slotAccess.get().copy());
+-                if (slotAccess.set(itemStack)) {
+-                    changedEntities.put(entity, itemStack);
+-                    if (entity instanceof ServerPlayer serverPlayer) {
+-                        serverPlayer.containerMenu.broadcastChanges();
++            EntityItemResult result = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> {
++                SlotAccess slotAccess = entity.getSlot(slot);
++                if (slotAccess != null) {
++                    ItemStack itemStack = applyModifier(source, modifier, slotAccess.get().copy());
++                    if (slotAccess.set(itemStack)) {
++                        if (entity instanceof ServerPlayer serverPlayer) {
++                            serverPlayer.broadcastActiveContainerChanges();
++                        }
++                        return new EntityItemResult(true, entity.getDisplayName(), itemStack);
+                     }
+                 }
++                return new EntityItemResult(false, entity.getDisplayName(), ItemStack.EMPTY);
++            });
++            if (result.success()) {
++                changedEntities.add(result);
+             }
+         }
+ 
+@@ -344,9 +_,9 @@
+             throw ERROR_TARGET_NO_CHANGES.create(slot);
+         } else {
+             if (changedEntities.size() == 1) {
+-                Entry<Entity, ItemStack> e = changedEntities.entrySet().iterator().next();
++                EntityItemResult result = changedEntities.getFirst();
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.item.entity.set.success.single", e.getKey().getDisplayName(), e.getValue().getDisplayName()), true
++                    () -> Component.translatable("commands.item.entity.set.success.single", result.entityName(), result.itemStack().getDisplayName()), true
+                 );
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.item.entity.set.success.multiple", changedEntities.size()), true);
+@@ -356,17 +_,31 @@
+         }
+     }
+ 
++    private static int setBlockItem(CommandContext<CommandSourceStack> context, boolean hasCount) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setBlockItem(context, hasCount))) {
++            return 0;
++        }
++
++        return setBlockItem(
++            source,
++            BlockPosArgument.getLoadedBlockPos(context, "pos"),
++            SlotArgument.getSlot(context, "slot"),
++            ItemArgument.getItem(context, "item").createItemStack(hasCount ? IntegerArgumentType.getInteger(context, "count") : 1)
++        );
++    }
++
+     private static int setBlockItem(CommandSourceStack source, BlockPos pos, int slot, ItemStack itemStack) throws CommandSyntaxException {
+-        Container container = getContainer(source, pos, ERROR_TARGET_NOT_A_CONTAINER);
+-        if (slot >= 0 && slot < container.getContainerSize()) {
++        RegionizedCommandHelper.callOnRegionThrowing(source, source.getLevel(), pos, () -> {
++            Container container = getContainer(source, pos, ERROR_TARGET_NOT_A_CONTAINER);
++            validateSlot(slot, container, ERROR_TARGET_INAPPLICABLE_SLOT);
+             container.setItem(slot, itemStack);
+-            source.sendSuccess(
+-                () -> Component.translatable("commands.item.block.set.success", pos.getX(), pos.getY(), pos.getZ(), itemStack.getDisplayName()), true
+-            );
+-            return 1;
+-        } else {
+-            throw ERROR_TARGET_INAPPLICABLE_SLOT.create(slot);
+-        }
++            return null;
++        });
++        source.sendSuccess(
++            () -> Component.translatable("commands.item.block.set.success", pos.getX(), pos.getY(), pos.getZ(), itemStack.getDisplayName()), true
++        );
++        return 1;
+     }
+ 
+     static Container getContainer(CommandSourceStack source, BlockPos pos, Dynamic3CommandExceptionType exceptionType) throws CommandSyntaxException {
+@@ -377,16 +_,42 @@
+         }
+     }
+ 
++    private static void validateSlot(int slot, Container container, DynamicCommandExceptionType exceptionType) throws CommandSyntaxException {
++        if (slot < 0 || slot >= container.getContainerSize()) {
++            throw exceptionType.create(slot);
++        }
++    }
++
++    private static int setEntityItem(CommandContext<CommandSourceStack> context, boolean hasCount) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setEntityItem(context, hasCount))) {
++            return 0;
++        }
++
++        return setEntityItem(
++            source,
++            EntityArgument.getEntities(context, "targets"),
++            SlotArgument.getSlot(context, "slot"),
++            ItemArgument.getItem(context, "item").createItemStack(hasCount ? IntegerArgumentType.getInteger(context, "count") : 1)
++        );
++    }
++
+     private static int setEntityItem(CommandSourceStack source, Collection<? extends Entity> entities, int slot, ItemStack itemStack) throws CommandSyntaxException {
+-        List<Entity> changedEntities = Lists.newArrayListWithCapacity(entities.size());
++        List<EntityItemResult> changedEntities = Lists.newArrayListWithCapacity(entities.size());
+ 
+         for (Entity entity : entities) {
+-            SlotAccess slotAccess = entity.getSlot(slot);
+-            if (slotAccess != null && slotAccess.set(itemStack.copy())) {
+-                changedEntities.add(entity);
+-                if (entity instanceof ServerPlayer serverPlayer) {
+-                    serverPlayer.containerMenu.broadcastChanges();
++            EntityItemResult result = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> {
++                SlotAccess slotAccess = entity.getSlot(slot);
++                if (slotAccess != null && slotAccess.set(itemStack.copy())) {
++                    if (entity instanceof ServerPlayer serverPlayer) {
++                        serverPlayer.broadcastActiveContainerChanges();
++                    }
++                    return new EntityItemResult(true, entity.getDisplayName(), itemStack);
+                 }
++                return new EntityItemResult(false, entity.getDisplayName(), ItemStack.EMPTY);
++            });
++            if (result.success()) {
++                changedEntities.add(result);
+             }
+         }
+ 
+@@ -394,9 +_,10 @@
+             throw ERROR_TARGET_NO_CHANGES_KNOWN_ITEM.create(itemStack.getDisplayName(), slot);
+         } else {
+             if (changedEntities.size() == 1) {
++                EntityItemResult result = changedEntities.getFirst();
+                 source.sendSuccess(
+                     () -> Component.translatable(
+-                        "commands.item.entity.set.success.single", changedEntities.getFirst().getDisplayName(), itemStack.getDisplayName()
++                        "commands.item.entity.set.success.single", result.entityName(), itemStack.getDisplayName()
+                     ),
+                     true
+                 );
+@@ -410,6 +_,32 @@
+         }
+     }
+ 
++    private static int blockToEntities(CommandContext<CommandSourceStack> context, boolean hasModifier) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> blockToEntities(context, hasModifier))) {
++            return 0;
++        }
++
++        if (hasModifier) {
++            return blockToEntities(
++                source,
++                BlockPosArgument.getLoadedBlockPos(context, "source"),
++                SlotArgument.getSlot(context, "sourceSlot"),
++                EntityArgument.getEntities(context, "targets"),
++                SlotArgument.getSlot(context, "slot"),
++                ResourceOrIdArgument.getLootModifier(context, "modifier")
++            );
++        }
++
++        return blockToEntities(
++            source,
++            BlockPosArgument.getLoadedBlockPos(context, "source"),
++            SlotArgument.getSlot(context, "sourceSlot"),
++            EntityArgument.getEntities(context, "targets"),
++            SlotArgument.getSlot(context, "slot")
++        );
++    }
++
+     private static int blockToEntities(
+         CommandSourceStack source, BlockPos sourcePos, int sourceSlot, Collection<? extends Entity> targetEntities, int targetSlot
+     ) throws CommandSyntaxException {
+@@ -427,6 +_,32 @@
+         return setEntityItem(source, targetEntities, targetSlot, applyModifier(source, modifier, getBlockItem(source, sourcePos, sourceSlot)));
+     }
+ 
++    private static int blockToBlock(CommandContext<CommandSourceStack> context, boolean hasModifier) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> blockToBlock(context, hasModifier))) {
++            return 0;
++        }
++
++        if (hasModifier) {
++            return blockToBlock(
++                source,
++                BlockPosArgument.getLoadedBlockPos(context, "source"),
++                SlotArgument.getSlot(context, "sourceSlot"),
++                BlockPosArgument.getLoadedBlockPos(context, "pos"),
++                SlotArgument.getSlot(context, "slot"),
++                ResourceOrIdArgument.getLootModifier(context, "modifier")
++            );
++        }
++
++        return blockToBlock(
++            source,
++            BlockPosArgument.getLoadedBlockPos(context, "source"),
++            SlotArgument.getSlot(context, "sourceSlot"),
++            BlockPosArgument.getLoadedBlockPos(context, "pos"),
++            SlotArgument.getSlot(context, "slot")
++        );
++    }
++
+     private static int blockToBlock(CommandSourceStack source, BlockPos sourcePos, int sourceSlot, BlockPos targetPos, int targetSlot) throws CommandSyntaxException {
+         return setBlockItem(source, targetPos, targetSlot, getBlockItem(source, sourcePos, sourceSlot));
+     }
+@@ -437,20 +_,72 @@
+         return setBlockItem(source, targetPos, targetSlot, applyModifier(source, modifier, getBlockItem(source, sourcePos, sourceSlot)));
+     }
+ 
++    private static int entityToBlock(CommandContext<CommandSourceStack> context, boolean hasModifier) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> entityToBlock(context, hasModifier))) {
++            return 0;
++        }
++
++        if (hasModifier) {
++            return entityToBlock(
++                source,
++                EntityArgument.getEntity(context, "source"),
++                SlotArgument.getSlot(context, "sourceSlot"),
++                BlockPosArgument.getLoadedBlockPos(context, "pos"),
++                SlotArgument.getSlot(context, "slot"),
++                ResourceOrIdArgument.getLootModifier(context, "modifier")
++            );
++        }
++
++        return entityToBlock(
++            source,
++            EntityArgument.getEntity(context, "source"),
++            SlotArgument.getSlot(context, "sourceSlot"),
++            BlockPosArgument.getLoadedBlockPos(context, "pos"),
++            SlotArgument.getSlot(context, "slot")
++        );
++    }
++
+     private static int entityToBlock(CommandSourceStack source, Entity sourceEntity, int sourceSlot, BlockPos targetPos, int targetSlot) throws CommandSyntaxException {
+-        return setBlockItem(source, targetPos, targetSlot, getItemInSlot(sourceEntity, sourceSlot));
++        return setBlockItem(source, targetPos, targetSlot, getEntityItemInSlot(source, sourceEntity, sourceSlot));
+     }
+ 
+     private static int entityToBlock(
+         CommandSourceStack source, Entity sourceEntity, int sourceSlot, BlockPos targetPos, int targetSlot, Holder<LootItemFunction> modifier
+     ) throws CommandSyntaxException {
+-        return setBlockItem(source, targetPos, targetSlot, applyModifier(source, modifier, getItemInSlot(sourceEntity, sourceSlot)));
++        return setBlockItem(source, targetPos, targetSlot, applyModifier(source, modifier, getEntityItemInSlot(source, sourceEntity, sourceSlot)));
++    }
++
++    private static int entityToEntities(CommandContext<CommandSourceStack> context, boolean hasModifier) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> entityToEntities(context, hasModifier))) {
++            return 0;
++        }
++
++        if (hasModifier) {
++            return entityToEntities(
++                source,
++                EntityArgument.getEntity(context, "source"),
++                SlotArgument.getSlot(context, "sourceSlot"),
++                EntityArgument.getEntities(context, "targets"),
++                SlotArgument.getSlot(context, "slot"),
++                ResourceOrIdArgument.getLootModifier(context, "modifier")
++            );
++        }
++
++        return entityToEntities(
++            source,
++            EntityArgument.getEntity(context, "source"),
++            SlotArgument.getSlot(context, "sourceSlot"),
++            EntityArgument.getEntities(context, "targets"),
++            SlotArgument.getSlot(context, "slot")
++        );
+     }
+ 
+     private static int entityToEntities(
+         CommandSourceStack source, Entity sourceEntity, int sourceSlot, Collection<? extends Entity> targetEntities, int targetSlot
+     ) throws CommandSyntaxException {
+-        return setEntityItem(source, targetEntities, targetSlot, getItemInSlot(sourceEntity, sourceSlot));
++        return setEntityItem(source, targetEntities, targetSlot, getEntityItemInSlot(source, sourceEntity, sourceSlot));
+     }
+ 
+     private static int entityToEntities(
+@@ -461,14 +_,14 @@
+         int targetSlot,
+         Holder<LootItemFunction> modifier
+     ) throws CommandSyntaxException {
+-        return setEntityItem(source, targetEntities, targetSlot, applyModifier(source, modifier, getItemInSlot(sourceEntity, sourceSlot)));
++        return setEntityItem(source, targetEntities, targetSlot, applyModifier(source, modifier, getEntityItemInSlot(source, sourceEntity, sourceSlot)));
+     }
+ 
+     private static ItemStack applyModifier(CommandSourceStack source, Holder<LootItemFunction> modifier, ItemStack item) {
+         ServerLevel level = source.getLevel();
+         LootParams lootParams = new LootParams.Builder(level)
+             .withParameter(LootContextParams.ORIGIN, source.getPosition())
+-            .withOptionalParameter(LootContextParams.THIS_ENTITY, source.getEntity())
++            .withOptionalParameter(LootContextParams.THIS_ENTITY, RegionizedCommandHelper.sourceEntityFor(source, level))
+             .create(LootContextParamSets.COMMAND);
+         LootContext context = new LootContext.Builder(lootParams).create(Optional.empty());
+         context.pushVisitedElement(LootContext.createVisitedEntry(modifier.value()));
+@@ -486,8 +_,33 @@
+         }
+     }
+ 
++    private static ItemStack getEntityItemInSlot(CommandSourceStack source, Entity entity, int slot) throws CommandSyntaxException {
++        return RegionizedCommandHelper.callOnEntityRegionThrowing(source, entity, () -> getItemInSlot(entity, slot));
++    }
++
+     private static ItemStack getBlockItem(CommandSourceStack source, BlockPos pos, int slot) throws CommandSyntaxException {
+-        Container container = getContainer(source, pos, ERROR_SOURCE_NOT_A_CONTAINER);
+-        return getItemInSlot(container, slot);
++        return getBlockItem(source, pos, slot, ERROR_SOURCE_NOT_A_CONTAINER);
++    }
++
++    private static ItemStack getBlockItem(CommandSourceStack source, BlockPos pos, int slot, Dynamic3CommandExceptionType exceptionType)
++        throws CommandSyntaxException {
++        return getBlockItem(source, pos, slot, exceptionType, ERROR_SOURCE_INAPPLICABLE_SLOT);
++    }
++
++    private static ItemStack getBlockItem(
++        CommandSourceStack source, BlockPos pos, int slot, Dynamic3CommandExceptionType containerExceptionType, DynamicCommandExceptionType slotExceptionType
++    ) throws CommandSyntaxException {
++        return RegionizedCommandHelper.callOnRegionThrowing(source, source.getLevel(), pos, () -> {
++            Container container = getContainer(source, pos, containerExceptionType);
++            SlotAccess slotAccess = container.getSlot(slot);
++            if (slotAccess == null) {
++                throw slotExceptionType.create(slot);
++            }
++
++            return slotAccess.get().copy();
++        });
++    }
++
++    private record EntityItemResult(boolean success, Component entityName, ItemStack itemStack) {
+     }
+ }

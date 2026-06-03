@@ -1,0 +1,64 @@
+--- a/net/minecraft/world/entity/animal/equine/Llama.java
++++ b/net/minecraft/world/entity/animal/equine/Llama.java
+@@ -62,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Llama extends AbstractChestedHorse implements RangedAttackMob {
+@@ -241,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         this.setRandomStrength(random);
+         Llama.Variant variant;
+         if (groupData instanceof Llama.LlamaGroupData) {
+@@ -384,20 +_,26 @@
+     }
+ 
+     public void leaveCaravan() {
+-        if (this.caravanHead != null) {
+-            this.caravanHead.caravanTail = null;
++        Llama caravanHead = this.getCaravanHead();
++        if (caravanHead != null) {
++            caravanHead.caravanTail = null;
+         }
+ 
+         this.caravanHead = null;
+     }
+ 
+     public void joinCaravan(Llama tail) {
+-        this.caravanHead = tail;
+-        this.caravanHead.caravanTail = this;
++        Llama caravanHead = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), tail);
++        if (caravanHead == null) {
++            return;
++        }
++
++        this.caravanHead = caravanHead;
++        caravanHead.caravanTail = this;
+     }
+ 
+     public boolean hasCaravanTail() {
+-        return this.caravanTail != null;
++        return this.getCaravanTail() != null;
+     }
+ 
+     public boolean inCaravan() {
+@@ -405,7 +_,11 @@
+     }
+ 
+     public @Nullable Llama getCaravanHead() {
+-        return this.caravanHead;
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.caravanHead);
++    }
++
++    private @Nullable Llama getCaravanTail() {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.caravanTail);
+     }
+ 
+     @Override

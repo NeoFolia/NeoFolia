@@ -1,0 +1,147 @@
+--- a/net/minecraft/world/entity/ai/attributes/AttributeMap.java
++++ b/net/minecraft/world/entity/ai/attributes/AttributeMap.java
+@@ -23,50 +_,70 @@
+         this.supplier = supplier;
+     }
+ 
+-    private void onAttributeModified(AttributeInstance attributeInstance) {
++    private synchronized void onAttributeModified(AttributeInstance attributeInstance) {
+         this.attributesToUpdate.add(attributeInstance);
+         if (attributeInstance.getAttribute().value().isClientSyncable()) {
+             this.attributesToSync.add(attributeInstance);
+         }
+     }
+ 
+-    public Set<AttributeInstance> getAttributesToSync() {
+-        return this.attributesToSync;
+-    }
+-
+-    public Set<AttributeInstance> getAttributesToUpdate() {
+-        return this.attributesToUpdate;
+-    }
+-
+-    public Collection<AttributeInstance> getSyncableAttributes() {
++    public synchronized Set<AttributeInstance> getAttributesToSync() {
++        return new ObjectOpenHashSet<>(this.attributesToSync);
++    }
++
++    public synchronized Set<AttributeInstance> getAttributesToUpdate() {
++        return new ObjectOpenHashSet<>(this.attributesToUpdate);
++    }
++
++    public synchronized Set<AttributeInstance> getAttributesToSyncAndClear() {
++        Set<AttributeInstance> result = new ObjectOpenHashSet<>(this.attributesToSync);
++        this.attributesToSync.clear();
++        return result;
++    }
++
++    public synchronized Set<AttributeInstance> getAttributesToUpdateAndClear() {
++        Set<AttributeInstance> result = new ObjectOpenHashSet<>(this.attributesToUpdate);
++        this.attributesToUpdate.clear();
++        return result;
++    }
++
++    public synchronized Collection<AttributeInstance> getSyncableAttributes() {
+         return this.attributes.values().stream().filter(instance -> instance.getAttribute().value().isClientSyncable()).collect(Collectors.toList());
+     }
+ 
+-    public @Nullable AttributeInstance getInstance(Holder<Attribute> attribute) {
++    public synchronized @Nullable AttributeInstance getInstance(Holder<Attribute> attribute) {
+         return this.attributes.computeIfAbsent(attribute, key -> this.supplier.createInstance(this::onAttributeModified, (Holder<Attribute>)key));
+     }
+ 
+-    public boolean hasAttribute(Holder<Attribute> attribute) {
++    private synchronized @Nullable AttributeInstance getInstanceIfPresent(Holder<Attribute> attribute) {
++        return this.attributes.get(attribute);
++    }
++
++    private synchronized Collection<AttributeInstance> attributesSnapshot() {
++        return List.copyOf(this.attributes.values());
++    }
++
++    public synchronized boolean hasAttribute(Holder<Attribute> attribute) {
+         return this.attributes.get(attribute) != null || this.supplier.hasAttribute(attribute);
+     }
+ 
+     public boolean hasModifier(Holder<Attribute> attribute, Identifier id) {
+-        AttributeInstance attributeInstance = this.attributes.get(attribute);
++        AttributeInstance attributeInstance = this.getInstanceIfPresent(attribute);
+         return attributeInstance != null ? attributeInstance.getModifier(id) != null : this.supplier.hasModifier(attribute, id);
+     }
+ 
+     public double getValue(Holder<Attribute> attribute) {
+-        AttributeInstance ownAttribute = this.attributes.get(attribute);
++        AttributeInstance ownAttribute = this.getInstanceIfPresent(attribute);
+         return ownAttribute != null ? ownAttribute.getValue() : this.supplier.getValue(attribute);
+     }
+ 
+     public double getBaseValue(Holder<Attribute> attribute) {
+-        AttributeInstance ownAttribute = this.attributes.get(attribute);
++        AttributeInstance ownAttribute = this.getInstanceIfPresent(attribute);
+         return ownAttribute != null ? ownAttribute.getBaseValue() : this.supplier.getBaseValue(attribute);
+     }
+ 
+     public double getModifierValue(Holder<Attribute> attribute, Identifier id) {
+-        AttributeInstance attributeInstance = this.attributes.get(attribute);
++        AttributeInstance attributeInstance = this.getInstanceIfPresent(attribute);
+         return attributeInstance != null ? attributeInstance.getModifier(id).amount() : this.supplier.getModifierValue(attribute, id);
+     }
+ 
+@@ -82,7 +_,7 @@
+ 
+     public void removeAttributeModifiers(Multimap<Holder<Attribute>, AttributeModifier> modifiers) {
+         modifiers.asMap().forEach((attribute, attributeModifiers) -> {
+-            AttributeInstance instance = this.attributes.get(attribute);
++            AttributeInstance instance = this.getInstanceIfPresent((Holder<Attribute>)attribute);
+             if (instance != null) {
+                 attributeModifiers.forEach(attributeModifier -> instance.removeModifier(attributeModifier.id()));
+             }
+@@ -90,7 +_,7 @@
+     }
+ 
+     public void assignAllValues(AttributeMap other) {
+-        other.attributes.values().forEach(otherInstance -> {
++        other.attributesSnapshot().forEach(otherInstance -> {
+             AttributeInstance selfInstance = this.getInstance(otherInstance.getAttribute());
+             if (selfInstance != null) {
+                 selfInstance.replaceFrom(otherInstance);
+@@ -99,7 +_,7 @@
+     }
+ 
+     public void assignBaseValues(AttributeMap other) {
+-        other.attributes.values().forEach(otherInstance -> {
++        other.attributesSnapshot().forEach(otherInstance -> {
+             AttributeInstance selfInstance = this.getInstance(otherInstance.getAttribute());
+             if (selfInstance != null) {
+                 selfInstance.setBaseValue(otherInstance.getBaseValue());
+@@ -108,7 +_,7 @@
+     }
+ 
+     public void assignPermanentModifiers(AttributeMap other) {
+-        other.attributes.values().forEach(otherInstance -> {
++        other.attributesSnapshot().forEach(otherInstance -> {
+             AttributeInstance selfInstance = this.getInstance(otherInstance.getAttribute());
+             if (selfInstance != null) {
+                 selfInstance.addPermanentModifiers(otherInstance.getPermanentModifiers());
+@@ -120,7 +_,7 @@
+         if (!this.supplier.hasAttribute(attribute)) {
+             return false;
+         } else {
+-            AttributeInstance instance = this.attributes.get(attribute);
++            AttributeInstance instance = this.getInstanceIfPresent(attribute);
+             if (instance != null) {
+                 instance.setBaseValue(this.supplier.getBaseValue(attribute));
+             }
+@@ -130,9 +_,10 @@
+     }
+ 
+     public List<AttributeInstance.Packed> pack() {
+-        List<AttributeInstance.Packed> result = new ArrayList<>(this.attributes.values().size());
++        Collection<AttributeInstance> attributes = this.attributesSnapshot();
++        List<AttributeInstance.Packed> result = new ArrayList<>(attributes.size());
+ 
+-        for (AttributeInstance attribute : this.attributes.values()) {
++        for (AttributeInstance attribute : attributes) {
+             result.add(attribute.pack());
+         }
+ 

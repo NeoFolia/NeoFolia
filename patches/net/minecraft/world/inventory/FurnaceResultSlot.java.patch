@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/inventory/FurnaceResultSlot.java
++++ b/net/minecraft/world/inventory/FurnaceResultSlot.java
+@@ -16,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean mayPlace(ItemStack itemStack) {
++    public synchronized boolean mayPlace(ItemStack itemStack) {
+         return false;
+     }
+ 
+     @Override
+-    public ItemStack remove(int amount) {
++    public synchronized ItemStack remove(int amount) {
+         if (this.hasItem()) {
+             this.removeCount = this.removeCount + Math.min(amount, this.getItem().getCount());
+         }
+@@ -30,24 +_,27 @@
+     }
+ 
+     @Override
+-    public void onTake(Player player, ItemStack carried) {
++    public synchronized void onTake(Player player, ItemStack carried) {
+         this.checkTakeAchievements(carried);
+         super.onTake(player, carried);
+     }
+ 
+     @Override
+-    protected void onQuickCraft(ItemStack picked, int count) {
++    protected synchronized void onQuickCraft(ItemStack picked, int count) {
+         this.removeCount += count;
+         this.checkTakeAchievements(picked);
+     }
+ 
+     @Override
+-    protected void checkTakeAchievements(ItemStack carried) {
++    protected synchronized void checkTakeAchievements(ItemStack carried) {
+         carried.onCraftedBy(this.player, this.removeCount);
+         if (this.player instanceof ServerPlayer serverPlayer && this.container instanceof AbstractFurnaceBlockEntity abstractFurnaceBlockEntity) {
+             abstractFurnaceBlockEntity.awardUsedRecipesAndPopExperience(serverPlayer);
+         }
+ 
++        if (this.removeCount != 0) {
++            net.neoforged.neoforge.event.EventHooks.firePlayerSmeltedEvent(this.player, carried, this.removeCount);
++        }
+         this.removeCount = 0;
+     }
+ }

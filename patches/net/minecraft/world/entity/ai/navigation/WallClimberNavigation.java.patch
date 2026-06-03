@@ -1,0 +1,46 @@
+--- a/net/minecraft/world/entity/ai/navigation/WallClimberNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/WallClimberNavigation.java
+@@ -15,19 +_,19 @@
+     }
+ 
+     @Override
+-    public Path createPath(BlockPos pos, int reachRange) {
++    public synchronized Path createPath(BlockPos pos, int reachRange) {
+         this.pathToPosition = pos;
+         return super.createPath(pos, reachRange);
+     }
+ 
+     @Override
+-    public Path createPath(Entity target, int reachRange) {
++    public synchronized Path createPath(Entity target, int reachRange) {
+         this.pathToPosition = target.blockPosition();
+         return super.createPath(target, reachRange);
+     }
+ 
+     @Override
+-    public boolean moveTo(Entity target, double speedModifier) {
++    public synchronized boolean moveTo(Entity target, double speedModifier) {
+         Path newPath = this.createPath(target, 0);
+         if (newPath != null) {
+             return this.moveTo(newPath, speedModifier);
+@@ -39,16 +_,17 @@
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         if (!this.isDone()) {
+             super.tick();
+         } else {
+             if (this.pathToPosition != null) {
+-                if (!this.pathToPosition.closerToCenterThan(this.mob.position(), this.mob.getBbWidth())
++                // FORGE: Fix MC-94054
++                if (!this.pathToPosition.closerToCenterThan(this.mob.position(), Math.max(this.mob.getBbWidth(), 1.0D))
+                     && (
+                         !(this.mob.getY() > this.pathToPosition.getY())
+                             || !BlockPos.containing(this.pathToPosition.getX(), this.mob.getY(), this.pathToPosition.getZ())
+-                                .closerToCenterThan(this.mob.position(), this.mob.getBbWidth())
++                                .closerToCenterThan(this.mob.position(), Math.max(this.mob.getBbWidth(), 1.0D))
+                     )) {
+                     this.mob
+                         .getMoveControl()

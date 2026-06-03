@@ -1,0 +1,74 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftBanListServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftBanListServiceImpl.java
+@@ -19,45 +_,69 @@
+ 
+     @Override
+     public void addUserBan(UserBanListEntry ban, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.addUserBan(ban, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Add player '{}' to banlist. Reason: '{}'", ban.getDisplayName(), ban.getReasonMessage().getString());
+         this.server.getPlayerList().getBans().add(ban);
+     }
+ 
+     @Override
+     public void removeUserBan(NameAndId nameAndId, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.removeUserBan(nameAndId, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Remove player '{}' from banlist", nameAndId);
+         this.server.getPlayerList().getBans().remove(nameAndId);
+     }
+ 
+     @Override
+     public void clearUserBans(ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.clearUserBans(clientInfo))) {
++            return;
++        }
++
+         this.server.getPlayerList().getBans().clear();
+     }
+ 
+     @Override
+     public Collection<UserBanListEntry> getUserBanEntries() {
+-        return this.server.getPlayerList().getBans().getEntries();
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getBans().getEntries());
+     }
+ 
+     @Override
+     public Collection<IpBanListEntry> getIpBanEntries() {
+-        return this.server.getPlayerList().getIpBans().getEntries();
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getIpBans().getEntries());
+     }
+ 
+     @Override
+     public void addIpBan(IpBanListEntry ipBanEntry, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.addIpBan(ipBanEntry, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Add ip '{}' to ban list", ipBanEntry.getUser());
+         this.server.getPlayerList().getIpBans().add(ipBanEntry);
+     }
+ 
+     @Override
+     public void clearIpBans(ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.clearIpBans(clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Clear ip ban list");
+         this.server.getPlayerList().getIpBans().clear();
+     }
+ 
+     @Override
+     public void removeIpBan(String ip, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.removeIpBan(ip, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Remove ip '{}' from ban list", ip);
+         this.server.getPlayerList().getIpBans().remove(ip);
+     }

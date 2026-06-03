@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/item/component/KineticWeapon.java
++++ b/net/minecraft/world/item/component/KineticWeapon.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.level.ClipContext;
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public record KineticWeapon(
+     int contactCooldownTicks,
+@@ -139,7 +_,10 @@
+             if (affected) {
+                 livingEntity.level().broadcastEntityEvent(livingEntity, (byte)2);
+                 if (livingEntity instanceof ServerPlayer player) {
+-                    CriteriaTriggers.SPEAR_MOBS_TRIGGER.trigger(player, livingEntity.stabbedEntities(e -> e instanceof LivingEntity));
++                    int stabbedLivingEntities = livingEntity.stabbedEntities(e -> e instanceof LivingEntity);
++                    RegionizedWorldGuard.executeOnPlayerRegion(
++                        player, () -> CriteriaTriggers.SPEAR_MOBS_TRIGGER.trigger(player, stabbedLivingEntities)
++                    );
+                 }
+             }
+         }

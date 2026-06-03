@@ -1,0 +1,13 @@
+--- a/net/minecraft/world/level/chunk/BulkSectionAccess.java
++++ b/net/minecraft/world/level/chunk/BulkSectionAccess.java
+@@ -26,6 +_,10 @@
+             if (this.lastSection == null || this.lastSectionKey != sectionKey) {
+                 this.lastSection = this.acquiredSections.computeIfAbsent(sectionKey, key -> {
+                     ChunkAccess chunk = this.level.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
++                    if (chunk == null) {
++                        return null;
++                    }
++
+                     LevelChunkSection result = chunk.getSection(sectionIndex);
+                     result.acquire();
+                     return result;

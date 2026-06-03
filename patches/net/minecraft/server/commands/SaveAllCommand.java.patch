@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/SaveAllCommand.java
++++ b/net/minecraft/server/commands/SaveAllCommand.java
+@@ -21,6 +_,10 @@
+     }
+ 
+     private static int saveAll(CommandSourceStack source, boolean flush) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> saveAll(source, flush))) {
++            return 0;
++        }
++
+         source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
+         MinecraftServer server = source.getServer();
+         boolean success = server.saveEverything(true, flush, true);

@@ -1,0 +1,105 @@
+--- a/net/minecraft/server/commands/LocateCommand.java
++++ b/net/minecraft/server/commands/LocateCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.google.common.base.Stopwatch;
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
+ import com.mojang.datafixers.util.Pair;
+@@ -61,31 +_,53 @@
+                     Commands.literal("structure")
+                         .then(
+                             Commands.argument("structure", ResourceOrTagKeyArgument.resourceOrTagKey(Registries.STRUCTURE))
+-                                .executes(
+-                                    c -> locateStructure(
+-                                        c.getSource(),
+-                                        ResourceOrTagKeyArgument.getResourceOrTagKey(c, "structure", Registries.STRUCTURE, ERROR_STRUCTURE_INVALID)
+-                                    )
+-                                )
++                                .executes(LocateCommand::locateStructure)
+                         )
+                 )
+                 .then(
+                     Commands.literal("biome")
+                         .then(
+                             Commands.argument("biome", ResourceOrTagArgument.resourceOrTag(context, Registries.BIOME))
+-                                .executes(c -> locateBiome(c.getSource(), ResourceOrTagArgument.getResourceOrTag(c, "biome", Registries.BIOME)))
++                                .executes(LocateCommand::locateBiome)
+                         )
+                 )
+                 .then(
+                     Commands.literal("poi")
+                         .then(
+                             Commands.argument("poi", ResourceOrTagArgument.resourceOrTag(context, Registries.POINT_OF_INTEREST_TYPE))
+-                                .executes(c -> locatePoi(c.getSource(), ResourceOrTagArgument.getResourceOrTag(c, "poi", Registries.POINT_OF_INTEREST_TYPE)))
++                                .executes(LocateCommand::locatePoi)
+                         )
+                 )
+         );
+     }
+ 
++    private static int locateStructure(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> locateStructure(context))) {
++            return 0;
++        }
++
++        return locateStructure(source, ResourceOrTagKeyArgument.getResourceOrTagKey(context, "structure", Registries.STRUCTURE, ERROR_STRUCTURE_INVALID));
++    }
++
++    private static int locateBiome(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> locateBiome(context))) {
++            return 0;
++        }
++
++        return locateBiome(source, ResourceOrTagArgument.getResourceOrTag(context, "biome", Registries.BIOME));
++    }
++
++    private static int locatePoi(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> locatePoi(context))) {
++            return 0;
++        }
++
++        return locatePoi(source, ResourceOrTagArgument.getResourceOrTag(context, "poi", Registries.POINT_OF_INTEREST_TYPE));
++    }
++
+     private static Optional<? extends HolderSet.ListBacked<Structure>> getHolders(
+         ResourceOrTagKeyArgument.Result<Structure> resourceOrTag, Registry<Structure> registry
+     ) {
+@@ -93,6 +_,10 @@
+     }
+ 
+     private static int locateStructure(CommandSourceStack source, ResourceOrTagKeyArgument.Result<Structure> resourceOrTag) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> locateStructure(source, resourceOrTag))) {
++            return 0;
++        }
++
+         Registry<Structure> registry = source.getLevel().registryAccess().lookupOrThrow(Registries.STRUCTURE);
+         HolderSet<Structure> target = (HolderSet<Structure>)getHolders(resourceOrTag, registry)
+             .orElseThrow(() -> ERROR_STRUCTURE_INVALID.create(resourceOrTag.asPrintable()));
+@@ -111,6 +_,10 @@
+     }
+ 
+     private static int locateBiome(CommandSourceStack source, ResourceOrTagArgument.Result<Biome> elementOrTag) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> locateBiome(source, elementOrTag))) {
++            return 0;
++        }
++
+         BlockPos sourcePos = BlockPos.containing(source.getPosition());
+         Stopwatch stopwatch = Stopwatch.createStarted(Util.TICKER);
+         Pair<BlockPos, Holder<Biome>> nearest = source.getLevel().findClosestBiome3d(elementOrTag, sourcePos, 6400, 32, 64);
+@@ -123,6 +_,10 @@
+     }
+ 
+     private static int locatePoi(CommandSourceStack source, ResourceOrTagArgument.Result<PoiType> resourceOrTag) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> locatePoi(source, resourceOrTag))) {
++            return 0;
++        }
++
+         BlockPos sourcePos = BlockPos.containing(source.getPosition());
+         ServerLevel serverLevel = source.getLevel();
+         Stopwatch stopwatch = Stopwatch.createStarted(Util.TICKER);

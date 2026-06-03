@@ -1,0 +1,27 @@
+--- a/net/minecraft/world/level/block/FrogspawnBlock.java
++++ b/net/minecraft/world/level/block/FrogspawnBlock.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.level.material.Fluids;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class FrogspawnBlock extends Block {
+     public static final MapCodec<FrogspawnBlock> CODEC = simpleCodec(FrogspawnBlock::new);
+@@ -58,11 +_,15 @@
+ 
+     @Override
+     protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
+-        level.scheduleTick(pos, this, getFrogspawnHatchDelay(level.getRandom()));
++        level.scheduleTick(pos, this, getFrogspawnHatchDelay(frogspawnRandom(level)));
+     }
+ 
+     private static int getFrogspawnHatchDelay(RandomSource random) {
+         return random.nextInt(minHatchTickDelay, maxHatchTickDelay);
++    }
++
++    private static RandomSource frogspawnRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     @Override

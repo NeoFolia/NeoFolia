@@ -1,0 +1,59 @@
+--- a/net/minecraft/world/entity/animal/fish/Pufferfish.java
++++ b/net/minecraft/world/entity/animal/fish/Pufferfish.java
+@@ -26,6 +_,8 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class Pufferfish extends AbstractFish {
+     private static final EntityDataAccessor<Integer> PUFF_STATE = SynchedEntityData.defineId(Pufferfish.class, EntityDataSerializers.INT);
+@@ -127,8 +_,12 @@
+     public void aiStep() {
+         super.aiStep();
+         if (this.level() instanceof ServerLevel level && this.isAlive() && this.getPuffState() > 0) {
+-            for (Mob mob : this.level()
+-                .getEntitiesOfClass(Mob.class, this.getBoundingBox().inflate(0.3), target -> TARGETING_CONDITIONS.test(level, this, target))) {
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(0.3));
++            if (regionBox == null) {
++                return;
++            }
++
++            for (Mob mob : this.level().getEntitiesOfClass(Mob.class, regionBox, target -> TARGETING_CONDITIONS.test(level, this, target))) {
+                 if (mob.isAlive()) {
+                     this.touch(level, mob);
+                 }
+@@ -151,7 +_,7 @@
+             && puffState > 0
+             && player.hurtServer(serverPlayer.level(), this.damageSources().mobAttack(this), 1 + puffState)) {
+             if (!this.isSilent()) {
+-                serverPlayer.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.PUFFER_FISH_STING, 0.0F));
++                RegionizedWorldGuard.sendToPlayer(serverPlayer, new ClientboundGameEventPacket(ClientboundGameEventPacket.PUFFER_FISH_STING, 0.0F));
+             }
+ 
+             player.addEffect(new MobEffectInstance(MobEffects.POISON, 60 * puffState, 0), this);
+@@ -198,13 +_,16 @@
+ 
+         @Override
+         public boolean canUse() {
+-            List<LivingEntity> entities = this.fish
+-                .level()
+-                .getEntitiesOfClass(
+-                    LivingEntity.class,
+-                    this.fish.getBoundingBox().inflate(2.0),
+-                    target -> Pufferfish.TARGETING_CONDITIONS.test(getServerLevel(this.fish), this.fish, target)
+-                );
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.fish.level(), this.fish.getBoundingBox().inflate(2.0));
++            List<LivingEntity> entities = regionBox == null
++                ? List.of()
++                : this.fish
++                    .level()
++                    .getEntitiesOfClass(
++                        LivingEntity.class,
++                        regionBox,
++                        target -> Pufferfish.TARGETING_CONDITIONS.test(getServerLevel(this.fish), this.fish, target)
++                    );
+             return !entities.isEmpty();
+         }
+ 

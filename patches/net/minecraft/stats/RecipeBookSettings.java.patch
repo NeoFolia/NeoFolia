@@ -1,0 +1,129 @@
+--- a/net/minecraft/stats/RecipeBookSettings.java
++++ b/net/minecraft/stats/RecipeBookSettings.java
+@@ -12,7 +_,8 @@
+ import net.minecraft.world.inventory.RecipeBookType;
+ 
+ public final class RecipeBookSettings {
+-    public static final StreamCodec<FriendlyByteBuf, RecipeBookSettings> STREAM_CODEC = StreamCodec.composite(
++    // Neo: We need RegistryFriendlyByteBuf to detect the connection type for Vanilla client/server compatibility
++    public static final StreamCodec<net.minecraft.network.RegistryFriendlyByteBuf, RecipeBookSettings> STREAM_CODEC = StreamCodec.composite(
+         RecipeBookSettings.TypeSettings.STREAM_CODEC,
+         o -> o.crafting,
+         RecipeBookSettings.TypeSettings.STREAM_CODEC,
+@@ -21,6 +_,9 @@
+         o -> o.blastFurnace,
+         RecipeBookSettings.TypeSettings.STREAM_CODEC,
+         o -> o.smoker,
++        // Neo: Also send settings for modded recipe book types
++        net.neoforged.neoforge.common.CommonHooks.MODDED_RECIPE_BOOK_TYPES_SETTINGS_STREAM_CODEC,
++        settings -> settings.moddedSettings,
+         RecipeBookSettings::new
+     );
+     public static final MapCodec<RecipeBookSettings> MAP_CODEC = RecordCodecBuilder.mapCodec(
+@@ -29,6 +_,7 @@
+                 RecipeBookSettings.TypeSettings.FURNACE_MAP_CODEC.forGetter(o -> o.furnace),
+                 RecipeBookSettings.TypeSettings.BLAST_FURNACE_MAP_CODEC.forGetter(o -> o.blastFurnace),
+                 RecipeBookSettings.TypeSettings.SMOKER_MAP_CODEC.forGetter(o -> o.smoker)
++                , net.neoforged.neoforge.common.CommonHooks.makeModdedRecipeBookTypesSettingsCodec().forGetter(settings -> settings.moddedSettings)
+             )
+             .apply(i, RecipeBookSettings::new)
+     );
+@@ -36,6 +_,7 @@
+     private RecipeBookSettings.TypeSettings furnace;
+     private RecipeBookSettings.TypeSettings blastFurnace;
+     private RecipeBookSettings.TypeSettings smoker;
++    private final java.util.Map<RecipeBookType, RecipeBookSettings.TypeSettings> moddedSettings;
+ 
+     public RecipeBookSettings() {
+         this(
+@@ -52,23 +_,35 @@
+         RecipeBookSettings.TypeSettings blastFurnace,
+         RecipeBookSettings.TypeSettings smoker
+     ) {
++        this(crafting, furnace, blastFurnace, smoker, new java.util.EnumMap<>(RecipeBookType.class));
++    }
++
++    private RecipeBookSettings(
++            RecipeBookSettings.TypeSettings crafting,
++            RecipeBookSettings.TypeSettings furnace,
++            RecipeBookSettings.TypeSettings blastFurnace,
++            RecipeBookSettings.TypeSettings smoker,
++            java.util.Map<RecipeBookType, RecipeBookSettings.TypeSettings> moddedSettings
++    ) {
+         this.crafting = crafting;
+         this.furnace = furnace;
+         this.blastFurnace = blastFurnace;
+         this.smoker = smoker;
++        this.moddedSettings = moddedSettings;
+     }
+ 
+     @VisibleForTesting
+-    public RecipeBookSettings.TypeSettings getSettings(RecipeBookType type) {
++    public synchronized RecipeBookSettings.TypeSettings getSettings(RecipeBookType type) {
+         return switch (type) {
+             case CRAFTING -> this.crafting;
+             case FURNACE -> this.furnace;
+             case BLAST_FURNACE -> this.blastFurnace;
+             case SMOKER -> this.smoker;
++            default -> this.moddedSettings.getOrDefault(type, RecipeBookSettings.TypeSettings.DEFAULT);
+         };
+     }
+ 
+-    private void updateSettings(RecipeBookType recipeBookType, UnaryOperator<RecipeBookSettings.TypeSettings> operator) {
++    private synchronized void updateSettings(RecipeBookType recipeBookType, UnaryOperator<RecipeBookSettings.TypeSettings> operator) {
+         switch (recipeBookType) {
+             case CRAFTING:
+                 this.crafting = operator.apply(this.crafting);
+@@ -81,34 +_,42 @@
+                 break;
+             case SMOKER:
+                 this.smoker = operator.apply(this.smoker);
++                break;
++            default:
++                this.moddedSettings.put(recipeBookType, operator.apply(this.moddedSettings.getOrDefault(recipeBookType, RecipeBookSettings.TypeSettings.DEFAULT)));
+         }
+     }
+ 
+-    public boolean isOpen(RecipeBookType type) {
++    public synchronized boolean isOpen(RecipeBookType type) {
+         return this.getSettings(type).open;
+     }
+ 
+-    public void setOpen(RecipeBookType type, boolean open) {
++    public synchronized void setOpen(RecipeBookType type, boolean open) {
+         this.updateSettings(type, s -> s.setOpen(open));
+     }
+ 
+-    public boolean isFiltering(RecipeBookType type) {
++    public synchronized boolean isFiltering(RecipeBookType type) {
+         return this.getSettings(type).filtering;
+     }
+ 
+-    public void setFiltering(RecipeBookType type, boolean filtering) {
++    public synchronized void setFiltering(RecipeBookType type, boolean filtering) {
+         this.updateSettings(type, s -> s.setFiltering(filtering));
+     }
+ 
+-    public RecipeBookSettings copy() {
+-        return new RecipeBookSettings(this.crafting, this.furnace, this.blastFurnace, this.smoker);
++    public synchronized RecipeBookSettings copy() {
++        return new RecipeBookSettings(this.crafting, this.furnace, this.blastFurnace, this.smoker, new java.util.EnumMap<>(this.moddedSettings));
+     }
+ 
+     public void replaceFrom(RecipeBookSettings other) {
+-        this.crafting = other.crafting;
+-        this.furnace = other.furnace;
+-        this.blastFurnace = other.blastFurnace;
+-        this.smoker = other.smoker;
++        RecipeBookSettings snapshot = other.copy();
++        synchronized (this) {
++            this.crafting = snapshot.crafting;
++            this.furnace = snapshot.furnace;
++            this.blastFurnace = snapshot.blastFurnace;
++            this.smoker = snapshot.smoker;
++            this.moddedSettings.clear();
++            this.moddedSettings.putAll(snapshot.moddedSettings);
++        }
+     }
+ 
+     public record TypeSettings(boolean open, boolean filtering) {

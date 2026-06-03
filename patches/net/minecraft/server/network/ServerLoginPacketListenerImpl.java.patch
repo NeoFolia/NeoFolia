@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -101,7 +_,7 @@
+     }
+ 
+     private boolean isPlayerAlreadyInWorld(GameProfile gameProfile) {
+-        return this.server.getPlayerList().getPlayer(gameProfile.id()) != null;
++        return this.server.getPlayerList().getAllPlayer(gameProfile.id()) != null;
+     }
+ 
+     @Override

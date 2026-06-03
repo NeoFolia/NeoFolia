@@ -1,0 +1,13 @@
+--- a/net/minecraft/network/protocol/game/ServerboundSetCommandMinecartPacket.java
++++ b/net/minecraft/network/protocol/game/ServerboundSetCommandMinecartPacket.java
+@@ -50,6 +_,10 @@
+         return entity instanceof MinecartCommandBlock ? ((MinecartCommandBlock)entity).getCommandBlock() : null;
+     }
+ 
++    public int getEntityId() {
++        return this.entity;
++    }
++
+     public String getCommand() {
+         return this.command;
+     }

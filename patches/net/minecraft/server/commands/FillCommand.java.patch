@@ -1,0 +1,124 @@
+--- a/net/minecraft/server/commands/FillCommand.java
++++ b/net/minecraft/server/commands/FillCommand.java
+@@ -55,13 +_,12 @@
+                                             Commands.literal("replace")
+                                                 .executes(
+                                                     c -> fillBlocks(
+-                                                        c.getSource(),
+-                                                        BoundingBox.fromCorners(
+-                                                            BlockPosArgument.getLoadedBlockPos(c, "from"), BlockPosArgument.getLoadedBlockPos(c, "to")
+-                                                        ),
+-                                                        BlockStateArgument.getBlock(c, "block"),
++                                                        c,
++                                                        c2 -> BlockPosArgument.getLoadedBlockPos(c2, "from"),
++                                                        c2 -> BlockPosArgument.getLoadedBlockPos(c2, "to"),
++                                                        c2 -> BlockStateArgument.getBlock(c2, "block"),
++                                                        c2 -> null,
+                                                         FillCommand.Mode.REPLACE,
+-                                                        null,
+                                                         false
+                                                     )
+                                                 )
+@@ -80,13 +_,12 @@
+                                             Commands.literal("keep")
+                                                 .executes(
+                                                     c -> fillBlocks(
+-                                                        c.getSource(),
+-                                                        BoundingBox.fromCorners(
+-                                                            BlockPosArgument.getLoadedBlockPos(c, "from"), BlockPosArgument.getLoadedBlockPos(c, "to")
+-                                                        ),
+-                                                        BlockStateArgument.getBlock(c, "block"),
++                                                        c,
++                                                        c2 -> BlockPosArgument.getLoadedBlockPos(c2, "from"),
++                                                        c2 -> BlockPosArgument.getLoadedBlockPos(c2, "to"),
++                                                        c2 -> BlockStateArgument.getBlock(c2, "block"),
++                                                        c2 -> b -> b.getLevel().isEmptyBlock(b.getPos()),
+                                                         FillCommand.Mode.REPLACE,
+-                                                        b -> b.getLevel().isEmptyBlock(b.getPos()),
+                                                         false
+                                                     )
+                                                 )
+@@ -106,57 +_,50 @@
+         FillCommand.NullableCommandFunction<CommandContext<CommandSourceStack>, Predicate<BlockInWorld>> filter
+     ) {
+         return builder.executes(
+-                c -> fillBlocks(
+-                    c.getSource(), BoundingBox.fromCorners(from.apply(c), to.apply(c)), block.apply(c), FillCommand.Mode.REPLACE, filter.apply(c), false
+-                )
++                c -> fillBlocks(c, from, to, block, filter, FillCommand.Mode.REPLACE, false)
+             )
+             .then(
+                 Commands.literal("outline")
+-                    .executes(
+-                        c -> fillBlocks(
+-                            c.getSource(),
+-                            BoundingBox.fromCorners(from.apply(c), to.apply(c)),
+-                            block.apply(c),
+-                            FillCommand.Mode.OUTLINE,
+-                            filter.apply(c),
+-                            false
+-                        )
+-                    )
++                    .executes(c -> fillBlocks(c, from, to, block, filter, FillCommand.Mode.OUTLINE, false))
+             )
+             .then(
+                 Commands.literal("hollow")
+-                    .executes(
+-                        c -> fillBlocks(
+-                            c.getSource(), BoundingBox.fromCorners(from.apply(c), to.apply(c)), block.apply(c), FillCommand.Mode.HOLLOW, filter.apply(c), false
+-                        )
+-                    )
++                    .executes(c -> fillBlocks(c, from, to, block, filter, FillCommand.Mode.HOLLOW, false))
+             )
+             .then(
+                 Commands.literal("destroy")
+-                    .executes(
+-                        c -> fillBlocks(
+-                            c.getSource(),
+-                            BoundingBox.fromCorners(from.apply(c), to.apply(c)),
+-                            block.apply(c),
+-                            FillCommand.Mode.DESTROY,
+-                            filter.apply(c),
+-                            false
+-                        )
+-                    )
++                    .executes(c -> fillBlocks(c, from, to, block, filter, FillCommand.Mode.DESTROY, false))
+             )
+             .then(
+                 Commands.literal("strict")
+-                    .executes(
+-                        c -> fillBlocks(
+-                            c.getSource(), BoundingBox.fromCorners(from.apply(c), to.apply(c)), block.apply(c), FillCommand.Mode.REPLACE, filter.apply(c), true
+-                        )
+-                    )
++                    .executes(c -> fillBlocks(c, from, to, block, filter, FillCommand.Mode.REPLACE, true))
+             );
+     }
+ 
+     private static int fillBlocks(
++        CommandContext<CommandSourceStack> context,
++        InCommandFunction<CommandContext<CommandSourceStack>, BlockPos> from,
++        InCommandFunction<CommandContext<CommandSourceStack>, BlockPos> to,
++        InCommandFunction<CommandContext<CommandSourceStack>, BlockInput> block,
++        FillCommand.NullableCommandFunction<CommandContext<CommandSourceStack>, Predicate<BlockInWorld>> filter,
++        FillCommand.Mode mode,
++        boolean strict
++    ) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> fillBlocks(context, from, to, block, filter, mode, strict))) {
++            return 0;
++        }
++
++        return fillBlocks(source, BoundingBox.fromCorners(from.apply(context), to.apply(context)), block.apply(context), mode, filter.apply(context), strict);
++    }
++
++    private static int fillBlocks(
+         CommandSourceStack source, BoundingBox region, BlockInput target, FillCommand.Mode mode, @Nullable Predicate<BlockInWorld> predicate, boolean strict
+     ) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> fillBlocks(source, region, target, mode, predicate, strict))) {
++            return 0;
++        }
++
+         long area = (long)region.getXSpan() * region.getYSpan() * region.getZSpan();
+         int limit = source.getLevel().getGameRules().get(GameRules.MAX_BLOCK_MODIFICATIONS);
+         if (area > limit) {

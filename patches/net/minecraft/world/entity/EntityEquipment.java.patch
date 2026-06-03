@@ -1,0 +1,92 @@
+--- a/net/minecraft/world/entity/EntityEquipment.java
++++ b/net/minecraft/world/entity/EntityEquipment.java
+@@ -1,7 +_,9 @@
+ package net.minecraft.world.entity;
+ 
+ import com.mojang.serialization.Codec;
++import java.util.ArrayList;
+ import java.util.EnumMap;
++import java.util.List;
+ import java.util.Map;
+ import java.util.Objects;
+ import java.util.Map.Entry;
+@@ -13,7 +_,7 @@
+         map.putAll((Map<? extends EquipmentSlot, ? extends ItemStack>)items);
+         return new EntityEquipment(map);
+     }, equipment -> {
+-        Map<EquipmentSlot, ItemStack> items = new EnumMap<>(equipment.items);
++        Map<EquipmentSlot, ItemStack> items = equipment.snapshotItems();
+         items.values().removeIf(ItemStack::isEmpty);
+         return items;
+     });
+@@ -27,15 +_,19 @@
+         this(new EnumMap<>(EquipmentSlot.class));
+     }
+ 
+-    public ItemStack set(EquipmentSlot slot, ItemStack itemStack) {
++    public synchronized ItemStack set(EquipmentSlot slot, ItemStack itemStack) {
+         return Objects.requireNonNullElse(this.items.put(slot, itemStack), ItemStack.EMPTY);
+     }
+ 
+-    public ItemStack get(EquipmentSlot slot) {
++    public synchronized ItemStack get(EquipmentSlot slot) {
+         return this.items.getOrDefault(slot, ItemStack.EMPTY);
+     }
+ 
+-    public boolean isEmpty() {
++    public synchronized ItemStack copy(EquipmentSlot slot) {
++        return this.get(slot).copy();
++    }
++
++    public synchronized boolean isEmpty() {
+         for (ItemStack item : this.items.values()) {
+             if (!item.isEmpty()) {
+                 return false;
+@@ -46,7 +_,7 @@
+     }
+ 
+     public void tick(Entity owner) {
+-        for (Entry<EquipmentSlot, ItemStack> entry : this.items.entrySet()) {
++        for (Entry<EquipmentSlot, ItemStack> entry : this.snapshotItems().entrySet()) {
+             ItemStack item = entry.getValue();
+             if (!item.isEmpty()) {
+                 item.inventoryTick(owner.level(), owner, entry.getKey());
+@@ -55,19 +_,33 @@
+     }
+ 
+     public void setAll(EntityEquipment equipment) {
++        EnumMap<EquipmentSlot, ItemStack> items = equipment.snapshotItems();
++        this.setAll(items);
++    }
++
++    private synchronized void setAll(EnumMap<EquipmentSlot, ItemStack> items) {
+         this.items.clear();
+-        this.items.putAll(equipment.items);
++        this.items.putAll(items);
+     }
+ 
+     public void dropAll(LivingEntity dropper) {
+-        for (ItemStack item : this.items.values()) {
++        List<ItemStack> itemsToDrop = this.drainItems();
++        for (ItemStack item : itemsToDrop) {
+             dropper.drop(item, true, false);
+         }
+-
+-        this.clear();
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.items.replaceAll((s, v) -> ItemStack.EMPTY);
++    }
++
++    private synchronized EnumMap<EquipmentSlot, ItemStack> snapshotItems() {
++        return new EnumMap<>(this.items);
++    }
++
++    private synchronized List<ItemStack> drainItems() {
++        List<ItemStack> result = new ArrayList<>(this.items.values());
++        this.clear();
++        return result;
+     }
+ }

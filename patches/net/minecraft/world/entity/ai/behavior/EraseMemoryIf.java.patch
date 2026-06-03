@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/EraseMemoryIf.java
++++ b/net/minecraft/world/entity/ai/behavior/EraseMemoryIf.java
+@@ -6,7 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ 
+ public class EraseMemoryIf {
+-    public static <E extends LivingEntity> BehaviorControl<E> create(Predicate<E> predicate, MemoryModuleType<?> memoryType) {
++    public static synchronized <E extends LivingEntity> BehaviorControl<E> create(Predicate<E> predicate, MemoryModuleType<?> memoryType) {
+         return BehaviorBuilder.create(i -> i.group(i.present(memoryType)).apply(i, memory -> (level, body, timestamp) -> {
+             if (predicate.test(body)) {
+                 memory.erase();

@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/ai/navigation/WaterBoundPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/WaterBoundPathNavigation.java
+@@ -24,36 +_,36 @@
+     }
+ 
+     @Override
+-    protected boolean canUpdatePath() {
++    protected synchronized boolean canUpdatePath() {
+         return this.allowBreaching || this.mob.isInLiquid();
+     }
+ 
+     @Override
+-    protected Vec3 getTempMobPos() {
++    protected synchronized Vec3 getTempMobPos() {
+         return new Vec3(this.mob.getX(), this.mob.getY(0.5), this.mob.getZ());
+     }
+ 
+     @Override
+-    protected double getGroundY(Vec3 target) {
++    protected synchronized double getGroundY(Vec3 target) {
+         return target.y;
+     }
+ 
+     @Override
+-    protected boolean canMoveDirectly(Vec3 startPos, Vec3 stopPos) {
++    protected synchronized boolean canMoveDirectly(Vec3 startPos, Vec3 stopPos) {
+         return isClearForMovementBetween(this.mob, startPos, stopPos, false);
+     }
+ 
+     @Override
+-    public boolean isStableDestination(BlockPos pos) {
+-        return !this.level.getBlockState(pos).isSolidRender();
+-    }
+-
+-    @Override
+-    public void setCanFloat(boolean canFloat) {
+-    }
+-
+-    @Override
+-    public boolean canNavigateGround() {
++    public synchronized boolean isStableDestination(BlockPos pos) {
++        return this.canReadBlock(pos) && !this.level.getBlockState(pos).isSolidRender();
++    }
++
++    @Override
++    public synchronized void setCanFloat(boolean canFloat) {
++    }
++
++    @Override
++    public synchronized boolean canNavigateGround() {
+         return false;
+     }
+ }

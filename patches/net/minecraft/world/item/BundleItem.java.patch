@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/item/BundleItem.java
++++ b/net/minecraft/world/item/BundleItem.java
+@@ -24,6 +_,7 @@
+ import net.minecraft.world.item.component.BundleContents;
+ import net.minecraft.world.item.component.TooltipDisplay;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.math.Fraction;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -58,7 +_,7 @@
+     @Override
+     public boolean overrideStackedOnOther(ItemStack self, Slot slot, ClickAction clickAction, Player player) {
+         BundleContents initialContents = self.get(DataComponents.BUNDLE_CONTENTS);
+-        if (initialContents == null) {
++        if (initialContents == null || self.getCount() != 1) {
+             return false;
+         } else {
+             ItemStack other = slot.getItem();
+@@ -95,6 +_,7 @@
+ 
+     @Override
+     public boolean overrideOtherStackedOnMe(ItemStack self, ItemStack other, Slot slot, ClickAction clickAction, Player player, SlotAccess carriedItem) {
++        if (self.getCount() != 1) return false;
+         if (clickAction == ClickAction.PRIMARY && other.isEmpty()) {
+             toggleSelectedItem(self, -1);
+             return false;
+@@ -143,7 +_,7 @@
+     private void dropContent(Level level, Player player, ItemStack itemStack) {
+         if (this.dropContent(itemStack, player)) {
+             playDropContentsSound(level, player);
+-            player.awardStat(Stats.ITEM_USED.get(this));
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+         }
+     }
+ 

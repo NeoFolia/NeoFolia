@@ -1,0 +1,60 @@
+--- a/net/minecraft/commands/arguments/selector/EntitySelector.java
++++ b/net/minecraft/commands/arguments/selector/EntitySelector.java
+@@ -25,6 +_,7 @@
+ import net.minecraft.world.level.entity.EntityTypeTest;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class EntitySelector {
+@@ -117,7 +_,7 @@
+     }
+ 
+     private void checkPermissions(CommandSourceStack sender) throws CommandSyntaxException {
+-        if (this.usesSelector && !sender.permissions().hasPermission(Permissions.COMMANDS_ENTITY_SELECTORS)) {
++        if (this.usesSelector && !net.neoforged.neoforge.common.CommonHooks.canUseEntitySelectors(sender)) {
+             throw EntityArgument.ERROR_SELECTORS_NOT_ALLOWED.create();
+         }
+     }
+@@ -139,11 +_,13 @@
+         if (!this.includesEntities) {
+             return this.findPlayers(sender);
+         } else if (this.playerName != null) {
+-            ServerPlayer result = sender.getServer().getPlayerList().getPlayerByName(this.playerName);
++            ServerPlayer result = sender.getServer().getPlayerList().getAllPlayerByName(this.playerName);
++            result = RegionizedWorldGuard.restrictEntityToCurrentRegion(sender.getLevel(), result);
+             return result == null ? List.of() : List.of(result);
+         } else if (this.entityUUID != null) {
+             for (ServerLevel level : sender.getServer().getAllLevels()) {
+                 Entity entity = level.getEntity(this.entityUUID);
++                entity = RegionizedWorldGuard.restrictEntityToCurrentRegion(level, entity);
+                 if (entity != null) {
+                     if (entity.getType().isEnabled(sender.enabledFeatures())) {
+                         return List.of(entity);
+@@ -203,10 +_,12 @@
+     public List<ServerPlayer> findPlayers(CommandSourceStack sender) throws CommandSyntaxException {
+         this.checkPermissions(sender);
+         if (this.playerName != null) {
+-            ServerPlayer result = sender.getServer().getPlayerList().getPlayerByName(this.playerName);
++            ServerPlayer result = sender.getServer().getPlayerList().getAllPlayerByName(this.playerName);
++            result = RegionizedWorldGuard.restrictEntityToCurrentRegion(sender.getLevel(), result);
+             return result == null ? List.of() : List.of(result);
+         } else if (this.entityUUID != null) {
+-            ServerPlayer result = sender.getServer().getPlayerList().getPlayer(this.entityUUID);
++            ServerPlayer result = sender.getServer().getPlayerList().getAllPlayer(this.entityUUID);
++            result = RegionizedWorldGuard.restrictEntityToCurrentRegion(sender.getLevel(), result);
+             return result == null ? List.of() : List.of(result);
+         } else {
+             Vec3 pos = this.position.apply(sender.getPosition());
+@@ -222,8 +_,8 @@
+                 } else {
+                     result = new ObjectArrayList<>();
+ 
+-                    for (ServerPlayer player : sender.getServer().getPlayerList().getPlayers()) {
+-                        if (predicate.test(player)) {
++                    for (ServerPlayer player : sender.getServer().getPlayerList().getAllPlayers()) {
++                        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(sender.getLevel(), player) != null && predicate.test(player)) {
+                             result.add(player);
+                             if (result.size() >= limit) {
+                                 return result;

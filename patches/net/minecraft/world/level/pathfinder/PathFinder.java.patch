@@ -1,0 +1,72 @@
+--- a/net/minecraft/world/level/pathfinder/PathFinder.java
++++ b/net/minecraft/world/level/pathfinder/PathFinder.java
+@@ -32,32 +_,34 @@
+         this.maxVisitedNodes = maxVisitedNodes;
+     }
+ 
+-    public void setCaptureDebug(BooleanSupplier captureDebug) {
++    public synchronized void setCaptureDebug(BooleanSupplier captureDebug) {
+         this.captureDebug = captureDebug;
+     }
+ 
+-    public void setMaxVisitedNodes(int maxVisitedNodes) {
++    public synchronized void setMaxVisitedNodes(int maxVisitedNodes) {
+         this.maxVisitedNodes = maxVisitedNodes;
+     }
+ 
+-    public @Nullable Path findPath(
++    public synchronized @Nullable Path findPath(
+         PathNavigationRegion level, Mob entity, Set<BlockPos> targets, float maxPathLength, int reachRange, float maxVisitedNodesMultiplier
+     ) {
+         this.openSet.clear();
+         this.nodeEvaluator.prepare(level, entity);
+-        Node from = this.nodeEvaluator.getStart();
+-        if (from == null) {
+-            return null;
+-        } else {
+-            Map<Target, BlockPos> tos = targets.stream()
+-                .collect(Collectors.toMap(pos -> this.nodeEvaluator.getTarget(pos.getX(), pos.getY(), pos.getZ()), Function.identity()));
+-            Path path = this.findPath(from, tos, maxPathLength, reachRange, maxVisitedNodesMultiplier);
++        try {
++            Node from = this.nodeEvaluator.getStart();
++            if (from == null) {
++                return null;
++            } else {
++                Map<Target, BlockPos> tos = targets.stream()
++                    .collect(Collectors.toMap(pos -> this.nodeEvaluator.getTarget(pos.getX(), pos.getY(), pos.getZ()), Function.identity()));
++                return this.findPath(from, tos, maxPathLength, reachRange, maxVisitedNodesMultiplier);
++            }
++        } finally {
+             this.nodeEvaluator.done();
+-            return path;
+         }
+     }
+ 
+-    private @Nullable Path findPath(Node from, Map<Target, BlockPos> targetMap, float maxPathLength, int reachRange, float maxVisitedNodesMultiplier) {
++    private synchronized @Nullable Path findPath(Node from, Map<Target, BlockPos> targetMap, float maxPathLength, int reachRange, float maxVisitedNodesMultiplier) {
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("find_path");
+         profiler.markForCharting(MetricCategory.PATH_FINDING);
+@@ -139,11 +_,11 @@
+         }
+     }
+ 
+-    protected float distance(Node from, Node to) {
++    protected synchronized float distance(Node from, Node to) {
+         return from.distanceTo(to);
+     }
+ 
+-    private float getBestH(Node from, Set<Target> targets) {
++    private synchronized float getBestH(Node from, Set<Target> targets) {
+         float bestH = Float.MAX_VALUE;
+ 
+         for (Target target : targets) {
+@@ -155,7 +_,7 @@
+         return bestH;
+     }
+ 
+-    private Path reconstructPath(Node closest, BlockPos target, boolean reached) {
++    private synchronized Path reconstructPath(Node closest, BlockPos target, boolean reached) {
+         List<Node> nodes = Lists.newArrayList();
+         Node node = closest;
+         nodes.add(0, closest);

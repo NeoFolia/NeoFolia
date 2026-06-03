@@ -1,0 +1,24 @@
+--- a/net/minecraft/server/commands/ServerPackCommand.java
++++ b/net/minecraft/server/commands/ServerPackCommand.java
+@@ -58,6 +_,10 @@
+     }
+ 
+     private static int pushPack(CommandSourceStack source, String url, Optional<UUID> maybeId, Optional<String> maybeHash) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> pushPack(source, url, maybeId, maybeHash))) {
++            return 0;
++        }
++
+         UUID id = maybeId.orElseGet(() -> UUID.nameUUIDFromBytes(url.getBytes(StandardCharsets.UTF_8)));
+         String hash = maybeHash.orElse("");
+         ClientboundResourcePackPushPacket packet = new ClientboundResourcePackPushPacket(id, url, hash, false, null);
+@@ -66,6 +_,10 @@
+     }
+ 
+     private static int popPack(CommandSourceStack source, UUID uuid) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> popPack(source, uuid))) {
++            return 0;
++        }
++
+         ClientboundResourcePackPopPacket packet = new ClientboundResourcePackPopPacket(Optional.of(uuid));
+         sendToAllConnections(source, packet);
+         return 0;

@@ -1,0 +1,90 @@
+--- a/net/minecraft/world/entity/ai/behavior/AnimalPanic.java
++++ b/net/minecraft/world/entity/ai/behavior/AnimalPanic.java
+@@ -20,7 +_,9 @@
+ import net.minecraft.world.entity.ai.util.AirAndWaterRandomPos;
+ import net.minecraft.world.entity.ai.util.LandRandomPos;
+ import net.minecraft.world.level.BlockGetter;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class AnimalPanic<E extends PathfinderMob> extends Behavior<E> {
+@@ -55,27 +_,27 @@
+         this.positionGetter = positionGetter;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, E body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, E body) {
+         return body.getBrain().getMemory(MemoryModuleType.HURT_BY).map(d -> d.is(this.panicCausingDamageTypes.apply(body))).orElse(false)
+             || body.getBrain().hasMemoryValue(MemoryModuleType.IS_PANICKING);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, E body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, E body, long timestamp) {
+         return true;
+     }
+ 
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+         body.getBrain().setMemory(MemoryModuleType.IS_PANICKING, true);
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+         body.getNavigation().stop();
+     }
+ 
+-    protected void stop(ServerLevel level, E body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, E body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+         brain.eraseMemory(MemoryModuleType.IS_PANICKING);
+     }
+ 
+-    protected void tick(ServerLevel level, E body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, E body, long timestamp) {
+         if (body.getNavigation().isDone()) {
+             Vec3 panicToPos = this.getPanicPos(body, level);
+             if (panicToPos != null) {
+@@ -84,30 +_,39 @@
+         }
+     }
+ 
+-    private @Nullable Vec3 getPanicPos(E body, ServerLevel level) {
++    private synchronized @Nullable Vec3 getPanicPos(E body, ServerLevel level) {
+         if (body.isOnFire()) {
+             Optional<Vec3> nearestWater = this.lookForWater(level, body).map(Vec3::atBottomCenterOf);
+             if (nearestWater.isPresent()) {
+-                return nearestWater.get();
++                return nearestWater.orElse(null);
+             }
+         }
+ 
+         return this.positionGetter.apply(body);
+     }
+ 
+-    private Optional<BlockPos> lookForWater(BlockGetter level, Entity mob) {
++    private synchronized Optional<BlockPos> lookForWater(BlockGetter level, Entity mob) {
+         BlockPos mobPosition = mob.blockPosition();
++        if (!canReadBlock(level, mobPosition)) {
++            return Optional.empty();
++        }
++
+         if (!level.getBlockState(mobPosition).getCollisionShape(level, mobPosition).isEmpty()) {
+             return Optional.empty();
+         } else {
+             Predicate<BlockPos> posPredicate;
+             if (Mth.ceil(mob.getBbWidth()) == 2) {
+-                posPredicate = from -> BlockPos.squareOutSouthEast(from).allMatch(pos -> level.getFluidState(pos).is(FluidTags.WATER));
++                posPredicate = from -> BlockPos.squareOutSouthEast(from).allMatch(pos -> canReadBlock(level, pos) && level.getFluidState(pos).is(FluidTags.WATER));
+             } else {
+-                posPredicate = pos -> level.getFluidState(pos).is(FluidTags.WATER);
++                posPredicate = pos -> canReadBlock(level, pos) && level.getFluidState(pos).is(FluidTags.WATER);
+             }
+ 
+             return BlockPos.findClosestMatch(mobPosition, 5, 1, posPredicate);
+         }
++    }
++
++    private static boolean canReadBlock(BlockGetter level, BlockPos pos) {
++        return !(level instanceof Level levelInstance)
++            || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/TryToSniff.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/TryToSniff.java
+@@ -23,7 +_,7 @@
+                 )
+                 .apply(i, (sniffing, walkTarget, cooldown, attackable, disturbance) -> (level, body, timestamp) -> {
+                     sniffing.set(Unit.INSTANCE);
+-                    cooldown.setWithExpiry(Unit.INSTANCE, SNIFF_COOLDOWN.sample(level.getRandom()));
++                    cooldown.setWithExpiry(Unit.INSTANCE, SNIFF_COOLDOWN.sample(body.getRandom()));
+                     walkTarget.erase();
+                     body.setPose(Pose.SNIFFING);
+                     return true;

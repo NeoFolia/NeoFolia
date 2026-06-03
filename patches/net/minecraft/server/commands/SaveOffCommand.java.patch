@@ -1,0 +1,33 @@
+--- a/net/minecraft/server/commands/SaveOffCommand.java
++++ b/net/minecraft/server/commands/SaveOffCommand.java
+@@ -10,15 +_,20 @@
+     private static final SimpleCommandExceptionType ERROR_ALREADY_OFF = new SimpleCommandExceptionType(Component.translatable("commands.save.alreadyOff"));
+ 
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+-        dispatcher.register(Commands.literal("save-off").requires(Commands.hasPermission(Commands.LEVEL_OWNERS)).executes(c -> {
+-            CommandSourceStack source = c.getSource();
+-            boolean success = source.getServer().setAutoSave(false);
+-            if (!success) {
+-                throw ERROR_ALREADY_OFF.create();
+-            } else {
+-                source.sendSuccess(() -> Component.translatable("commands.save.disabled"), true);
+-                return 1;
+-            }
+-        }));
++        dispatcher.register(Commands.literal("save-off").requires(Commands.hasPermission(Commands.LEVEL_OWNERS)).executes(c -> saveOff(c.getSource())));
++    }
++
++    private static int saveOff(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> saveOff(source))) {
++            return 0;
++        }
++
++        boolean success = source.getServer().setAutoSave(false);
++        if (!success) {
++            throw ERROR_ALREADY_OFF.create();
++        } else {
++            source.sendSuccess(() -> Component.translatable("commands.save.disabled"), true);
++            return 1;
++        }
+     }
+ }

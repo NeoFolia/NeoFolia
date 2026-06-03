@@ -1,0 +1,1170 @@
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -199,6 +_,8 @@
+ import net.minecraft.world.scores.Scoreboard;
+ import net.minecraft.world.scores.Team;
+ import net.minecraft.world.scores.criteria.ObjectiveCriteria;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -297,9 +_,11 @@
+         }
+ 
+         @Override
+-        public void sendInitialData(AbstractContainerMenu container, List<ItemStack> slotItems, ItemStack carriedItem, int[] dataSlots) {
+-            ServerPlayer.this.connection
+-                .send(new ClientboundContainerSetContentPacket(container.containerId, container.incrementStateId(), slotItems, carriedItem));
++        public synchronized void sendInitialData(AbstractContainerMenu container, List<ItemStack> slotItems, ItemStack carriedItem, int[] dataSlots) {
++            RegionizedWorldGuard.sendToPlayer(
++                ServerPlayer.this,
++                new ClientboundContainerSetContentPacket(container.containerId, container.incrementStateId(), slotItems, carriedItem)
++            );
+ 
+             for (int slot = 0; slot < dataSlots.length; slot++) {
+                 this.broadcastDataValue(container, slot, dataSlots[slot]);
+@@ -307,26 +_,36 @@
+         }
+ 
+         @Override
+-        public void sendSlotChange(AbstractContainerMenu container, int slotIndex, ItemStack itemStack) {
+-            ServerPlayer.this.connection.send(new ClientboundContainerSetSlotPacket(container.containerId, container.incrementStateId(), slotIndex, itemStack));
+-        }
+-
+-        @Override
+-        public void sendCarriedChange(AbstractContainerMenu container, ItemStack itemStack) {
+-            ServerPlayer.this.connection.send(new ClientboundSetCursorItemPacket(itemStack));
+-        }
+-
+-        @Override
+-        public void sendDataChange(AbstractContainerMenu container, int id, int value) {
++        public synchronized void sendSlotChange(AbstractContainerMenu container, int slotIndex, ItemStack itemStack) {
++            RegionizedWorldGuard.sendToPlayer(
++                ServerPlayer.this,
++                new ClientboundContainerSetSlotPacket(container.containerId, container.incrementStateId(), slotIndex, itemStack)
++            );
++        }
++
++        @Override
++        public synchronized void sendCarriedChange(AbstractContainerMenu container, ItemStack itemStack) {
++            RegionizedWorldGuard.sendToPlayer(ServerPlayer.this, new ClientboundSetCursorItemPacket(itemStack));
++        }
++
++        @Override
++        public synchronized void sendDataChange(AbstractContainerMenu container, int id, int value) {
+             this.broadcastDataValue(container, id, value);
+         }
+ 
+-        private void broadcastDataValue(AbstractContainerMenu container, int id, int value) {
+-            ServerPlayer.this.connection.send(new ClientboundContainerSetDataPacket(container.containerId, id, value));
++        private synchronized void broadcastDataValue(AbstractContainerMenu container, int id, int value) {
++            if (ServerPlayer.this.connection.hasChannel(net.neoforged.neoforge.network.payload.AdvancedContainerSetDataPayload.TYPE)) {
++                RegionizedWorldGuard.sendPayloadToPlayer(
++                    ServerPlayer.this,
++                    new net.neoforged.neoforge.network.payload.AdvancedContainerSetDataPayload((byte) container.containerId, (short) id, value)
++                );
++                return;
++            }
++            RegionizedWorldGuard.sendToPlayer(ServerPlayer.this, new ClientboundContainerSetDataPacket(container.containerId, id, value));
+         }
+ 
+         @Override
+-        public RemoteSlot createSlot() {
++        public synchronized RemoteSlot createSlot() {
+             return new RemoteSlot.Synchronized(this.cache::getUnchecked);
+         }
+     };
+@@ -336,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void slotChanged(AbstractContainerMenu container, int slotIndex, ItemStack changedItem) {
++        public synchronized void slotChanged(AbstractContainerMenu container, int slotIndex, ItemStack changedItem) {
+             Slot slot = container.getSlot(slotIndex);
+             if (!(slot instanceof ResultSlot)) {
+                 if (slot.container == ServerPlayer.this.getInventory()) {
+@@ -346,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void dataChanged(AbstractContainerMenu container, int id, int value) {
++        public synchronized void dataChanged(AbstractContainerMenu container, int id, int value) {
+         }
+     };
+     private @Nullable RemoteChatSession chatSession;
+@@ -375,10 +_,17 @@
+         public void sendSystemMessage(Component message) {
+             ServerPlayer.this.sendSystemMessage(message);
+         }
++
++        @Override
++        public Optional<GameProfile> getGameProfile() {
++            return Optional.of(ServerPlayer.this.getGameProfile());
++        }
+     };
+     private Set<DebugSubscription<?>> requestedDebugSubscriptions = Set.of();
+     private int containerCounter;
+     public boolean wonGame;
++    // Neo: Used to track partial TIME_SINCE_REST increases for dimensions in which clocks move at different speeds. No need to persist, at most Phantoms will spawn one tick too early for each save/load cycle.
++    private float partialTimeSinceRestTick;
+ 
+     public ServerPlayer(MinecraftServer server, ServerLevel level, GameProfile gameProfile, ClientInformation clientInformation) {
+         super(level, gameProfile);
+@@ -487,10 +_,11 @@
+     }
+ 
+     private void saveEnderPearls(ValueOutput playerOutput) {
+-        if (!this.enderPearls.isEmpty()) {
++        Set<ThrownEnderpearl> enderPearls = this.getEnderPearls();
++        if (!enderPearls.isEmpty()) {
+             ValueOutput.ValueOutputList pearlsOutput = playerOutput.childrenList("ender_pearls");
+ 
+-            for (ThrownEnderpearl enderPearl : this.enderPearls) {
++            for (ThrownEnderpearl enderPearl : enderPearls) {
+                 if (enderPearl.isRemoved()) {
+                     LOGGER.warn("Trying to save removed ender pearl, skipping");
+                 } else {
+@@ -561,6 +_,34 @@
+         container.setSynchronizer(this.containerSynchronizer);
+     }
+ 
++    private synchronized AbstractContainerMenu getActiveContainerMenu() {
++        return this.containerMenu;
++    }
++
++    private synchronized void setActiveContainerMenu(AbstractContainerMenu container) {
++        this.containerMenu = container;
++    }
++
++    private synchronized void restoreInventoryMenuIfCurrent(AbstractContainerMenu expected) {
++        if (this.containerMenu == expected) {
++            this.containerMenu = this.inventoryMenu;
++        }
++    }
++
++    private AbstractContainerMenu getActiveContainerMenuForBroadcast() {
++        AbstractContainerMenu containerMenu = this.getActiveContainerMenu();
++        if (containerMenu != this.inventoryMenu && !containerMenu.stillValid(this)) {
++            this.closeContainer(containerMenu);
++            return this.inventoryMenu;
++        }
++
++        return containerMenu;
++    }
++
++    public void broadcastActiveContainerChanges() {
++        this.getActiveContainerMenuForBroadcast().broadcastChanges();
++    }
++
+     public void initInventoryMenu() {
+         this.initMenu(this.inventoryMenu);
+     }
+@@ -568,13 +_,13 @@
+     @Override
+     public void onEnterCombat() {
+         super.onEnterCombat();
+-        this.connection.send(ClientboundPlayerCombatEnterPacket.INSTANCE);
++        RegionizedWorldGuard.sendToPlayer(this, ClientboundPlayerCombatEnterPacket.INSTANCE);
+     }
+ 
+     @Override
+     public void onLeaveCombat() {
+         super.onLeaveCombat();
+-        this.connection.send(new ClientboundPlayerCombatEndPacket(this.getCombatTracker()));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerCombatEndPacket(this.getCombatTracker()));
+     }
+ 
+     @Override
+@@ -596,11 +_,7 @@
+             this.invulnerableTime--;
+         }
+ 
+-        this.containerMenu.broadcastChanges();
+-        if (!this.containerMenu.stillValid(this)) {
+-            this.closeContainer();
+-            this.containerMenu = this.inventoryMenu;
+-        }
++        this.broadcastActiveContainerChanges();
+ 
+         Entity camera = this.getCamera();
+         if (camera != this) {
+@@ -659,9 +_,9 @@
+         try {
+             if (!this.isSpectator() || !this.touchingUnloadedChunk()) {
+                 super.tick();
+-                if (!this.containerMenu.stillValid(this)) {
+-                    this.closeContainer();
+-                    this.containerMenu = this.inventoryMenu;
++                AbstractContainerMenu containerMenu = this.getActiveContainerMenu();
++                if (!containerMenu.stillValid(this)) {
++                    this.closeContainer(containerMenu);
+                 }
+ 
+                 this.foodData.tick(this);
+@@ -676,7 +_,26 @@
+                 }
+ 
+                 if (!this.isSleeping()) {
+-                    this.awardStat(Stats.TIME_SINCE_REST);
++                    // Neo: Advance TIME_SINCE_REST if (a) vanilla daytime handling in effect, or (b) days are shorter, or (c) dayTime has ticked, or (d) dayTime advances are off and we need to ignore day length
++                    var defaultClock = level().dimensionType().defaultClock();
++                    if (defaultClock.isEmpty() || !level().getGameRules().get(GameRules.ADVANCE_TIME)) {
++                        // TODO 26.1: It's debatable whether this should advance in a dimension with no clock BUT in Vanilla it does!
++                        this.awardStat(Stats.TIME_SINCE_REST);
++                    } else {
++                        var speed = level().clockManager().getRate(defaultClock.get());
++                        var fullTicks = (int) speed;
++                        partialTimeSinceRestTick += speed;
++                        if (partialTimeSinceRestTick >= 1) {
++                            partialTimeSinceRestTick = 0;
++                            fullTicks++;
++                        }
++
++                        for (int i = 0; i < fullTicks; i++) {
++                            this.awardStat(Stats.TIME_SINCE_REST);
++                        }
++                    }
++                } else {
++                    partialTimeSinceRestTick = 0;
+                 }
+             }
+ 
+@@ -690,7 +_,7 @@
+             if (this.getHealth() != this.lastSentHealth
+                 || this.lastSentFood != this.foodData.getFoodLevel()
+                 || this.foodData.getSaturationLevel() == 0.0F != this.lastFoodSaturationZero) {
+-                this.connection.send(new ClientboundSetHealthPacket(this.getHealth(), this.foodData.getFoodLevel(), this.foodData.getSaturationLevel()));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundSetHealthPacket(this.getHealth(), this.foodData.getFoodLevel(), this.foodData.getSaturationLevel()));
+                 this.lastSentHealth = this.getHealth();
+                 this.lastSentFood = this.foodData.getFoodLevel();
+                 this.lastFoodSaturationZero = this.foodData.getSaturationLevel() == 0.0F;
+@@ -728,7 +_,12 @@
+ 
+             if (this.totalExperience != this.lastSentExp) {
+                 this.lastSentExp = this.totalExperience;
+-                this.connection.send(new ClientboundSetExperiencePacket(this.experienceProgress, this.totalExperience, this.experienceLevel));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundSetExperiencePacket(this.experienceProgress, this.totalExperience, this.experienceLevel));
++            }
++
++            if (this.getAbilities().flying && !this.mayFly()) {
++                this.getAbilities().flying = false;
++                this.onUpdateAbilities();
+             }
+ 
+             if (this.tickCount % 20 == 0) {
+@@ -744,11 +_,11 @@
+ 
+     private void synchronizeSpecialItemUpdates(ItemStack itemStack) {
+         MapId mapId = itemStack.get(DataComponents.MAP_ID);
+-        MapItemSavedData data = MapItem.getSavedData(mapId, this.level());
++        MapItemSavedData data = MapItem.getSavedData(itemStack, this.level());
+         if (data != null) {
+             Packet<?> packet = data.getUpdatePacket(mapId, this);
+             if (packet != null) {
+-                this.connection.send(packet);
++                RegionizedWorldGuard.sendToPlayer(this, packet);
+             }
+         }
+     }
+@@ -865,13 +_,19 @@
+         if (this.fallDistance > 0.0 && this.startingToFallPosition == null) {
+             this.startingToFallPosition = this.position();
+             if (this.currentImpulseImpactPos != null && this.currentImpulseImpactPos.y <= this.startingToFallPosition.y) {
+-                CriteriaTriggers.FALL_AFTER_EXPLOSION.trigger(this, this.currentImpulseImpactPos, this.currentExplosionCause);
++                Vec3 impactPos = this.currentImpulseImpactPos;
++                Entity explosionCause = this.currentExplosionCause;
++                Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(this, () -> CriteriaTriggers.FALL_AFTER_EXPLOSION.trigger(this, impactPos, explosionCause));
++                if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Fall after explosion advancement", trigger)) {
++                    trigger.run();
++                }
+             }
+         }
+     }
+ 
+     public void trackEnteredOrExitedLavaOnVehicle() {
+-        if (this.getVehicle() != null && this.getVehicle().isInLava()) {
++        Entity vehicle = this.getVehicle();
++        if (vehicle != null && vehicle.isInLava()) {
+             if (this.enteredLavaOnVehiclePosition == null) {
+                 this.enteredLavaOnVehiclePosition = this.position();
+             } else {
+@@ -879,7 +_,7 @@
+             }
+         }
+ 
+-        if (this.enteredLavaOnVehiclePosition != null && (this.getVehicle() == null || !this.getVehicle().isInLava())) {
++        if (this.enteredLavaOnVehiclePosition != null && (vehicle == null || !vehicle.isInLava())) {
+             this.enteredLavaOnVehiclePosition = null;
+         }
+     }
+@@ -891,25 +_,26 @@
+     @Override
+     public void die(DamageSource source) {
+         this.gameEvent(GameEvent.ENTITY_DIE);
++        if (net.neoforged.neoforge.common.CommonHooks.onLivingDeath(this, source)) return;
+         boolean showDeathMessage = this.level().getGameRules().get(GameRules.SHOW_DEATH_MESSAGES);
+         if (showDeathMessage) {
+             Component deathMessage = this.getCombatTracker().getDeathMessage();
+-            this.connection
+-                .send(
+-                    new ClientboundPlayerCombatKillPacket(this.getId(), deathMessage),
+-                    PacketSendListener.exceptionallySend(
+-                        () -> {
+-                            int truncatedMessageSize = 256;
+-                            String truncatedDeathMessage = deathMessage.getString(256);
+-                            Component explanation = Component.translatable(
+-                                "death.attack.message_too_long", Component.literal(truncatedDeathMessage).withStyle(ChatFormatting.YELLOW)
+-                            );
+-                            Component fakeDeathMessage = Component.translatable("death.attack.even_more_magic", this.getDisplayName())
+-                                .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(explanation)));
+-                            return new ClientboundPlayerCombatKillPacket(this.getId(), fakeDeathMessage);
+-                        }
+-                    )
+-                );
++            RegionizedWorldGuard.sendToPlayer(
++                this,
++                new ClientboundPlayerCombatKillPacket(this.getId(), deathMessage),
++                PacketSendListener.exceptionallySend(
++                    () -> {
++                        int truncatedMessageSize = 256;
++                        String truncatedDeathMessage = deathMessage.getString(256);
++                        Component explanation = Component.translatable(
++                            "death.attack.message_too_long", Component.literal(truncatedDeathMessage).withStyle(ChatFormatting.YELLOW)
++                        );
++                        Component fakeDeathMessage = Component.translatable("death.attack.even_more_magic", this.getDisplayName())
++                            .withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(explanation)));
++                        return new ClientboundPlayerCombatKillPacket(this.getId(), fakeDeathMessage);
++                    }
++                )
++            );
+             Team team = this.getTeam();
+             if (team == null || team.getDeathMessageVisibility() == Team.Visibility.ALWAYS) {
+                 this.server.getPlayerList().broadcastSystemMessage(deathMessage, false);
+@@ -919,7 +_,7 @@
+                 this.server.getPlayerList().broadcastSystemToAllExceptTeam(this, deathMessage);
+             }
+         } else {
+-            this.connection.send(new ClientboundPlayerCombatKillPacket(this.getId(), CommonComponents.EMPTY));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerCombatKillPacket(this.getId(), CommonComponents.EMPTY));
+         }
+ 
+         this.removeEntitiesOnShoulder();
+@@ -953,8 +_,13 @@
+ 
+     private void tellNeutralMobsThatIDied() {
+         AABB aabb = new AABB(this.blockPosition()).inflate(32.0, 10.0, 32.0);
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), aabb);
++        if (regionBox == null) {
++            return;
++        }
++
+         this.level()
+-            .getEntitiesOfClass(Mob.class, aabb, EntitySelector.NO_SPECTATORS)
++            .getEntitiesOfClass(Mob.class, regionBox, EntitySelector.NO_SPECTATORS)
+             .stream()
+             .filter(mob -> mob instanceof NeutralMob)
+             .forEach(mob -> ((NeutralMob)mob).playerDied(this.level(), this));
+@@ -975,7 +_,10 @@
+ 
+             this.handleTeamKill(this, victim, ObjectiveCriteria.TEAM_KILL);
+             this.handleTeamKill(victim, this, ObjectiveCriteria.KILLED_BY_TEAM);
+-            CriteriaTriggers.PLAYER_KILLED_ENTITY.trigger(this, victim, killingBlow);
++            Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(this, () -> CriteriaTriggers.PLAYER_KILLED_ENTITY.trigger(this, victim, killingBlow));
++            if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Player killed entity advancement", trigger)) {
++                trigger.run();
++            }
+         }
+     }
+ 
+@@ -1074,7 +_,7 @@
+             return BedBlock.findStandUpPosition(EntityType.PLAYER, level, pos, blockState.getValue(BedBlock.FACING), yaw)
+                 .map(p -> ServerPlayer.RespawnPosAngle.of(p, pos, 0.0F));
+         } else if (!forced) {
+-            return Optional.empty();
++            return blockState.getRespawnPosition(EntityType.PLAYER, level, pos, yaw);
+         } else {
+             boolean freeBottom = block.isPossibleToRespawnInThis(blockState);
+             BlockState topState = level.getBlockState(pos.above());
+@@ -1086,21 +_,31 @@
+     }
+ 
+     public void showEndCredits() {
++        if (this.executeOnPlayerRegionAndWaitIfNeeded("show end credits", this::showEndCredits)) {
++            return;
++        }
++
+         this.unRide();
+         this.level().removePlayerImmediately(this, Entity.RemovalReason.CHANGED_DIMENSION);
+         if (!this.wonGame) {
+             this.wonGame = true;
+-            this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
+             this.seenCredits = true;
+         }
+     }
+ 
+     public @Nullable ServerPlayer teleport(TeleportTransition transition) {
++        RegionCallResult<ServerPlayer> regionResult = this.callOnPlayerRegionAndWaitIfNeeded("player teleport", () -> this.teleport(transition));
++        if (regionResult != null) {
++            return regionResult.result();
++        }
++
++        if (!net.neoforged.neoforge.common.CommonHooks.onTravelToDimension(this, transition.newLevel().dimension())) return null;
+         if (this.isRemoved()) {
+             return null;
+         } else {
+             if (transition.missingRespawnBlock()) {
+-                this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
+             }
+ 
+             ServerLevel newLevel = transition.newLevel();
+@@ -1118,12 +_,12 @@
+             } else {
+                 this.isChangingDimension = true;
+                 LevelData levelData = newLevel.getLevelData();
+-                this.connection.send(new ClientboundRespawnPacket(this.createCommonSpawnInfo(newLevel), (byte)3));
+-                this.connection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundRespawnPacket(this.createCommonSpawnInfo(newLevel), (byte)3));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
+                 PlayerList playerList = this.server.getPlayerList();
+                 playerList.sendPlayerPermissionLevel(this);
+                 oldLevel.removePlayerImmediately(this, Entity.RemovalReason.CHANGED_DIMENSION);
+-                this.unsetRemoved();
++                this.revive();
+                 ProfilerFiller profiler = Profiler.get();
+                 profiler.push("moving");
+                 if (lastDimension == Level.OVERWORLD && newLevel.dimension() == Level.NETHER) {
+@@ -1139,24 +_,55 @@
+                 profiler.pop();
+                 this.triggerDimensionChangeTriggers(oldLevel);
+                 this.stopUsingItem();
+-                this.connection.send(new ClientboundPlayerAbilitiesPacket(this.getAbilities()));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerAbilitiesPacket(this.getAbilities()));
+                 playerList.sendLevelInfo(this, newLevel);
+                 playerList.sendAllPlayerInfo(this);
+                 playerList.sendActivePlayerEffects(this);
++                // TODO 1.21: Play custom teleport sound
+                 transition.postTeleportTransition().onTransition(this);
+                 this.lastSentExp = -1;
+                 this.lastSentHealth = -1.0F;
+                 this.lastSentFood = -1;
+                 this.teleportSpectators(transition, oldLevel);
++                // Neo: On the client all attachments are lost on dimension change and need to be re-sent
++                net.neoforged.neoforge.attachment.AttachmentSync.syncInitialPlayerAttachments(this);
++                net.neoforged.neoforge.event.EventHooks.firePlayerChangedDimensionEvent(this, lastDimension, transition.newLevel().dimension());
+                 return this;
+             }
+         }
++    }
++
++    private boolean executeOnPlayerRegionAndWaitIfNeeded(String reason, Runnable task) {
++        return this.callOnPlayerRegionAndWaitIfNeeded(reason, () -> {
++            task.run();
++            return Boolean.TRUE;
++        }) != null;
++    }
++
++    private <T> @Nullable RegionCallResult<T> callOnPlayerRegionAndWaitIfNeeded(String reason, java.util.function.Supplier<T> task) {
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            return null;
++        }
++
++        var region = RegionizedWorldGuard.regionFor(this.level(), this.blockPosition());
++        if (RegionizedTickContext.currentRegion().map(region::equals).orElse(false)) {
++            return null;
++        }
++
++        if (RegionizedTickContext.isRegionThread()) {
++            throw new IllegalStateException("Cannot wait for " + reason + " from another region worker");
++        }
++
++        return new RegionCallResult<>(true, RegionizedWorldGuard.callOnPlayerRegionAndWait(this, reason, task));
++    }
++
++    private record RegionCallResult<T>(boolean completed, @Nullable T result) {
+     }
+ 
+     @Override
+     public void forceSetRotation(float yRot, boolean relativeY, float xRot, boolean relativeX) {
+         super.forceSetRotation(yRot, relativeY, xRot, relativeX);
+-        this.connection.send(new ClientboundPlayerRotationPacket(yRot, relativeY, xRot, relativeX));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerRotationPacket(yRot, relativeY, xRot, relativeX));
+     }
+ 
+     private void triggerDimensionChangeTriggers(ServerLevel oldLevel) {
+@@ -1184,13 +_,24 @@
+     @Override
+     public void take(Entity entity, int orgCount) {
+         super.take(entity, orgCount);
+-        this.containerMenu.broadcastChanges();
++        this.broadcastActiveContainerChanges();
+     }
+ 
+     @Override
+     public Either<Player.BedSleepingProblem, Unit> startSleepInBed(BlockPos pos) {
++        // Neo: Encapsulate the vanilla check logic to supply to the CanPlayerSleepEvent
++        var vanillaResult = ((java.util.function.Supplier<Either<BedSleepingProblem, Unit>>) () -> {
++        // Guard against modded beds that may not have the FACING property.
++        // We just return success (Unit) here. Modders will need to implement conditions in the CanPlayerSleepEvent
++        if (!this.level().getBlockState(pos).hasProperty(HorizontalDirectionalBlock.FACING)) {
++            return Either.right(Unit.INSTANCE);
++        }
++
++        // Start vanilla code
+         Direction direction = this.level().getBlockState(pos).getValue(HorizontalDirectionalBlock.FACING);
+-        if (!this.isSleeping() && this.isAlive()) {
++        if (this.isSleeping() || !this.isAlive()) {
++            return Either.left(Player.BedSleepingProblem.OTHER_PROBLEM);
++        } else {
+             BedRule rule = this.level().environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, pos);
+             boolean canSleep = rule.canSleep(this.level());
+             boolean canSetSpawn = rule.canSetSpawn(this.level());
+@@ -1214,24 +_,42 @@
+                         double hRange = 8.0;
+                         double vRange = 5.0;
+                         Vec3 bedCenter = Vec3.atBottomCenterOf(pos);
+-                        List<Monster> monsters = this.level()
+-                            .getEntitiesOfClass(
+-                                Monster.class,
+-                                new AABB(
+-                                    bedCenter.x() - 8.0,
+-                                    bedCenter.y() - 5.0,
+-                                    bedCenter.z() - 8.0,
+-                                    bedCenter.x() + 8.0,
+-                                    bedCenter.y() + 5.0,
+-                                    bedCenter.z() + 8.0
+-                                ),
+-                                monster -> monster.isPreventingPlayerRest(this.level(), this)
+-                            );
++                        AABB monsterBox = RegionizedWorldGuard.restrictToCurrentRegion(
++                            this.level(),
++                            new AABB(
++                                bedCenter.x() - 8.0,
++                                bedCenter.y() - 5.0,
++                                bedCenter.z() - 8.0,
++                                bedCenter.x() + 8.0,
++                                bedCenter.y() + 5.0,
++                                bedCenter.z() + 8.0
++                            )
++                        );
++                        List<Monster> monsters = monsterBox == null
++                            ? List.of()
++                            : this.level().getEntitiesOfClass(Monster.class, monsterBox, monster -> monster.isPreventingPlayerRest(this.level(), this));
+                         if (!monsters.isEmpty()) {
+                             return Either.left(Player.BedSleepingProblem.NOT_SAFE);
+                         }
+                     }
+ 
++        // End vanilla code
++                }
++            }
++        }
++
++        return Either.right(Unit.INSTANCE);
++        }).get();
++
++        // Fire the event. Return the error if one exists after the event, otherwise use the vanilla logic to start sleeping.
++        vanillaResult = net.neoforged.neoforge.event.EventHooks.canPlayerStartSleeping(this, pos, vanillaResult);
++        if (vanillaResult.left().isPresent()) {
++            return vanillaResult;
++        }
++
++        {
++            {{
++                // Start vanilla code
+                     Either<Player.BedSleepingProblem, Unit> result = super.startSleepInBed(pos).ifRight(unit -> {
+                         this.awardStat(Stats.SLEEP_IN_BED);
+                         CriteriaTriggers.SLEPT_IN_BED.trigger(this);
+@@ -1244,8 +_,6 @@
+                     return result;
+                 }
+             }
+-        } else {
+-            return Either.left(Player.BedSleepingProblem.OTHER_PROBLEM);
+         }
+     }
+ 
+@@ -1256,6 +_,7 @@
+     }
+ 
+     private boolean bedInRange(BlockPos pos, Direction direction) {
++        if (direction == null) return false;
+         return this.isReachableBedBlock(pos) || this.isReachableBedBlock(pos.relative(direction.getOpposite()));
+     }
+ 
+@@ -1324,13 +_,13 @@
+ 
+     @Override
+     public void openTextEdit(SignBlockEntity sign, boolean isFrontText) {
+-        this.connection.send(new ClientboundBlockUpdatePacket(this.level(), sign.getBlockPos()));
+-        this.connection.send(new ClientboundOpenSignEditorPacket(sign.getBlockPos(), isFrontText));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundBlockUpdatePacket(this.level(), sign.getBlockPos()));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundOpenSignEditorPacket(sign.getBlockPos(), isFrontText));
+     }
+ 
+     @Override
+     public void openDialog(Holder<Dialog> dialog) {
+-        this.connection.send(new ClientboundShowDialogPacket(dialog));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundShowDialogPacket(dialog));
+     }
+ 
+     private void nextContainerCounter() {
+@@ -1339,11 +_,20 @@
+ 
+     @Override
+     public OptionalInt openMenu(@Nullable MenuProvider provider) {
++        return openMenu(provider, (java.util.function.Consumer<net.minecraft.network.RegistryFriendlyByteBuf>) null);
++    }
++
++    @Override
++    public OptionalInt openMenu(@Nullable MenuProvider provider, java.util.function.@Nullable Consumer<net.minecraft.network.RegistryFriendlyByteBuf> extraDataWriter) {
+         if (provider == null) {
+             return OptionalInt.empty();
+         } else {
+-            if (this.containerMenu != this.inventoryMenu) {
+-                this.closeContainer();
++            AbstractContainerMenu currentMenu = this.getActiveContainerMenu();
++            if (currentMenu != this.inventoryMenu) {
++                if (provider.shouldTriggerClientSideContainerClosingOnOpen())
++                    this.closeContainer(currentMenu);
++                else
++                    this.doCloseContainer(currentMenu);
+             }
+ 
+             this.nextContainerCounter();
+@@ -1355,9 +_,32 @@
+ 
+                 return OptionalInt.empty();
+             } else {
+-                this.connection.send(new ClientboundOpenScreenPacket(menu.containerId, menu.getType(), provider.getDisplayName()));
++                // Neo: Support sending additional arbitrary data to menu factories on the client-side
++                var extraData = net.neoforged.neoforge.common.util.FriendlyByteBufUtil.writeCustomData(
++                        buffer -> {
++                            provider.writeClientSideData(menu, buffer);
++                            if (extraDataWriter != null) {
++                                extraDataWriter.accept(buffer);
++                            }
++                        },
++                        registryAccess()
++                );
++                if (extraData.length != 0) {
++                    RegionizedWorldGuard.sendPayloadToPlayer(
++                        this,
++                        new net.neoforged.neoforge.network.payload.AdvancedOpenScreenPayload(
++                            menu.containerId,
++                            menu.getType(),
++                            provider.getDisplayName(),
++                            extraData
++                        )
++                    );
++                } else {
++                    RegionizedWorldGuard.sendToPlayer(this, new ClientboundOpenScreenPacket(menu.containerId, menu.getType(), provider.getDisplayName()));
++                }
+                 this.initMenu(menu);
+-                this.containerMenu = menu;
++                this.setActiveContainerMenu(menu);
++                net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.entity.player.PlayerContainerEvent.Open(this, menu));
+                 return OptionalInt.of(this.containerCounter);
+             }
+         }
+@@ -1365,62 +_,76 @@
+ 
+     @Override
+     public void sendMerchantOffers(int containerId, MerchantOffers offers, int merchantLevel, int merchantXp, boolean showProgressBar, boolean canRestock) {
+-        this.connection.send(new ClientboundMerchantOffersPacket(containerId, offers, merchantLevel, merchantXp, showProgressBar, canRestock));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundMerchantOffersPacket(containerId, offers, merchantLevel, merchantXp, showProgressBar, canRestock));
+     }
+ 
+     @Override
+     public void openHorseInventory(AbstractHorse horse, Container container) {
+-        if (this.containerMenu != this.inventoryMenu) {
+-            this.closeContainer();
++        AbstractContainerMenu currentMenu = this.getActiveContainerMenu();
++        if (currentMenu != this.inventoryMenu) {
++            this.closeContainer(currentMenu);
+         }
+ 
+         this.nextContainerCounter();
+         int inventoryColumns = horse.getInventoryColumns();
+-        this.connection.send(new ClientboundMountScreenOpenPacket(this.containerCounter, inventoryColumns, horse.getId()));
+-        this.containerMenu = new HorseInventoryMenu(this.containerCounter, this.getInventory(), container, horse, inventoryColumns);
+-        this.initMenu(this.containerMenu);
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundMountScreenOpenPacket(this.containerCounter, inventoryColumns, horse.getId()));
++        AbstractContainerMenu menu = new HorseInventoryMenu(this.containerCounter, this.getInventory(), container, horse, inventoryColumns);
++        this.initMenu(menu);
++        this.setActiveContainerMenu(menu);
++        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.entity.player.PlayerContainerEvent.Open(this, menu));
+     }
+ 
+     @Override
+     public void openNautilusInventory(AbstractNautilus nautilus, Container container) {
+-        if (this.containerMenu != this.inventoryMenu) {
+-            this.closeContainer();
++        AbstractContainerMenu currentMenu = this.getActiveContainerMenu();
++        if (currentMenu != this.inventoryMenu) {
++            this.closeContainer(currentMenu);
+         }
+ 
+         this.nextContainerCounter();
+         int inventoryColumns = nautilus.getInventoryColumns();
+-        this.connection.send(new ClientboundMountScreenOpenPacket(this.containerCounter, inventoryColumns, nautilus.getId()));
+-        this.containerMenu = new NautilusInventoryMenu(this.containerCounter, this.getInventory(), container, nautilus, inventoryColumns);
+-        this.initMenu(this.containerMenu);
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundMountScreenOpenPacket(this.containerCounter, inventoryColumns, nautilus.getId()));
++        AbstractContainerMenu menu = new NautilusInventoryMenu(this.containerCounter, this.getInventory(), container, nautilus, inventoryColumns);
++        this.initMenu(menu);
++        this.setActiveContainerMenu(menu);
+     }
+ 
+     @Override
+     public void openItemGui(ItemStack itemStack, InteractionHand hand) {
+         if (itemStack.has(DataComponents.WRITTEN_BOOK_CONTENT)) {
+             if (WrittenBookContent.resolveForItem(itemStack, ResolutionContext.create(this.createCommandSourceStack()), this.registryAccess())) {
+-                this.containerMenu.broadcastChanges();
++                this.broadcastActiveContainerChanges();
+             }
+ 
+-            this.connection.send(new ClientboundOpenBookPacket(hand));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundOpenBookPacket(hand));
+         }
+     }
+ 
+     @Override
+     public void openCommandBlock(CommandBlockEntity commandBlock) {
+-        this.connection.send(ClientboundBlockEntityDataPacket.create(commandBlock, BlockEntity::saveCustomOnly));
++        RegionizedWorldGuard.sendToPlayer(this, ClientboundBlockEntityDataPacket.create(commandBlock, BlockEntity::saveCustomOnly));
+     }
+ 
+     @Override
+     public void closeContainer() {
+-        this.connection.send(new ClientboundContainerClosePacket(this.containerMenu.containerId));
+-        this.doCloseContainer();
++        this.closeContainer(this.getActiveContainerMenu());
++    }
++
++    private void closeContainer(AbstractContainerMenu containerMenu) {
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundContainerClosePacket(containerMenu.containerId));
++        this.doCloseContainer(containerMenu);
+     }
+ 
+     @Override
+     public void doCloseContainer() {
+-        this.containerMenu.removed(this);
+-        this.inventoryMenu.transferState(this.containerMenu);
+-        this.containerMenu = this.inventoryMenu;
++        this.doCloseContainer(this.getActiveContainerMenu());
++    }
++
++    private void doCloseContainer(AbstractContainerMenu containerMenu) {
++        containerMenu.removed(this);
++        this.inventoryMenu.transferState(containerMenu);
++        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.entity.player.PlayerContainerEvent.Close(this, containerMenu));
++        this.restoreInventoryMenuIfCurrent(containerMenu);
+     }
+ 
+     @Override
+@@ -1581,7 +_,7 @@
+     @Override
+     protected void completeUsingItem() {
+         if (!this.useItem.isEmpty() && this.isUsingItem()) {
+-            this.connection.send(new ClientboundEntityEventPacket(this, (byte)9));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundEntityEventPacket(this, (byte)9));
+             super.completeUsingItem();
+         }
+     }
+@@ -1589,13 +_,13 @@
+     @Override
+     public void lookAt(EntityAnchorArgument.Anchor anchor, Vec3 pos) {
+         super.lookAt(anchor, pos);
+-        this.connection.send(new ClientboundPlayerLookAtPacket(anchor, pos.x, pos.y, pos.z));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerLookAtPacket(anchor, pos.x, pos.y, pos.z));
+     }
+ 
+     public void lookAt(EntityAnchorArgument.Anchor fromAnchor, Entity entity, EntityAnchorArgument.Anchor toAnchor) {
+         Vec3 pos = toAnchor.apply(entity);
+         super.lookAt(fromAnchor, pos);
+-        this.connection.send(new ClientboundPlayerLookAtPacket(fromAnchor, entity, toAnchor));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerLookAtPacket(fromAnchor, entity, toAnchor));
+     }
+ 
+     public void restoreFrom(ServerPlayer oldPlayer, boolean restoreAll) {
+@@ -1637,6 +_,15 @@
+         this.setShoulderEntityRight(oldPlayer.getShoulderEntityRight());
+         this.setLastDeathLocation(oldPlayer.getLastDeathLocation());
+         this.waypointIcon().copyFrom(oldPlayer.waypointIcon());
++
++        //Copy over a section of the Entity Data from the old player.
++        //Allows mods to specify data that persists after players respawn.
++        var old = oldPlayer.getPersistentData();
++        if (old.contains(PERSISTED_NBT_TAG))
++             getPersistentData().put(PERSISTED_NBT_TAG, old.get(PERSISTED_NBT_TAG));
++        net.neoforged.neoforge.event.EventHooks.onPlayerClone(this, oldPlayer, !restoreAll);
++        this.tabListHeader = oldPlayer.tabListHeader;
++        this.tabListFooter = oldPlayer.tabListFooter;
+     }
+ 
+     private void transferInventoryXpAndScore(Player oldPlayer) {
+@@ -1650,20 +_,20 @@
+     @Override
+     protected void onEffectAdded(MobEffectInstance effect, @Nullable Entity source) {
+         super.onEffectAdded(effect, source);
+-        this.connection.send(new ClientboundUpdateMobEffectPacket(this.getId(), effect, true));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundUpdateMobEffectPacket(this.getId(), effect, true));
+         if (effect.is(MobEffects.LEVITATION)) {
+             this.levitationStartTime = this.tickCount;
+             this.levitationStartPos = this.position();
+         }
+ 
+-        CriteriaTriggers.EFFECTS_CHANGED.trigger(this, source);
++        this.triggerEffectsChanged(source);
+     }
+ 
+     @Override
+     protected void onEffectUpdated(MobEffectInstance effect, boolean doRefreshAttributes, @Nullable Entity source) {
+         super.onEffectUpdated(effect, doRefreshAttributes, source);
+-        this.connection.send(new ClientboundUpdateMobEffectPacket(this.getId(), effect, false));
+-        CriteriaTriggers.EFFECTS_CHANGED.trigger(this, source);
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundUpdateMobEffectPacket(this.getId(), effect, false));
++        this.triggerEffectsChanged(source);
+     }
+ 
+     @Override
+@@ -1671,13 +_,20 @@
+         super.onEffectsRemoved(effects);
+ 
+         for (MobEffectInstance effect : effects) {
+-            this.connection.send(new ClientboundRemoveMobEffectPacket(this.getId(), effect.getEffect()));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundRemoveMobEffectPacket(this.getId(), effect.getEffect()));
+             if (effect.is(MobEffects.LEVITATION)) {
+                 this.levitationStartPos = null;
+             }
+         }
+ 
+-        CriteriaTriggers.EFFECTS_CHANGED.trigger(this, null);
++        this.triggerEffectsChanged(null);
++    }
++
++    private void triggerEffectsChanged(@Nullable Entity source) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(this, () -> CriteriaTriggers.EFFECTS_CHANGED.trigger(this, source));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Effects changed advancement", trigger)) {
++            trigger.run();
++        }
+     }
+ 
+     @Override
+@@ -1728,7 +_,7 @@
+     @Override
+     public void onUpdateAbilities() {
+         if (this.connection != null) {
+-            this.connection.send(new ClientboundPlayerAbilitiesPacket(this.getAbilities()));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundPlayerAbilitiesPacket(this.getAbilities()));
+             this.updateInvisibilityStatus();
+         }
+     }
+@@ -1739,10 +_,12 @@
+ 
+     public boolean setGameMode(GameType mode) {
+         boolean wasSpectator = this.isSpectator();
++        mode = net.neoforged.neoforge.common.CommonHooks.onChangeGameType(this, this.gameMode.getGameModeForPlayer(), mode);
++        if (mode == null) return false;
+         if (!this.gameMode.changeGameModeForPlayer(mode)) {
+             return false;
+         } else {
+-            this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.CHANGE_GAME_MODE, mode.getId()));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundGameEventPacket(ClientboundGameEventPacket.CHANGE_GAME_MODE, mode.getId()));
+             if (mode == GameType.SPECTATOR) {
+                 this.removeEntitiesOnShoulder();
+                 this.stopRiding();
+@@ -1803,6 +_,12 @@
+     }
+ 
+     public void sendSystemMessage(Component message, boolean overlay) {
++        if (this.server.regionizedTaskDispatcher().isRunning()
++            && !RegionizedTickContext.currentRegion().map(RegionizedWorldGuard.regionFor(this.level(), this.blockPosition())::equals).orElse(false)) {
++            RegionizedWorldGuard.executeOnPlayerRegion(this, () -> this.sendSystemMessage(message, overlay));
++            return;
++        }
++
+         if (this.acceptsSystemMessages(overlay)) {
+             this.connection
+                 .send(
+@@ -1826,6 +_,12 @@
+     }
+ 
+     public void sendChatMessage(OutgoingChatMessage message, boolean filtered, ChatType.Bound chatType) {
++        if (this.server.regionizedTaskDispatcher().isRunning()
++            && !RegionizedTickContext.currentRegion().map(RegionizedWorldGuard.regionFor(this.level(), this.blockPosition())::equals).orElse(false)) {
++            RegionizedWorldGuard.executeOnPlayerRegion(this, () -> this.sendChatMessage(message, filtered, chatType));
++            return;
++        }
++
+         if (this.acceptsChatMessages()) {
+             message.sendToPlayer(this, filtered, chatType);
+         }
+@@ -1885,7 +_,7 @@
+     }
+ 
+     public void sendServerStatus(ServerStatus status) {
+-        this.connection.send(new ClientboundServerDataPacket(status.description(), status.favicon().map(ServerStatus.Favicon::iconBytes)));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundServerDataPacket(status.description(), status.favicon().map(ServerStatus.Favicon::iconBytes)));
+     }
+ 
+     @Override
+@@ -1920,10 +_,17 @@
+     }
+ 
+     public void setCamera(@Nullable Entity newCamera) {
++        this.setCamera(newCamera, null, null);
++    }
++
++    public void setCamera(@Nullable Entity newCamera, @Nullable ServerLevel cameraLevel, @Nullable Vec3 cameraPosition) {
+         Entity oldCamera = this.getCamera();
+         this.camera = (Entity)(newCamera == null ? this : newCamera);
++        while (this.camera instanceof net.neoforged.neoforge.entity.PartEntity<?> partEntity) this.camera = partEntity.getParent(); // Neo: fix MC-46486
+         if (oldCamera != this.camera) {
+-            if (this.camera.level() instanceof ServerLevel level) {
++            if (cameraLevel != null && cameraPosition != null) {
++                this.teleportTo(cameraLevel, cameraPosition.x, cameraPosition.y, cameraPosition.z, Set.of(), this.getYRot(), this.getXRot(), false);
++            } else if (this.camera.level() instanceof ServerLevel level) {
+                 this.teleportTo(level, this.camera.getX(), this.camera.getY(), this.camera.getZ(), Set.of(), this.getYRot(), this.getXRot(), false);
+             }
+ 
+@@ -1931,7 +_,7 @@
+                 this.level().getChunkSource().move(this);
+             }
+ 
+-            this.connection.send(new ClientboundSetCameraPacket(this.camera));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundSetCameraPacket(this.camera));
+             this.connection.resetPosition();
+         }
+     }
+@@ -1948,7 +_,11 @@
+     }
+ 
+     public @Nullable Component getTabListDisplayName() {
+-        return null;
++        if (!this.hasTabListName) {
++            this.tabListDisplayName = net.neoforged.neoforge.event.EventHooks.getPlayerTabListDisplayName(this);
++            this.hasTabListName = true;
++        }
++        return this.tabListDisplayName;
+     }
+ 
+     public int getTabListOrder() {
+@@ -1982,6 +_,7 @@
+     }
+ 
+     public void setRespawnPosition(ServerPlayer.@Nullable RespawnConfig respawnConfig, boolean showMessage) {
++        if (net.neoforged.neoforge.event.EventHooks.onPlayerSpawnSet(this, respawnConfig)) return;
+         if (showMessage && respawnConfig != null && !respawnConfig.isSamePosition(this.respawnConfig)) {
+             this.sendSystemMessage(SPAWN_SET_MESSAGE);
+         }
+@@ -2019,6 +_,83 @@
+         return entity;
+     }
+ 
++    /**
++     * Returns the language last reported by the player as their local language.
++     * Defaults to en_us if the value is unknown.
++     */
++    public String getLanguage() {
++        return this.language;
++    }
++
++    private Component tabListHeader = Component.empty();
++    private Component tabListFooter = Component.empty();
++
++    public Component getTabListHeader() {
++        return this.tabListHeader;
++    }
++
++    /**
++     * Set the tab list header while preserving the footer.
++     *
++     * @param header the new header, or {@link Component#empty()} to clear
++     */
++    public void setTabListHeader(final Component header) {
++        this.setTabListHeaderFooter(header, this.tabListFooter);
++    }
++
++    public Component getTabListFooter() {
++        return this.tabListFooter;
++    }
++
++    /**
++     * Set the tab list footer while preserving the header.
++     *
++     * @param footer the new footer, or {@link Component#empty()} to clear
++     */
++    public void setTabListFooter(final Component footer) {
++        this.setTabListHeaderFooter(this.tabListHeader, footer);
++    }
++
++    /**
++     * Set the tab list header and footer at once.
++     *
++     * @param header the new header, or {@link Component#empty()} to clear
++     * @param footer the new footer, or {@link Component#empty()} to clear
++     */
++    public void setTabListHeaderFooter(final Component header, final Component footer) {
++        if (this.executeOnPlayerRegionAndWaitIfNeeded("tab list header/footer update", () -> this.setTabListHeaderFooter(header, footer))) {
++            return;
++        }
++
++        if (java.util.Objects.equals(header, this.tabListHeader)
++                && java.util.Objects.equals(footer, this.tabListFooter)) {
++            return;
++        }
++
++        this.tabListHeader = java.util.Objects.requireNonNull(header, "header");
++        this.tabListFooter = java.util.Objects.requireNonNull(footer, "footer");
++
++        RegionizedWorldGuard.sendToPlayer(this, new net.minecraft.network.protocol.game.ClientboundTabListPacket(header, footer));
++    }
++
++    // We need this as tablistDisplayname may be null even if the event was fired.
++    private boolean hasTabListName = false;
++    private Component tabListDisplayName = null;
++    /**
++     * Force the name displayed in the tab list to refresh, by firing {@link net.neoforged.neoforge.event.entity.player.PlayerEvent.TabListNameFormat}.
++     */
++    public void refreshTabListName() {
++        if (this.executeOnPlayerRegionAndWaitIfNeeded("tab list name refresh", this::refreshTabListName)) {
++            return;
++        }
++
++        Component oldName = this.tabListDisplayName;
++        this.tabListDisplayName = net.neoforged.neoforge.event.EventHooks.getPlayerTabListDisplayName(this);
++        if (!java.util.Objects.equals(oldName, this.tabListDisplayName)) {
++            this.server.getPlayerList().broadcastAll(new net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket(net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME, this));
++        }
++    }
++
+     public TextFilter getTextFilter() {
+         return this.textFilter;
+     }
+@@ -2033,6 +_,7 @@
+     }
+ 
+     private GameType calculateGameModeForNewPlayer(@Nullable GameType loadedGameType) {
++        if (isFakePlayer()) return GameType.SURVIVAL; // Neo: Always default fake players to survival
+         GameType forcedGameType = this.server.getForcedGameType();
+         if (forcedGameType != null) {
+             return forcedGameType;
+@@ -2069,15 +_,19 @@
+ 
+     public void drop(boolean all) {
+         Inventory inventory = this.getInventory();
++        ItemStack selected = inventory.getSelectedItem();
++        if (selected.isEmpty() || !selected.onDroppedByPlayer(this)) return;
+         ItemStack removed = inventory.removeFromSelected(all);
+-        this.containerMenu
++        AbstractContainerMenu containerMenu = this.getActiveContainerMenu();
++        ItemStack selectedSnapshot = inventory.getSelectedItem();
++        containerMenu
+             .findSlot(inventory, inventory.getSelectedSlot())
+-            .ifPresent(slotIndex -> this.containerMenu.setRemoteSlot(slotIndex, inventory.getSelectedItem()));
++            .ifPresent(slotIndex -> containerMenu.setRemoteSlot(slotIndex, selectedSnapshot));
+         if (this.useItem.isEmpty()) {
+             this.stopUsingItem();
+         }
+ 
+-        this.drop(removed, false, true);
++        net.neoforged.neoforge.common.CommonHooks.onPlayerTossEvent(this, removed, false, true);
+     }
+ 
+     @Override
+@@ -2104,8 +_,20 @@
+     public void onItemPickup(ItemEntity entity) {
+         super.onItemPickup(entity);
+         Entity thrower = entity.getOwner();
++        if (thrower == null) {
++            UUID throwerId = entity.getThrowerUUID();
++            thrower = throwerId == null ? null : this.server.getPlayerList().getAnyRegionPlayer(throwerId);
++        }
++
+         if (thrower != null) {
+-            CriteriaTriggers.THROWN_ITEM_PICKED_UP_BY_PLAYER.trigger(this, entity.getItem(), thrower);
++            ItemStack itemStack = entity.getItem().copy();
++            Entity triggerThrower = thrower;
++            Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(
++                this, () -> CriteriaTriggers.THROWN_ITEM_PICKED_UP_BY_PLAYER.trigger(this, itemStack, triggerThrower)
++            );
++            if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Thrown item picked up by player advancement", trigger)) {
++                trigger.run();
++            }
+         }
+     }
+ 
+@@ -2120,7 +_,7 @@
+     @Override
+     public void indicateDamage(double xd, double zd) {
+         this.hurtDir = (float)(Mth.atan2(zd, xd) * 180.0F / (float)Math.PI - this.getYRot());
+-        this.connection.send(new ClientboundHurtAnimationPacket(this));
++        RegionizedWorldGuard.sendToPlayer(this, new ClientboundHurtAnimationPacket(this));
+     }
+ 
+     @Override
+@@ -2132,7 +_,7 @@
+                 this.server.getPlayerList().sendActiveEffects(livingEntity, this.connection);
+             }
+ 
+-            this.connection.send(new ClientboundSetPassengersPacket(entityToRide));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundSetPassengersPacket(entityToRide));
+             return true;
+         } else {
+             return false;
+@@ -2145,12 +_,12 @@
+         super.removeVehicle();
+         if (oldVehicle instanceof LivingEntity livingEntity) {
+             for (MobEffectInstance effect : livingEntity.getActiveEffects()) {
+-                this.connection.send(new ClientboundRemoveMobEffectPacket(oldVehicle.getId(), effect.getEffect()));
++                RegionizedWorldGuard.sendToPlayer(this, new ClientboundRemoveMobEffectPacket(oldVehicle.getId(), effect.getEffect()));
+             }
+         }
+ 
+         if (oldVehicle != null) {
+-            this.connection.send(new ClientboundSetPassengersPacket(oldVehicle));
++            RegionizedWorldGuard.sendToPlayer(this, new ClientboundSetPassengersPacket(oldVehicle));
+         }
+     }
+ 
+@@ -2222,16 +_,16 @@
+         return getInputVector(new Vec3(leftIntent, 0.0, forwardIntent), 1.0F, this.getYRot());
+     }
+ 
+-    public void registerEnderPearl(ThrownEnderpearl enderPearl) {
++    public synchronized void registerEnderPearl(ThrownEnderpearl enderPearl) {
+         this.enderPearls.add(enderPearl);
+     }
+ 
+-    public void deregisterEnderPearl(ThrownEnderpearl enderPearl) {
++    public synchronized void deregisterEnderPearl(ThrownEnderpearl enderPearl) {
+         this.enderPearls.remove(enderPearl);
+     }
+ 
+-    public Set<ThrownEnderpearl> getEnderPearls() {
+-        return this.enderPearls;
++    public synchronized Set<ThrownEnderpearl> getEnderPearls() {
++        return Set.copyOf(this.enderPearls);
+     }
+ 
+     public CompoundTag getShoulderEntityLeft() {
+@@ -2268,12 +_,12 @@
+         return TicketType.ENDER_PEARL.timeout();
+     }
+ 
+-    public void requestDebugSubscriptions(Set<DebugSubscription<?>> subscriptions) {
++    public synchronized void requestDebugSubscriptions(Set<DebugSubscription<?>> subscriptions) {
+         this.requestedDebugSubscriptions = Set.copyOf(subscriptions);
+     }
+ 
+-    public Set<DebugSubscription<?>> debugSubscriptions() {
+-        return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions;
++    public synchronized Set<DebugSubscription<?>> debugSubscriptions() {
++        return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : Set.copyOf(this.requestedDebugSubscriptions);
+     }
+ 
+     public record RespawnConfig(LevelData.RespawnData respawnData, boolean forced) {

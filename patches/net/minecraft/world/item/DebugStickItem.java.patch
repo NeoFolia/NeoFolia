@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/DebugStickItem.java
++++ b/net/minecraft/world/item/DebugStickItem.java
+@@ -7,6 +_,7 @@
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.Util;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.player.Player;
+@@ -93,7 +_,7 @@
+     }
+ 
+     private static void message(ServerPlayer player, Component message) {
+-        player.sendOverlayMessage(message);
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.sendOverlayMessage(message));
+     }
+ 
+     private static <T extends Comparable<T>> String getNameHelper(BlockState state, Property<T> property) {

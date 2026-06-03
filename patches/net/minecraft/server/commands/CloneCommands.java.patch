@@ -1,0 +1,76 @@
+--- a/net/minecraft/server/commands/CloneCommands.java
++++ b/net/minecraft/server/commands/CloneCommands.java
+@@ -109,7 +_,7 @@
+         ArgumentBuilder<CommandSourceStack, ?> builder
+     ) {
+         return builder.executes(
+-                c -> clone(c.getSource(), beginPos.apply(c), endPos.apply(c), destinationPos.apply(c), b -> true, CloneCommands.Mode.NORMAL, strict)
++                c -> clone(c, beginPos, endPos, destinationPos, c2 -> b -> true, CloneCommands.Mode.NORMAL, strict)
+             )
+             .then(wrapWithCloneMode(beginPos, endPos, destinationPos, c -> b -> true, strict, Commands.literal("replace")))
+             .then(wrapWithCloneMode(beginPos, endPos, destinationPos, c -> FILTER_AIR, strict, Commands.literal("masked")))
+@@ -137,30 +_,37 @@
+         ArgumentBuilder<CommandSourceStack, ?> builder
+     ) {
+         return builder.executes(
+-                c -> clone(c.getSource(), beginPos.apply(c), endPos.apply(c), destinationPos.apply(c), filter.apply(c), CloneCommands.Mode.NORMAL, strict)
++                c -> clone(c, beginPos, endPos, destinationPos, filter, CloneCommands.Mode.NORMAL, strict)
+             )
+             .then(
+                 Commands.literal("force")
+-                    .executes(
+-                        c -> clone(
+-                            c.getSource(), beginPos.apply(c), endPos.apply(c), destinationPos.apply(c), filter.apply(c), CloneCommands.Mode.FORCE, strict
+-                        )
+-                    )
++                    .executes(c -> clone(c, beginPos, endPos, destinationPos, filter, CloneCommands.Mode.FORCE, strict))
+             )
+             .then(
+                 Commands.literal("move")
+-                    .executes(
+-                        c -> clone(c.getSource(), beginPos.apply(c), endPos.apply(c), destinationPos.apply(c), filter.apply(c), CloneCommands.Mode.MOVE, strict)
+-                    )
++                    .executes(c -> clone(c, beginPos, endPos, destinationPos, filter, CloneCommands.Mode.MOVE, strict))
+             )
+             .then(
+                 Commands.literal("normal")
+-                    .executes(
+-                        c -> clone(
+-                            c.getSource(), beginPos.apply(c), endPos.apply(c), destinationPos.apply(c), filter.apply(c), CloneCommands.Mode.NORMAL, strict
+-                        )
+-                    )
++                    .executes(c -> clone(c, beginPos, endPos, destinationPos, filter, CloneCommands.Mode.NORMAL, strict))
+             );
++    }
++
++    private static int clone(
++        CommandContext<CommandSourceStack> context,
++        InCommandFunction<CommandContext<CommandSourceStack>, CloneCommands.DimensionAndPosition> beginPos,
++        InCommandFunction<CommandContext<CommandSourceStack>, CloneCommands.DimensionAndPosition> endPos,
++        InCommandFunction<CommandContext<CommandSourceStack>, CloneCommands.DimensionAndPosition> destinationPos,
++        InCommandFunction<CommandContext<CommandSourceStack>, Predicate<BlockInWorld>> filter,
++        CloneCommands.Mode mode,
++        boolean strict
++    ) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> clone(context, beginPos, endPos, destinationPos, filter, mode, strict))) {
++            return 0;
++        }
++
++        return clone(source, beginPos.apply(context), endPos.apply(context), destinationPos.apply(context), filter.apply(context), mode, strict);
+     }
+ 
+     private static int clone(
+@@ -172,6 +_,12 @@
+         CloneCommands.Mode mode,
+         boolean strict
+     ) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(
++            source, () -> clone(source, startPosAndDimension, endPosAndDimension, destPosAndDimension, predicate, mode, strict)
++        )) {
++            return 0;
++        }
++
+         BlockPos startPos = startPosAndDimension.position();
+         BlockPos endPos = endPosAndDimension.position();
+         BoundingBox from = BoundingBox.fromCorners(startPos, endPos);

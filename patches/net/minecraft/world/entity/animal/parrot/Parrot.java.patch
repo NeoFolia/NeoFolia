@@ -1,0 +1,143 @@
+--- a/net/minecraft/world/entity/animal/parrot/Parrot.java
++++ b/net/minecraft/world/entity/animal/parrot/Parrot.java
+@@ -70,16 +_,20 @@
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Parrot extends ShoulderRidingEntity implements FlyingAnimal {
+     private static final EntityDataAccessor<Integer> DATA_VARIANT_ID = SynchedEntityData.defineId(Parrot.class, EntityDataSerializers.INT);
+     private static final Predicate<Mob> NOT_PARROT_PREDICATE = new Predicate<Mob>() {
+         public boolean test(@Nullable Mob input) {
+-            return input != null && Parrot.MOB_SOUND_MAP.containsKey(input.getType());
++            return input != null && (Parrot.MOB_SOUND_MAP.containsKey(input.getType()) || input.getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.PARROT_IMITATIONS) != null);
+         }
+     };
++    /** @deprecated Neo: use the {@link net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps#PARROT_IMITATIONS data map} instead */
++    @Deprecated
+     private static final Map<EntityType<?>, SoundEvent> MOB_SOUND_MAP = Util.make(Maps.newHashMap(), map -> {
+         map.put(EntityType.BLAZE, SoundEvents.PARROT_IMITATE_BLAZE);
+         map.put(EntityType.BOGGED, SoundEvents.PARROT_IMITATE_BOGGED);
+@@ -145,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        this.setVariant(Util.getRandom(Parrot.Variant.values(), level.getRandom()));
++        this.setVariant(Util.getRandom(Parrot.Variant.values(), this.getRandom()));
+         if (groupData == null) {
+             groupData = new AgeableMob.AgeableMobGroupData(false);
+         }
+@@ -188,12 +_,15 @@
+ 
+     @Override
+     public void aiStep() {
+-        if (this.jukebox == null || !this.jukebox.closerToCenterThan(this.position(), 3.46) || !this.level().getBlockState(this.jukebox).is(Blocks.JUKEBOX)) {
++        if (this.jukebox == null
++            || !this.jukebox.closerToCenterThan(this.position(), 3.46)
++            || !this.canReadBlock(this.jukebox)
++            || !this.level().getBlockState(this.jukebox).is(Blocks.JUKEBOX)) {
+             this.partyParrot = false;
+             this.jukebox = null;
+         }
+ 
+-        if (this.level().getRandom().nextInt(400) == 0) {
++        if (this.getRandom().nextInt(400) == 0) {
+             imitateNearbyMobs(this.level(), this);
+         }
+ 
+@@ -211,6 +_,10 @@
+         return this.partyParrot;
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private void calculateFlapping() {
+         this.oFlap = this.flap;
+         this.oFlapSpeed = this.flapSpeed;
+@@ -230,9 +_,10 @@
+     }
+ 
+     public static boolean imitateNearbyMobs(Level level, Entity entity) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = entity.getRandom();
+         if (entity.isAlive() && !entity.isSilent() && random.nextInt(2) == 0) {
+-            List<Mob> mobs = level.getEntitiesOfClass(Mob.class, entity.getBoundingBox().inflate(20.0), NOT_PARROT_PREDICATE);
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, entity.getBoundingBox().inflate(20.0));
++            List<Mob> mobs = searchBox == null ? List.of() : level.getEntitiesOfClass(Mob.class, searchBox, NOT_PARROT_PREDICATE);
+             if (!mobs.isEmpty()) {
+                 Mob mob = mobs.get(random.nextInt(mobs.size()));
+                 if (!mob.isSilent()) {
+@@ -268,7 +_,7 @@
+             }
+ 
+             if (!this.level().isClientSide()) {
+-                if (this.random.nextInt(10) == 0) {
++                if (this.random.nextInt(10) == 0 && !net.neoforged.neoforge.event.EventHooks.onAnimalTame(this, player)) {
+                     this.tame(player);
+                     this.level().broadcastEntityEvent(this, (byte)7);
+                 } else {
+@@ -304,7 +_,8 @@
+     }
+ 
+     public static boolean checkParrotSpawnRules(EntityType<Parrot> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random) {
+-        return level.getBlockState(pos.below()).is(BlockTags.PARROTS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.PARROTS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
+     }
+ 
+     @Override
+@@ -323,12 +_,15 @@
+ 
+     @Override
+     public @Nullable SoundEvent getAmbientSound() {
+-        return getAmbient(this.level(), this.level().getRandom());
++        return getAmbient(this.level(), this.getRandom());
+     }
+ 
+     public static SoundEvent getAmbient(Level level, RandomSource random) {
+         if (level.getDifficulty() != Difficulty.PEACEFUL && random.nextInt(1000) == 0) {
+-            List<EntityType<?>> keys = Lists.newArrayList(MOB_SOUND_MAP.keySet());
++            final var entities = new java.util.HashSet<>(MOB_SOUND_MAP.keySet());
++            final var registry = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENTITY_TYPE);
++            registry.getDataMap(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.PARROT_IMITATIONS).keySet().forEach(key -> entities.add(registry.getValue(key)));
++            List<EntityType<?>> keys = Lists.newArrayList(entities);
+             return getImitatedSound(keys.get(random.nextInt(keys.size())));
+         } else {
+             return SoundEvents.PARROT_AMBIENT;
+@@ -336,7 +_,9 @@
+     }
+ 
+     private static SoundEvent getImitatedSound(EntityType<?> id) {
+-        return MOB_SOUND_MAP.getOrDefault(id, SoundEvents.PARROT_AMBIENT);
++        var imitation = id.builtInRegistryHolder().getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.PARROT_IMITATIONS);
++        if (imitation != null) return imitation.sound();
++        return SoundEvents.PARROT_AMBIENT;
+     }
+ 
+     @Override
+@@ -496,9 +_,17 @@
+                 Mth.floor(this.mob.getZ() + 3.0)
+             )) {
+                 if (!mobPos.equals(pos)) {
+-                    BlockState state = this.mob.level().getBlockState(belowPos.setWithOffset(pos, Direction.DOWN));
++                    belowPos.setWithOffset(pos, Direction.DOWN);
++                    abovePos.setWithOffset(pos, Direction.UP);
++                    if (!RegionizedWorldGuard.shouldLoadChunk(this.mob.level(), pos.getX() >> 4, pos.getZ() >> 4)
++                        || !RegionizedWorldGuard.shouldLoadChunk(this.mob.level(), belowPos.getX() >> 4, belowPos.getZ() >> 4)
++                        || !RegionizedWorldGuard.shouldLoadChunk(this.mob.level(), abovePos.getX() >> 4, abovePos.getZ() >> 4)) {
++                        continue;
++                    }
++
++                    BlockState state = this.mob.level().getBlockState(belowPos);
+                     boolean canSitOn = state.getBlock() instanceof LeavesBlock || state.is(BlockTags.LOGS);
+-                    if (canSitOn && this.mob.level().isEmptyBlock(pos) && this.mob.level().isEmptyBlock(abovePos.setWithOffset(pos, Direction.UP))) {
++                    if (canSitOn && this.mob.level().isEmptyBlock(pos) && this.mob.level().isEmptyBlock(abovePos)) {
+                         return Vec3.atBottomCenterOf(pos);
+                     }
+                 }

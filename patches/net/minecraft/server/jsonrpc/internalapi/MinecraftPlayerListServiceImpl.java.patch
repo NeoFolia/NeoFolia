@@ -1,0 +1,91 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListServiceImpl.java
+@@ -3,11 +_,13 @@
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
++import net.minecraft.network.chat.Component;
+ import net.minecraft.server.dedicated.DedicatedServer;
+ import net.minecraft.server.jsonrpc.JsonRpcLogger;
+ import net.minecraft.server.jsonrpc.methods.ClientInfo;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.players.NameAndId;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MinecraftPlayerListServiceImpl implements MinecraftPlayerListService {
+@@ -21,12 +_,12 @@
+ 
+     @Override
+     public List<ServerPlayer> getPlayers() {
+-        return this.server.getPlayerList().getPlayers();
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getAllPlayers());
+     }
+ 
+     @Override
+     public @Nullable ServerPlayer getPlayer(UUID uuid) {
+-        return this.server.getPlayerList().getPlayer(uuid);
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getAllPlayer(uuid));
+     }
+ 
+     @Override
+@@ -46,26 +_,52 @@
+ 
+     @Override
+     public Optional<ServerPlayer> getPlayer(Optional<UUID> id, Optional<String> name) {
+-        if (id.isPresent()) {
+-            return Optional.ofNullable(this.server.getPlayerList().getPlayer(id.get()));
+-        } else {
+-            return name.isPresent() ? Optional.ofNullable(this.server.getPlayerList().getPlayerByName(name.get())) : Optional.empty();
+-        }
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> {
++            if (id.isPresent()) {
++                return Optional.ofNullable(this.server.getPlayerList().getAllPlayer(id.get()));
++            } else {
++                return name.isPresent() ? Optional.ofNullable(this.server.getPlayerList().getAllPlayerByName(name.get())) : Optional.empty();
++            }
++        });
+     }
+ 
+     @Override
+     public List<ServerPlayer> getPlayersWithAddress(String ip) {
+-        return this.server.getPlayerList().getPlayersWithAddress(ip);
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getAllPlayersWithAddress(ip));
+     }
+ 
+     @Override
+     public void remove(ServerPlayer serverPlayer, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.remove(serverPlayer, clientInfo))) {
++            return;
++        }
++
+         this.server.getPlayerList().remove(serverPlayer);
+         this.jsonRpcLogger.log(clientInfo, "Remove player '{}'", serverPlayer.getPlainTextName());
+     }
+ 
+     @Override
++    public void disconnect(ServerPlayer player, Component reason, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.scheduleOnPlayerRegionIfNeeded(this.server, player, () -> this.disconnect(player, reason, clientInfo))) {
++            return;
++        }
++
++        if (!RegionizedTickContext.isRegionThread()
++            && RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.disconnect(player, reason, clientInfo))) {
++            return;
++        }
++
++        this.jsonRpcLogger.log(clientInfo, "Disconnect player '{}': '{}'", player.getPlainTextName(), reason.getString());
++        player.connection.disconnect(reason);
++    }
++
++    @Override
+     public @Nullable ServerPlayer getPlayerByName(String name) {
+-        return this.server.getPlayerList().getPlayerByName(name);
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getAllPlayerByName(name));
++    }
++
++    @Override
++    public String getIpAddress(ServerPlayer player) {
++        return RegionizedJsonRpcGuard.callOnPlayerRegionIfNeeded(this.server, player, player::getIpAddress);
+     }
+ }

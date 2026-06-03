@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/level/block/DispenserBlock.java
++++ b/net/minecraft/world/level/block/DispenserBlock.java
+@@ -16,6 +_,7 @@
+ import net.minecraft.core.dispenser.SpawnEggItemBehavior;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.Containers;
+ import net.minecraft.world.InteractionResult;
+@@ -41,6 +_,7 @@
+ import net.minecraft.world.level.redstone.Orientation;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -75,7 +_,7 @@
+     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+         if (!level.isClientSide() && level.getBlockEntity(pos) instanceof DispenserBlockEntity dispenser) {
+             player.openMenu(dispenser);
+-            player.awardStat(dispenser instanceof DropperBlockEntity ? Stats.INSPECT_DROPPER : Stats.INSPECT_DISPENSER);
++            RegionizedWorldGuard.awardStat(player, dispenser instanceof DropperBlockEntity ? Stats.INSPECT_DROPPER : Stats.INSPECT_DISPENSER);
+         }
+ 
+         return InteractionResult.SUCCESS;
+@@ -87,7 +_,7 @@
+             LOGGER.warn("Ignoring dispensing attempt for Dispenser without matching block entity at {}", pos);
+         } else {
+             BlockSource source = new BlockSource(level, pos, state, blockEntity);
+-            int slot = blockEntity.getRandomSlot(level.getRandom());
++            int slot = blockEntity.getRandomSlot(dispenserRandom(level));
+             if (slot < 0) {
+                 level.levelEvent(1001, pos, 0);
+                 level.gameEvent(GameEvent.BLOCK_ACTIVATE, pos, GameEvent.Context.of(blockEntity.getBlockState()));
+@@ -99,6 +_,10 @@
+                 }
+             }
+         }
++    }
++
++    protected static RandomSource dispenserRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
+     }
+ 
+     protected DispenseItemBehavior getDispenseMethod(Level level, ItemStack itemStack) {

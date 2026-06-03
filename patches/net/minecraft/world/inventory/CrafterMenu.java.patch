@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/inventory/CrafterMenu.java
++++ b/net/minecraft/world/inventory/CrafterMenu.java
+@@ -68,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -117,11 +_,11 @@
+     }
+ 
+     @Override
+-    public void slotChanged(AbstractContainerMenu container, int slotIndex, ItemStack itemStack) {
++    public synchronized void slotChanged(AbstractContainerMenu container, int slotIndex, ItemStack itemStack) {
+         this.refreshRecipeResult();
+     }
+ 
+     @Override
+-    public void dataChanged(AbstractContainerMenu container, int id, int value) {
++    public synchronized void dataChanged(AbstractContainerMenu container, int id, int value) {
+     }
+ }

@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/ai/behavior/Mount.java
++++ b/net/minecraft/world/entity/ai/behavior/Mount.java
+@@ -9,14 +_,19 @@
+ public class Mount {
+     private static final int CLOSE_ENOUGH_TO_START_RIDING_DIST = 1;
+ 
+-    public static BehaviorControl<LivingEntity> create(float speedModifier) {
++    public static synchronized BehaviorControl<LivingEntity> create(float speedModifier) {
+         return BehaviorBuilder.create(
+             i -> i.group(i.registered(MemoryModuleType.LOOK_TARGET), i.absent(MemoryModuleType.WALK_TARGET), i.present(MemoryModuleType.RIDE_TARGET))
+                 .apply(i, (lookTarget, walkTarget, rideTarget) -> (level, body, timestamp) -> {
+                     if (body.isPassenger()) {
+                         return false;
+                     } else {
+-                        Entity ridableEntity = i.get(rideTarget);
++                        Entity ridableEntity = BehaviorUtils.regionSafeEntity(body, i.get(rideTarget));
++                        if (ridableEntity == null) {
++                            rideTarget.erase();
++                            return false;
++                        }
++
+                         if (ridableEntity.closerThan(body, 1.0)) {
+                             body.startRiding(ridableEntity);
+                         } else {

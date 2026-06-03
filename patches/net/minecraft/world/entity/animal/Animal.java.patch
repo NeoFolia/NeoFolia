@@ -1,0 +1,103 @@
+--- a/net/minecraft/world/entity/animal/Animal.java
++++ b/net/minecraft/world/entity/animal/Animal.java
+@@ -37,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class Animal extends AgeableMob {
+@@ -90,7 +_,8 @@
+ 
+     @Override
+     public float getWalkTargetValue(BlockPos pos, LevelReader level) {
+-        return level.getBlockState(pos.below()).is(Blocks.GRASS_BLOCK) ? 10.0F : level.getPathfindingCostFromLightLevels(pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(Blocks.GRASS_BLOCK) ? 10.0F : level.getPathfindingCostFromLightLevels(pos);
+     }
+ 
+     @Override
+@@ -111,7 +_,12 @@
+         EntityType<? extends Animal> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+         boolean brightEnoughToSpawn = EntitySpawnReason.ignoresLightRequirements(spawnReason) || isBrightEnoughToSpawn(level, pos);
+-        return level.getBlockState(pos.below()).is(BlockTags.ANIMALS_SPAWNABLE_ON) && brightEnoughToSpawn;
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.ANIMALS_SPAWNABLE_ON) && brightEnoughToSpawn;
++    }
++
++    protected static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     protected static boolean isBrightEnoughToSpawn(BlockAndLightGetter level, BlockPos pos) {
+@@ -187,7 +_,19 @@
+     }
+ 
+     public @Nullable ServerPlayer getLoveCause() {
+-        return EntityReference.get(this.loveCause, this.level(), ServerPlayer.class);
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), EntityReference.get(this.loveCause, this.level(), ServerPlayer.class));
++    }
++
++    public @Nullable ServerPlayer getLoveCauseAcrossRegions() {
++        if (this.loveCause == null) {
++            return null;
++        }
++
++        if (this.level() instanceof ServerLevel serverLevel) {
++            return serverLevel.getServer().getPlayerList().getAnyRegionPlayer(this.loveCause.getUUID());
++        }
++
++        return this.getLoveCause();
+     }
+ 
+     public boolean isInLove() {
+@@ -208,6 +_,17 @@
+ 
+     public void spawnChildFromBreeding(ServerLevel level, Animal partner) {
+         AgeableMob offspring = this.getBreedOffspring(level, partner);
++        final net.neoforged.neoforge.event.entity.living.BabyEntitySpawnEvent event = new net.neoforged.neoforge.event.entity.living.BabyEntitySpawnEvent(this, partner, offspring);
++        final boolean cancelled = net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event).isCanceled();
++        offspring = event.getChild();
++        if (cancelled) {
++            //Reset the "inLove" state for the animals
++            this.setAge(6000);
++            partner.setAge(6000);
++            this.resetLove();
++            partner.resetLove();
++            return;
++        }
+         if (offspring != null) {
+             offspring.setBaby(true);
+             offspring.snapTo(this.getX(), this.getY(), this.getZ(), 0.0F, 0.0F);
+@@ -217,10 +_,8 @@
+     }
+ 
+     public void finalizeSpawnChildFromBreeding(ServerLevel level, Animal partner, @Nullable AgeableMob offspring) {
+-        Optional.ofNullable(this.getLoveCause()).or(() -> Optional.ofNullable(partner.getLoveCause())).ifPresent(cause -> {
+-            cause.awardStat(Stats.ANIMALS_BRED);
+-            CriteriaTriggers.BRED_ANIMALS.trigger(cause, this, partner, offspring);
+-        });
++        Optional.ofNullable(this.getLoveCauseAcrossRegions()).or(() -> Optional.ofNullable(partner.getLoveCauseAcrossRegions()))
++            .ifPresent(cause -> triggerBredAnimals(cause, this, partner, offspring));
+         this.setAge(6000);
+         partner.setAge(6000);
+         this.resetLove();
+@@ -228,6 +_,16 @@
+         level.broadcastEntityEvent(this, (byte)18);
+         if (level.getGameRules().get(GameRules.MOB_DROPS)) {
+             level.addFreshEntity(new ExperienceOrb(level, this.getX(), this.getY(), this.getZ(), this.getRandom().nextInt(7) + 1));
++        }
++    }
++
++    protected static void triggerBredAnimals(ServerPlayer cause, Animal parent, Animal partner, @Nullable AgeableMob offspring) {
++        Runnable trigger = () -> {
++            RegionizedWorldGuard.awardStat(cause, Stats.ANIMALS_BRED);
++            RegionizedWorldGuard.executeOnPlayerRegion(cause, () -> CriteriaTriggers.BRED_ANIMALS.trigger(cause, parent, partner, offspring));
++        };
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(parent.level(), "Bred animals advancement", trigger)) {
++            trigger.run();
+         }
+     }
+ 

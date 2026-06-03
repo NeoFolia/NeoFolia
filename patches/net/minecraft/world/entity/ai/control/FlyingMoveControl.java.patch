@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/control/FlyingMoveControl.java
++++ b/net/minecraft/world/entity/ai/control/FlyingMoveControl.java
+@@ -15,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.operation == MoveControl.Operation.MOVE_TO) {
+             this.operation = MoveControl.Operation.WAIT;
+             this.mob.setNoGravity(true);

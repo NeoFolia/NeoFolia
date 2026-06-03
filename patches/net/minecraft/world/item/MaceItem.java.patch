@@ -1,0 +1,57 @@
+--- a/net/minecraft/world/item/MaceItem.java
++++ b/net/minecraft/world/item/MaceItem.java
+@@ -21,7 +_,9 @@
+ import net.minecraft.world.item.component.Tool;
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.level.Level;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MaceItem extends Item {
+@@ -58,7 +_,7 @@
+             attacker.setDeltaMovement(attacker.getDeltaMovement().with(Direction.Axis.Y, 0.01F));
+             attacker.setIgnoreFallDamageFromCurrentImpulse(true, this.calculateImpactPosition(attacker));
+             if (attacker instanceof ServerPlayer player) {
+-                player.connection.send(new ClientboundSetEntityMotionPacket(player));
++                RegionizedWorldGuard.sendToPlayer(player, new ClientboundSetEntityMotionPacket(player));
+             }
+ 
+             if (mob.onGround()) {
+@@ -91,7 +_,12 @@
+ 
+     @Override
+     public float getAttackDamageBonus(Entity victim, float ignoredDamage, DamageSource damageSource) {
+-        if (damageSource.getDirectEntity() instanceof LivingEntity attacker) {
++        Entity directEntity = damageSource.getDirectEntity();
++        if (victim.level() instanceof ServerLevel level) {
++            directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(level, directEntity);
++        }
++
++        if (directEntity instanceof LivingEntity attacker) {
+             if (!canSmashAttack(attacker)) {
+                 return 0.0F;
+             } else {
+@@ -118,14 +_,19 @@
+ 
+     private static void knockback(Level level, Entity attacker, Entity entity) {
+         level.levelEvent(2013, entity.getOnPos(), 750);
+-        level.getEntitiesOfClass(LivingEntity.class, entity.getBoundingBox().inflate(3.5), knockbackPredicate(attacker, entity)).forEach(nearby -> {
++        AABB knockbackBox = RegionizedWorldGuard.restrictToCurrentRegion(level, entity.getBoundingBox().inflate(3.5));
++        if (knockbackBox == null) {
++            return;
++        }
++
++        level.getEntitiesOfClass(LivingEntity.class, knockbackBox, knockbackPredicate(attacker, entity)).forEach(nearby -> {
+             Vec3 direction = nearby.position().subtract(entity.position());
+             double knockbackPower = getKnockbackPower(attacker, nearby, direction);
+             Vec3 knockbackVector = direction.normalize().scale(knockbackPower);
+             if (knockbackPower > 0.0) {
+                 nearby.push(knockbackVector.x, 0.7F, knockbackVector.z);
+                 if (nearby instanceof ServerPlayer otherPlayer) {
+-                    otherPlayer.connection.send(new ClientboundSetEntityMotionPacket(otherPlayer));
++                    RegionizedWorldGuard.sendToPlayer(otherPlayer, new ClientboundSetEntityMotionPacket(otherPlayer));
+                 }
+             }
+         });

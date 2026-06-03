@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/goal/WaterAvoidingRandomStrollGoal.java
++++ b/net/minecraft/world/entity/ai/goal/WaterAvoidingRandomStrollGoal.java
+@@ -19,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected @Nullable Vec3 getPosition() {
++    protected synchronized @Nullable Vec3 getPosition() {
+         if (this.mob.isInWater()) {
+             Vec3 pos = LandRandomPos.getPos(this.mob, 15, 7);
+             return pos == null ? super.getPosition() : pos;

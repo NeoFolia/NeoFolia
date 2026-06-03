@@ -1,0 +1,50 @@
+--- a/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
++++ b/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
+@@ -49,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class HappyGhast extends Animal {
+@@ -84,7 +_,7 @@
+     private void setServerStillTimeout(int serverStillTimeout) {
+         if (this.serverStillTimeout <= 0 && serverStillTimeout > 0 && this.level() instanceof ServerLevel serverLevel) {
+             this.syncPacketPositionCodec(this.getX(), this.getY(), this.getZ());
+-            serverLevel.getChunkSource().chunkMap.sendToTrackingPlayers(this, ClientboundEntityPositionSyncPacket.of(this));
++            serverLevel.getChunkSource().sendToTrackingPlayers(this, ClientboundEntityPositionSyncPacket.of(this));
+         }
+ 
+         this.serverStillTimeout = serverStillTimeout;
+@@ -177,11 +_,17 @@
+ 
+     @Override
+     public float getWalkTargetValue(BlockPos pos, LevelReader level) {
+-        if (!level.isEmptyBlock(pos)) {
++        if (!canReadBlock(level, pos) || !level.isEmptyBlock(pos)) {
+             return 0.0F;
+         } else {
+-            return level.isEmptyBlock(pos.below()) && !level.isEmptyBlock(pos.below(2)) ? 10.0F : 5.0F;
++            BlockPos below = pos.below();
++            BlockPos belowTwo = pos.below(2);
++            return canReadBlock(level, below) && canReadBlock(level, belowTwo) && level.isEmptyBlock(below) && !level.isEmptyBlock(belowTwo) ? 10.0F : 5.0F;
+         }
++    }
++
++    protected static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override
+@@ -548,6 +_,10 @@
+         );
+ 
+         for (Player player : this.level().players()) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), player) == null) {
++                continue;
++            }
++
+             if (!player.isSpectator()) {
+                 Entity rootVehicle = player.getRootVehicle();
+                 if (!(rootVehicle instanceof HappyGhast) && ghastDetectionBox.contains(rootVehicle.position())) {

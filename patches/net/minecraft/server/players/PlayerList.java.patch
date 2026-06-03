@@ -1,0 +1,1075 @@
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -99,6 +_,8 @@
+ import net.minecraft.world.scores.Objective;
+ import net.minecraft.world.scores.PlayerTeam;
+ import net.minecraft.world.scores.Team;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -141,6 +_,10 @@
+     }
+ 
+     public void placeNewPlayer(Connection connection, ServerPlayer player, CommonListenerCookie cookie) {
++        if (this.scheduleGlobalIfRegionized(() -> this.placeNewPlayer(connection, player, cookie))) {
++            return;
++        }
++
+         NameAndId gameProfile = player.nameAndId();
+         UserNameToIdResolver profileCache = this.server.services().nameToIdCache();
+         Optional<NameAndId> oldProfile = profileCache.get(gameProfile.id());
+@@ -160,7 +_,7 @@
+         LevelData levelData = level.getLevelData();
+         ServerGamePacketListenerImpl playerConnection = new ServerGamePacketListenerImpl(this.server, connection, player, cookie);
+         connection.setupInboundProtocol(
+-            GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection), playerConnection
++            GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess(), playerConnection.getConnectionType()), playerConnection), playerConnection
+         );
+         playerConnection.suspendFlushing();
+         GameRules gameRules = level.getGameRules();
+@@ -185,10 +_,12 @@
+         playerConnection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
+         playerConnection.send(new ClientboundPlayerAbilitiesPacket(player.getAbilities()));
+         playerConnection.send(new ClientboundSetHeldSlotPacket(player.getInventory().getSelectedSlot()));
++        var dataSyncEvent = net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.OnDatapackSyncEvent(this, player));
+         RecipeManager recipeManager = this.server.getRecipeManager();
+         playerConnection.send(
+             new ClientboundUpdateRecipesPacket(recipeManager.getSynchronizedItemProperties(), recipeManager.getSynchronizedStonecutterRecipes())
+         );
++        net.neoforged.neoforge.common.CommonHooks.sendRecipes(player, dataSyncEvent.getRecipeTypesToSend(), recipeManager.recipeMap());
+         this.sendPlayerPermissionLevel(player);
+         player.getStats().markAllDirty();
+         player.getRecipeBook().sendInitialRecipeBook(player);
+@@ -208,31 +_,146 @@
+             player.sendServerStatus(status);
+         }
+ 
+-        player.connection.send(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(this.players));
+-        this.players.add(player);
+-        this.playersByUUID.put(player.getUUID(), player);
++        RegionizedWorldGuard.sendToPlayer(player, ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(this.playersSnapshot()));
++        this.addListedPlayer(player);
+         this.broadcastAll(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player)));
+         this.sendLevelInfo(player, level);
+-        level.addNewPlayer(player);
++        this.addPlayerToLevelOnPlayerRegion(player, () -> level.addNewPlayer(player));
+         this.server.getCustomBossEvents().onPlayerConnect(player);
+         this.sendActivePlayerEffects(player);
+         player.initInventoryMenu();
+         this.server.notificationManager().playerJoined(player);
+         playerConnection.resumeFlushing();
++
++        net.neoforged.neoforge.attachment.AttachmentSync.syncInitialPlayerAttachments(player);
++        net.neoforged.neoforge.event.EventHooks.firePlayerLoggedIn(player);
++    }
++
++    private synchronized List<ServerPlayer> playersSnapshot() {
++        return Lists.newArrayList(this.players);
++    }
++
++    private synchronized void addListedPlayer(ServerPlayer player) {
++        this.players.add(player);
++        this.playersByUUID.put(player.getUUID(), player);
++    }
++
++    private synchronized void removeListedPlayer(ServerPlayer player) {
++        this.players.remove(player);
++    }
++
++    private synchronized boolean removeListedPlayerIfCurrent(ServerPlayer player) {
++        UUID uuid = player.getUUID();
++        ServerPlayer serverPlayer = this.playersByUUID.get(uuid);
++        if (serverPlayer != player) {
++            return false;
++        }
++
++        this.playersByUUID.remove(uuid);
++        this.stats.remove(uuid);
++        this.advancements.remove(uuid);
++        return true;
++    }
++
++    private synchronized @Nullable ServerPlayer getListedPlayer(UUID uuid) {
++        return this.playersByUUID.get(uuid);
++    }
++
++    private synchronized @Nullable ServerPlayer getListedPlayerByName(String name) {
++        for (ServerPlayer player : this.players) {
++            if (player.getGameProfile().name().equalsIgnoreCase(name)) {
++                return player;
++            }
++        }
++
++        return null;
++    }
++
++    private synchronized int listedPlayerCount() {
++        return this.players.size();
++    }
++
++    private synchronized boolean shouldSendAllPlayerInfo() {
++        if (++this.sendAllPlayerInfoIn <= 600) {
++            return false;
++        }
++
++        this.sendAllPlayerInfoIn = 0;
++        return true;
++    }
++
++    private synchronized void addOpEntry(NameAndId nameAndId, LevelBasedPermissionSet permissions, Optional<Boolean> canBypassPlayerLimit) {
++        this.ops.add(new ServerOpListEntry(nameAndId, permissions, canBypassPlayerLimit.orElse(this.ops.canBypassPlayerLimit(nameAndId))));
++    }
++
++    private synchronized boolean removeOpEntry(NameAndId nameAndId) {
++        return this.ops.remove(nameAndId);
++    }
++
++    private synchronized boolean isOpEntry(NameAndId nameAndId) {
++        return this.ops.contains(nameAndId);
++    }
++
++    private synchronized boolean isWhiteListEntry(NameAndId nameAndId) {
++        return this.whitelist.contains(nameAndId);
++    }
++
++    private synchronized @Nullable Component getUserBanReason(NameAndId nameAndId) {
++        if (!this.bans.isBanned(nameAndId)) {
++            return null;
++        }
++
++        UserBanListEntry ban = this.bans.get(nameAndId);
++        MutableComponent reason = Component.translatable("multiplayer.disconnect.banned.reason", ban.getReasonMessage());
++        if (ban.getExpires() != null) {
++            reason.append(Component.translatable("multiplayer.disconnect.banned.expiration", BAN_DATE_FORMAT.format(ban.getExpires())));
++        }
++
++        return reason;
++    }
++
++    private synchronized @Nullable Component getIpBanReason(SocketAddress address) {
++        if (!this.ipBans.isBanned(address)) {
++            return null;
++        }
++
++        IpBanListEntry ban = this.ipBans.get(address);
++        MutableComponent reason = Component.translatable("multiplayer.disconnect.banned_ip.reason", ban.getReasonMessage());
++        if (ban.getExpires() != null) {
++            reason.append(Component.translatable("multiplayer.disconnect.banned_ip.expiration", BAN_DATE_FORMAT.format(ban.getExpires())));
++        }
++
++        return reason;
++    }
++
++    private synchronized String[] whitelistNamesSnapshot() {
++        return this.whitelist.getUserList();
++    }
++
++    private synchronized String[] opNamesSnapshot() {
++        return this.ops.getUserList();
++    }
++
++    private synchronized void setViewDistanceValue(int viewDistance) {
++        this.viewDistance = viewDistance;
++    }
++
++    private synchronized void setSimulationDistanceValue(int simulationDistance) {
++        this.simulationDistance = simulationDistance;
+     }
+ 
+     protected void updateEntireScoreboard(ServerScoreboard scoreboard, ServerPlayer player) {
+         Set<Objective> objectives = Sets.newHashSet();
+ 
+         for (PlayerTeam team : scoreboard.getPlayerTeams()) {
+-            player.connection.send(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
++            RegionizedWorldGuard.sendToPlayer(player, ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
+         }
+ 
+         for (DisplaySlot slot : DisplaySlot.values()) {
+             Objective objective = scoreboard.getDisplayObjective(slot);
+             if (objective != null && !objectives.contains(objective)) {
+                 for (Packet<?> packet : scoreboard.getStartTrackingPackets(objective)) {
+-                    player.connection.send(packet);
++                    RegionizedWorldGuard.sendToPlayer(player, packet);
+                 }
+ 
+                 objectives.add(objective);
+@@ -292,22 +_,68 @@
+     }
+ 
+     protected void save(ServerPlayer player) {
++        if (player.connection == null) return;
+         this.playerIo.save(player);
+-        ServerStatsCounter stats = this.stats.get(player.getUUID());
++        ServerStatsCounter stats = this.getStatsIfPresent(player.getUUID());
+         if (stats != null) {
+             stats.save();
+         }
+ 
+-        PlayerAdvancements advancements = this.advancements.get(player.getUUID());
++        PlayerAdvancements advancements = this.getAdvancementsIfPresent(player.getUUID());
+         if (advancements != null) {
+             advancements.save();
+         }
+     }
+ 
++    private synchronized @Nullable ServerStatsCounter getStatsIfPresent(UUID uuid) {
++        return this.stats.get(uuid);
++    }
++
++    private synchronized @Nullable PlayerAdvancements getAdvancementsIfPresent(UUID uuid) {
++        return this.advancements.get(uuid);
++    }
++
+     public void remove(ServerPlayer player) {
+-        ServerLevel level = player.level();
+-        player.awardStat(Stats.LEAVE_GAME);
+-        this.save(player);
++        if (this.scheduleGlobalIfRegionized(() -> this.remove(player))) {
++            return;
++        }
++
++        this.removePlayerFromLevelOnPlayerRegion(player, Entity.RemovalReason.UNLOADED_WITH_PLAYER);
++        player.getAdvancements().stopListening();
++        this.removeListedPlayer(player);
++        this.server.getCustomBossEvents().onPlayerDisconnect(player);
++        if (this.removeListedPlayerIfCurrent(player)) {
++            this.server.notificationManager().playerLeft(player);
++        }
++
++        this.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
++    }
++
++    private void removePlayerFromLevelOnPlayerRegion(ServerPlayer player, Entity.RemovalReason reason) {
++        this.executeOnPlayerRegionAndWait(player, "player disconnect", () -> {
++            net.neoforged.neoforge.event.EventHooks.firePlayerLoggedOut(player);
++            RegionizedWorldGuard.awardStat(player, Stats.LEAVE_GAME);
++            this.save(player);
++            this.unloadPlayerVehicle(player);
++            player.unRide();
++
++            for (ThrownEnderpearl enderpearl : player.getEnderPearls()) {
++                enderpearl.removeWithOwner();
++            }
++
++            player.level().removePlayerImmediately(player, reason);
++        });
++    }
++
++    private void removePlayerImmediatelyOnPlayerRegion(ServerPlayer player, Entity.RemovalReason reason) {
++        this.executeOnPlayerRegionAndWait(player, "player removal", () -> player.level().removePlayerImmediately(player, reason));
++    }
++
++    private void addPlayerToLevelOnPlayerRegion(ServerPlayer player, Runnable task) {
++        this.executeOnPlayerRegionAndWait(player, "player level add", task);
++    }
++
++    private void unloadPlayerVehicle(ServerPlayer player) {
+         if (player.isPassenger()) {
+             Entity vehicle = player.getRootVehicle();
+             if (vehicle.hasExactlyOnePlayerPassenger()) {
+@@ -316,50 +_,25 @@
+                 vehicle.getPassengersAndSelf().forEach(e -> e.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER));
+             }
+         }
+-
+-        player.unRide();
+-
+-        for (ThrownEnderpearl enderpearl : player.getEnderPearls()) {
+-            enderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER);
+-        }
+-
+-        level.removePlayerImmediately(player, Entity.RemovalReason.UNLOADED_WITH_PLAYER);
+-        player.getAdvancements().stopListening();
+-        this.players.remove(player);
+-        this.server.getCustomBossEvents().onPlayerDisconnect(player);
+-        UUID uuid = player.getUUID();
+-        ServerPlayer serverPlayer = this.playersByUUID.get(uuid);
+-        if (serverPlayer == player) {
+-            this.playersByUUID.remove(uuid);
+-            this.stats.remove(uuid);
+-            this.advancements.remove(uuid);
+-            this.server.notificationManager().playerLeft(player);
+-        }
+-
+-        this.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
++    }
++
++    private void executeOnPlayerRegionAndWait(ServerPlayer player, String reason, Runnable task) {
++        RegionizedWorldGuard.executeOnPlayerRegionAndWait(player, reason, task);
+     }
+ 
+     public @Nullable Component canPlayerLogin(SocketAddress address, NameAndId nameAndId) {
+-        if (this.bans.isBanned(nameAndId)) {
+-            UserBanListEntry ban = this.bans.get(nameAndId);
+-            MutableComponent reason = Component.translatable("multiplayer.disconnect.banned.reason", ban.getReasonMessage());
+-            if (ban.getExpires() != null) {
+-                reason.append(Component.translatable("multiplayer.disconnect.banned.expiration", BAN_DATE_FORMAT.format(ban.getExpires())));
+-            }
+-
+-            return reason;
++        Component banReason = this.getUserBanReason(nameAndId);
++        if (banReason != null) {
++            return banReason;
+         } else if (!this.isWhiteListed(nameAndId)) {
+             return Component.translatable("multiplayer.disconnect.not_whitelisted");
+-        } else if (this.ipBans.isBanned(address)) {
+-            IpBanListEntry ban = this.ipBans.get(address);
+-            MutableComponent reason = Component.translatable("multiplayer.disconnect.banned_ip.reason", ban.getReasonMessage());
+-            if (ban.getExpires() != null) {
+-                reason.append(Component.translatable("multiplayer.disconnect.banned_ip.expiration", BAN_DATE_FORMAT.format(ban.getExpires())));
++        } else {
++            Component ipBanReason = this.getIpBanReason(address);
++            if (ipBanReason != null) {
++                return ipBanReason;
+             }
+ 
+-            return reason;
+-        } else {
+-            return this.players.size() >= this.getMaxPlayers() && !this.canBypassPlayerLimit(nameAndId)
++            return this.listedPlayerCount() >= this.getMaxPlayers() && !this.canBypassPlayerLimit(nameAndId)
+                 ? Component.translatable("multiplayer.disconnect.server_full")
+                 : null;
+         }
+@@ -368,35 +_,50 @@
+     public boolean disconnectAllPlayersWithProfile(UUID playerId) {
+         Set<ServerPlayer> dupes = Sets.newIdentityHashSet();
+ 
+-        for (ServerPlayer player : this.players) {
++        for (ServerPlayer player : this.playersSnapshot()) {
+             if (player.getUUID().equals(playerId)) {
+                 dupes.add(player);
+             }
+         }
+ 
+-        ServerPlayer serverPlayer = this.playersByUUID.get(playerId);
++        ServerPlayer serverPlayer = this.getListedPlayer(playerId);
+         if (serverPlayer != null) {
+             dupes.add(serverPlayer);
+         }
+ 
+         for (ServerPlayer playerx : dupes) {
+-            playerx.connection.disconnect(DUPLICATE_LOGIN_DISCONNECT_MESSAGE);
++            RegionizedWorldGuard.executeOnPlayerRegionAndWait(
++                playerx,
++                "duplicate login disconnect",
++                () -> playerx.connection.disconnect(DUPLICATE_LOGIN_DISCONNECT_MESSAGE)
++            );
+         }
+ 
+         return !dupes.isEmpty();
+     }
+ 
+     public ServerPlayer respawn(ServerPlayer serverPlayer, boolean keepAllPlayerData, Entity.RemovalReason removalReason) {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw new IllegalStateException("Player respawn must not run from a region worker");
++        }
++
+         TeleportTransition respawnInfo = serverPlayer.findRespawnPositionAndUseSpawnBlock(!keepAllPlayerData, TeleportTransition.DO_NOTHING);
+-        this.players.remove(serverPlayer);
+-        serverPlayer.level().removePlayerImmediately(serverPlayer, removalReason);
++        this.removeListedPlayer(serverPlayer);
++        this.removePlayerImmediatelyOnPlayerRegion(serverPlayer, removalReason);
++
++        // Neo: Allow changing the respawn position of players. The local dimension transition is updated with the new target.
++        var event = net.neoforged.neoforge.event.EventHooks.firePlayerRespawnPositionEvent(serverPlayer, respawnInfo, keepAllPlayerData);
++        respawnInfo = event.getTeleportTransition();
++
+         ServerLevel level = respawnInfo.newLevel();
+         ServerPlayer player = new ServerPlayer(this.server, level, serverPlayer.getGameProfile(), serverPlayer.clientInformation());
+         player.connection = serverPlayer.connection;
+         player.restoreFrom(serverPlayer, keepAllPlayerData);
+         player.setId(serverPlayer.getId());
+         player.setMainArm(serverPlayer.getMainArm());
+-        if (!respawnInfo.missingRespawnBlock()) {
++
++        // Neo: Allow the event to control if the original spawn position is copied
++        if (event.copyOriginalSpawnPosition()) {
+             player.copyRespawnPosition(serverPlayer);
+         }
+ 
+@@ -407,25 +_,26 @@
+         Vec3 pos = respawnInfo.position();
+         player.snapTo(pos.x, pos.y, pos.z, respawnInfo.yRot(), respawnInfo.xRot());
+         if (respawnInfo.missingRespawnBlock()) {
+-            player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
+         }
+ 
+         byte dataToKeep = (byte)(keepAllPlayerData ? 1 : 0);
+         ServerLevel playerLevel = player.level();
+         LevelData levelData = playerLevel.getLevelData();
+-        player.connection.send(new ClientboundRespawnPacket(player.createCommonSpawnInfo(playerLevel), dataToKeep));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundRespawnPacket(player.createCommonSpawnInfo(playerLevel), dataToKeep));
+         player.connection.teleport(player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot());
+-        player.connection.send(new ClientboundSetDefaultSpawnPositionPacket(level.getRespawnData()));
+-        player.connection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
+-        player.connection.send(new ClientboundSetExperiencePacket(player.experienceProgress, player.totalExperience, player.experienceLevel));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundSetDefaultSpawnPositionPacket(level.getRespawnData()));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundSetExperiencePacket(player.experienceProgress, player.totalExperience, player.experienceLevel));
+         this.sendActivePlayerEffects(player);
+         this.sendLevelInfo(player, level);
+         this.sendPlayerPermissionLevel(player);
+-        level.addRespawnedPlayer(player);
+-        this.players.add(player);
+-        this.playersByUUID.put(player.getUUID(), player);
++        this.addPlayerToLevelOnPlayerRegion(player, () -> level.addRespawnedPlayer(player));
++        this.addListedPlayer(player);
+         player.initInventoryMenu();
+         player.setHealth(player.getHealth());
++        net.neoforged.neoforge.attachment.AttachmentSync.syncInitialPlayerAttachments(player);
++        net.neoforged.neoforge.event.EventHooks.firePlayerRespawnEvent(player, keepAllPlayerData);
+         ServerPlayer.RespawnConfig respawnConfig = player.getRespawnConfig();
+         if (!keepAllPlayerData && respawnConfig != null) {
+             LevelData.RespawnData respawnData = respawnConfig.respawnData();
+@@ -434,19 +_,19 @@
+                 BlockPos respawnPosition = respawnData.pos();
+                 BlockState blockState = respawnLevel.getBlockState(respawnPosition);
+                 if (blockState.is(Blocks.RESPAWN_ANCHOR)) {
+-                    player.connection
+-                        .send(
+-                            new ClientboundSoundPacket(
+-                                SoundEvents.RESPAWN_ANCHOR_DEPLETE,
+-                                SoundSource.BLOCKS,
+-                                respawnPosition.getX(),
+-                                respawnPosition.getY(),
+-                                respawnPosition.getZ(),
+-                                1.0F,
+-                                1.0F,
+-                                level.getRandom().nextLong()
+-                            )
+-                        );
++                    RegionizedWorldGuard.sendToPlayer(
++                        player,
++                        new ClientboundSoundPacket(
++                            SoundEvents.RESPAWN_ANCHOR_DEPLETE,
++                            SoundSource.BLOCKS,
++                            respawnPosition.getX(),
++                            respawnPosition.getY(),
++                            respawnPosition.getZ(),
++                            1.0F,
++                            1.0F,
++                            player.getRandom().nextLong()
++                        )
++                    );
+                 }
+             }
+         }
+@@ -460,77 +_,96 @@
+ 
+     public void sendActiveEffects(LivingEntity livingEntity, ServerGamePacketListenerImpl connection) {
+         for (MobEffectInstance effect : livingEntity.getActiveEffects()) {
+-            connection.send(new ClientboundUpdateMobEffectPacket(livingEntity.getId(), effect, false));
++            RegionizedWorldGuard.sendToPlayer(connection.player, new ClientboundUpdateMobEffectPacket(livingEntity.getId(), effect, false));
+         }
+     }
+ 
+     public void sendPlayerPermissionLevel(ServerPlayer player) {
+         LevelBasedPermissionSet permissions = this.server.getProfilePermissions(player.nameAndId());
+-        this.sendPlayerPermissionLevel(player, permissions);
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> this.sendPlayerPermissionLevel(player, permissions));
+     }
+ 
+     public void tick() {
+-        if (++this.sendAllPlayerInfoIn > 600) {
+-            this.broadcastAll(new ClientboundPlayerInfoUpdatePacket(EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY), this.players));
+-            this.sendAllPlayerInfoIn = 0;
++        if (this.shouldSendAllPlayerInfo()) {
++            this.broadcastAll(new ClientboundPlayerInfoUpdatePacket(EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY), this.playersSnapshot()));
+         }
+     }
+ 
+     public void broadcastAll(Packet<?> packet) {
+-        for (ServerPlayer player : this.players) {
+-            player.connection.send(packet);
++        for (ServerPlayer player : this.playersSnapshot()) {
++            RegionizedWorldGuard.sendToPlayer(player, packet);
+         }
+     }
+ 
+     public void broadcastAll(Packet<?> packet, ResourceKey<Level> dimension) {
+-        for (ServerPlayer player : this.players) {
+-            if (player.level().dimension() == dimension) {
+-                player.connection.send(packet);
+-            }
++        for (ServerPlayer player : this.playersSnapshot()) {
++            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++                if (player.level().dimension() == dimension) {
++                    RegionizedWorldGuard.sendToPlayer(player, packet);
++                }
++            });
+         }
+     }
+ 
+     public void broadcastSystemToTeam(Player player, Component message) {
+-        Team team = player.getTeam();
++        if (this.scheduleGlobalBroadcastIfRegionized(() -> this.broadcastSystemToTeam(player, message))) {
++            return;
++        }
++
++        Team team = this.getPlayerTeamOnOwningRegion(player);
+         if (team != null) {
+             for (String name : team.getPlayers()) {
+-                ServerPlayer teamPlayer = this.getPlayerByName(name);
++                ServerPlayer teamPlayer = this.getAllPlayerByName(name);
+                 if (teamPlayer != null && teamPlayer != player) {
+-                    teamPlayer.sendSystemMessage(message);
++                    RegionizedWorldGuard.executeOnPlayerRegion(teamPlayer, () -> teamPlayer.sendSystemMessage(message));
+                 }
+             }
+         }
+     }
+ 
+     public void broadcastSystemToAllExceptTeam(Player player, Component message) {
+-        Team team = player.getTeam();
++        if (this.scheduleGlobalBroadcastIfRegionized(() -> this.broadcastSystemToAllExceptTeam(player, message))) {
++            return;
++        }
++
++        Team team = this.getPlayerTeamOnOwningRegion(player);
+         if (team == null) {
+             this.broadcastSystemMessage(message, false);
+         } else {
+-            for (int i = 0; i < this.players.size(); i++) {
+-                ServerPlayer targetPlayer = this.players.get(i);
+-                if (targetPlayer.getTeam() != team) {
+-                    targetPlayer.sendSystemMessage(message);
+-                }
++            for (ServerPlayer targetPlayer : this.playersSnapshot()) {
++                RegionizedWorldGuard.executeOnPlayerRegion(targetPlayer, () -> {
++                    if (targetPlayer.getTeam() != team) {
++                        targetPlayer.sendSystemMessage(message);
++                    }
++                });
+             }
+         }
++    }
++
++    private @Nullable Team getPlayerTeamOnOwningRegion(Player player) {
++        if (player instanceof ServerPlayer serverPlayer) {
++            return RegionizedWorldGuard.callOnPlayerRegionAndWait(serverPlayer, "player team lookup", serverPlayer::getTeam);
++        }
++
++        return player.getTeam();
+     }
+ 
+     public String[] getPlayerNamesArray() {
+-        String[] names = new String[this.players.size()];
++        List<ServerPlayer> players = this.playersSnapshot();
++        String[] names = new String[players.size()];
+ 
+-        for (int i = 0; i < this.players.size(); i++) {
+-            names[i] = this.players.get(i).getGameProfile().name();
++        for (int i = 0; i < players.size(); i++) {
++            names[i] = players.get(i).getGameProfile().name();
+         }
+ 
+         return names;
+     }
+ 
+-    public UserBanList getBans() {
++    public synchronized UserBanList getBans() {
+         return this.bans;
+     }
+ 
+-    public IpBanList getIpBans() {
++    public synchronized IpBanList getIpBans() {
+         return this.ipBans;
+     }
+ 
+@@ -539,21 +_,26 @@
+     }
+ 
+     public void op(NameAndId nameAndId, Optional<LevelBasedPermissionSet> permissions, Optional<Boolean> canBypassPlayerLimit) {
+-        this.ops
+-            .add(
+-                new ServerOpListEntry(
+-                    nameAndId, permissions.orElse(this.server.operatorUserPermissions()), canBypassPlayerLimit.orElse(this.ops.canBypassPlayerLimit(nameAndId))
+-                )
+-            );
+-        ServerPlayer player = this.getPlayer(nameAndId.id());
++        if (this.scheduleGlobalIfRegionized(() -> this.op(nameAndId, permissions, canBypassPlayerLimit))) {
++            return;
++        }
++
++        if (net.neoforged.neoforge.event.EventHooks.onPermissionChanged(nameAndId, this.server.operatorUserPermissions(), this)) return;
++        this.addOpEntry(nameAndId, permissions.orElse(this.server.operatorUserPermissions()), canBypassPlayerLimit);
++        ServerPlayer player = this.getAllPlayer(nameAndId.id());
+         if (player != null) {
+             this.sendPlayerPermissionLevel(player);
+         }
+     }
+ 
+     public void deop(NameAndId nameAndId) {
+-        if (this.ops.remove(nameAndId)) {
+-            ServerPlayer player = this.getPlayer(nameAndId.id());
++        if (this.scheduleGlobalIfRegionized(() -> this.deop(nameAndId))) {
++            return;
++        }
++
++        if (net.neoforged.neoforge.event.EventHooks.onPermissionChanged(nameAndId, LevelBasedPermissionSet.ALL, this)) return;
++        if (this.removeOpEntry(nameAndId)) {
++            ServerPlayer player = this.getAllPlayer(nameAndId.id());
+             if (player != null) {
+                 this.sendPlayerPermissionLevel(player);
+             }
+@@ -569,97 +_,106 @@
+                 case ADMINS -> 27;
+                 case OWNERS -> 28;
+             };
+-            player.connection.send(new ClientboundEntityEventPacket(player, eventId));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundEntityEventPacket(player, eventId));
+         }
+ 
+         this.server.getCommands().sendCommands(player);
+     }
+ 
+     public boolean isWhiteListed(NameAndId nameAndId) {
+-        return !this.isUsingWhitelist() || this.ops.contains(nameAndId) || this.whitelist.contains(nameAndId);
++        return !this.isUsingWhitelist() || this.isOpEntry(nameAndId) || this.isWhiteListEntry(nameAndId);
+     }
+ 
+     public boolean isOp(NameAndId nameAndId) {
+-        return this.ops.contains(nameAndId)
++        return this.isOpEntry(nameAndId)
+             || this.server.isSingleplayerOwner(nameAndId) && this.server.getWorldData().isAllowCommands()
+-            || this.allowCommandsForAllPlayers;
++            || this.isAllowCommandsForAllPlayers();
+     }
+ 
+     public @Nullable ServerPlayer getPlayerByName(String name) {
+-        int size = this.players.size();
+-
+-        for (int i = 0; i < size; i++) {
+-            ServerPlayer player = this.players.get(i);
+-            if (player.getGameProfile().name().equalsIgnoreCase(name)) {
+-                return player;
+-            }
+-        }
+-
+-        return null;
++        return this.restrictPlayerToCurrentRegion(this.getListedPlayerByName(name));
++    }
++
++    public @Nullable ServerPlayer getAllPlayerByName(String name) {
++        return this.restrictPlayerToCurrentRegion(this.getListedPlayerByName(name));
+     }
+ 
+     public void broadcast(@Nullable Player except, double x, double y, double z, double range, ResourceKey<Level> dimension, Packet<?> packet) {
+-        for (int i = 0; i < this.players.size(); i++) {
+-            ServerPlayer player = this.players.get(i);
+-            if (player != except && player.level().dimension() == dimension) {
+-                double xd = x - player.getX();
+-                double yd = y - player.getY();
+-                double zd = z - player.getZ();
+-                if (xd * xd + yd * yd + zd * zd < range * range) {
+-                    player.connection.send(packet);
+-                }
++        for (ServerPlayer player : this.playersSnapshot()) {
++            if (player != except) {
++                RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++                    if (player.level().dimension() != dimension) {
++                        return;
++                    }
++
++                    double xd = x - player.getX();
++                    double yd = y - player.getY();
++                    double zd = z - player.getZ();
++                    if (xd * xd + yd * yd + zd * zd < range * range) {
++                        RegionizedWorldGuard.sendToPlayer(player, packet);
++                    }
++                });
+             }
+         }
+     }
+ 
+     public void saveAll() {
+-        for (int i = 0; i < this.players.size(); i++) {
+-            this.save(this.players.get(i));
++        for (ServerPlayer player : this.playersSnapshot()) {
++            this.executeOnPlayerRegionAndWait(player, "player save", () -> this.save(player));
+         }
+     }
+ 
+-    public UserWhiteList getWhiteList() {
++    public synchronized UserWhiteList getWhiteList() {
+         return this.whitelist;
+     }
+ 
+     public String[] getWhiteListNames() {
+-        return this.whitelist.getUserList();
++        return this.whitelistNamesSnapshot();
+     }
+ 
+-    public ServerOpList getOps() {
++    public synchronized ServerOpList getOps() {
+         return this.ops;
+     }
+ 
+     public String[] getOpNames() {
+-        return this.ops.getUserList();
++        return this.opNamesSnapshot();
+     }
+ 
+     public void reloadWhiteList() {
+     }
+ 
+     public void sendLevelInfo(ServerPlayer player, ServerLevel level) {
++        this.executeOnPlayerRegionAndWait(player, "player level info sync", () -> this.sendLevelInfoOnPlayerRegion(player, level));
++    }
++
++    private void sendLevelInfoOnPlayerRegion(ServerPlayer player, ServerLevel level) {
+         WorldBorder worldBorder = level.getWorldBorder();
+-        player.connection.send(new ClientboundInitializeBorderPacket(worldBorder));
+-        player.connection.send(this.server.clockManager().createFullSyncPacket());
+-        player.connection.send(new ClientboundSetDefaultSpawnPositionPacket(level.getRespawnData()));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundInitializeBorderPacket(worldBorder));
++        RegionizedWorldGuard.sendToPlayer(player, this.server.clockManager().createFullSyncPacket());
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundSetDefaultSpawnPositionPacket(level.getRespawnData()));
+         if (level.isRaining()) {
+-            player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.START_RAINING, 0.0F));
+-            player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.RAIN_LEVEL_CHANGE, level.getRainLevel(1.0F)));
+-            player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.THUNDER_LEVEL_CHANGE, level.getThunderLevel(1.0F)));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundGameEventPacket(ClientboundGameEventPacket.START_RAINING, 0.0F));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundGameEventPacket(ClientboundGameEventPacket.RAIN_LEVEL_CHANGE, level.getRainLevel(1.0F)));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundGameEventPacket(ClientboundGameEventPacket.THUNDER_LEVEL_CHANGE, level.getThunderLevel(1.0F)));
+         }
+ 
+-        player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.LEVEL_CHUNKS_LOAD_START, 0.0F));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundGameEventPacket(ClientboundGameEventPacket.LEVEL_CHUNKS_LOAD_START, 0.0F));
+         this.server.tickRateManager().updateJoiningPlayer(player);
++        net.neoforged.neoforge.attachment.AttachmentSync.syncInitialLevelAttachments(level, player);
+     }
+ 
+     public void sendAllPlayerInfo(ServerPlayer player) {
++        this.executeOnPlayerRegionAndWait(player, "all player info sync", () -> this.sendAllPlayerInfoOnPlayerRegion(player));
++    }
++
++    private void sendAllPlayerInfoOnPlayerRegion(ServerPlayer player) {
+         player.inventoryMenu.sendAllDataToRemote();
+         player.resetSentInfo();
+-        player.connection.send(new ClientboundSetHeldSlotPacket(player.getInventory().getSelectedSlot()));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundSetHeldSlotPacket(player.getInventory().getSelectedSlot()));
+     }
+ 
+     public int getPlayerCount() {
+-        return this.players.size();
++        return this.listedPlayerCount();
+     }
+ 
+     public int getMaxPlayers() {
+@@ -673,34 +_,56 @@
+     public List<ServerPlayer> getPlayersWithAddress(String ip) {
+         List<ServerPlayer> result = Lists.newArrayList();
+ 
+-        for (ServerPlayer player : this.players) {
+-            if (player.getIpAddress().equals(ip)) {
+-                result.add(player);
+-            }
+-        }
+-
+-        return result;
+-    }
+-
+-    public int getViewDistance() {
++        for (ServerPlayer player : this.playersSnapshot()) {
++            ServerPlayer visiblePlayer = this.restrictPlayerToCurrentRegion(player);
++            if (visiblePlayer != null && visiblePlayer.getIpAddress().equals(ip)) {
++                result.add(player);
++            }
++        }
++
++        return result;
++    }
++
++    public List<ServerPlayer> getAllPlayersWithAddress(String ip) {
++        List<ServerPlayer> result = Lists.newArrayList();
++
++        for (ServerPlayer player : this.playersSnapshot()) {
++            ServerPlayer visiblePlayer = this.restrictPlayerToCurrentRegion(player);
++            if (visiblePlayer != null && visiblePlayer.getIpAddress().equals(ip)) {
++                result.add(player);
++            }
++        }
++
++        return result;
++    }
++
++    public synchronized int getViewDistance() {
+         return this.viewDistance;
+     }
+ 
+-    public int getSimulationDistance() {
++    public synchronized int getSimulationDistance() {
+         return this.simulationDistance;
+     }
+ 
+-    public MinecraftServer getServer() {
++    public synchronized MinecraftServer getServer() {
+         return this.server;
+     }
+ 
+-    public void setAllowCommandsForAllPlayers(boolean allowCommands) {
++    public synchronized void setAllowCommandsForAllPlayers(boolean allowCommands) {
+         this.allowCommandsForAllPlayers = allowCommands;
+     }
+ 
+     public void removeAll() {
+-        for (int i = 0; i < this.players.size(); i++) {
+-            this.players.get(i).connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
++        if (this.scheduleGlobalIfRegionized(this::removeAll)) {
++            return;
++        }
++
++        for (ServerPlayer player : this.playersSnapshot()) {
++            RegionizedWorldGuard.executeOnPlayerRegionAndWait(
++                player,
++                "server shutdown disconnect",
++                () -> player.connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"))
++            );
+         }
+     }
+ 
+@@ -709,24 +_,54 @@
+     }
+ 
+     public void broadcastSystemMessage(Component message, Function<ServerPlayer, Component> playerMessages, boolean overlay) {
++        if (this.scheduleGlobalBroadcastIfRegionized(() -> this.broadcastSystemMessage(message, playerMessages, overlay))) {
++            return;
++        }
++
+         this.server.sendSystemMessage(message);
+ 
+-        for (ServerPlayer player : this.players) {
+-            Component playerMessage = playerMessages.apply(player);
+-            if (playerMessage != null) {
+-                player.sendSystemMessage(playerMessage, overlay);
+-            }
++        for (ServerPlayer player : this.playersSnapshot()) {
++            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++                Component playerMessage = playerMessages.apply(player);
++                if (playerMessage != null) {
++                    player.sendSystemMessage(playerMessage, overlay);
++                }
++            });
+         }
+     }
+ 
+     public void broadcastChatMessage(PlayerChatMessage message, CommandSourceStack sender, ChatType.Bound chatType) {
++        if (this.scheduleGlobalBroadcastIfRegionized(() -> this.broadcastChatMessage(message, sender, chatType))) {
++            return;
++        }
++
+         this.broadcastChatMessage(message, sender::shouldFilterMessageTo, sender.getPlayer(), chatType);
+     }
+ 
+     public void broadcastChatMessage(PlayerChatMessage message, ServerPlayer sender, ChatType.Bound chatType) {
++        if (this.scheduleGlobalBroadcastIfRegionized(() -> this.broadcastChatMessage(message, sender, chatType))) {
++            return;
++        }
++
+         this.broadcastChatMessage(message, sender::shouldFilterMessageTo, sender, chatType);
+     }
+ 
++    private boolean scheduleGlobalBroadcastIfRegionized(Runnable task) {
++        return this.scheduleGlobalIfRegionized(task);
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate player list state from region worker while region dispatcher is not running");
++    }
++
+     private void broadcastChatMessage(
+         PlayerChatMessage message, Predicate<ServerPlayer> isFiltered, @Nullable ServerPlayer senderPlayer, ChatType.Bound chatType
+     ) {
+@@ -735,14 +_,14 @@
+         OutgoingChatMessage tracked = OutgoingChatMessage.create(message);
+         boolean wasFullyFiltered = false;
+ 
+-        for (ServerPlayer player : this.players) {
++        for (ServerPlayer player : this.playersSnapshot()) {
+             boolean filtered = isFiltered.test(player);
+-            player.sendChatMessage(tracked, filtered, chatType);
++            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.sendChatMessage(tracked, filtered, chatType));
+             wasFullyFiltered |= filtered && message.isFullyFiltered();
+         }
+ 
+         if (wasFullyFiltered && senderPlayer != null) {
+-            senderPlayer.sendSystemMessage(CHAT_FILTERED_FULL);
++            RegionizedWorldGuard.executeOnPlayerRegion(senderPlayer, () -> senderPlayer.sendSystemMessage(CHAT_FILTERED_FULL));
+         }
+     }
+ 
+@@ -752,6 +_,10 @@
+ 
+     public ServerStatsCounter getPlayerStats(Player player) {
+         GameProfile gameProfile = player.getGameProfile();
++        return this.getOrCreateStats(gameProfile);
++    }
++
++    private synchronized ServerStatsCounter getOrCreateStats(GameProfile gameProfile) {
+         return this.stats.computeIfAbsent(gameProfile.id(), id -> {
+             Path targetFile = this.locateStatsFile(gameProfile);
+             return new ServerStatsCounter(this.server, targetFile);
+@@ -783,19 +_,29 @@
+ 
+     public PlayerAdvancements getPlayerAdvancements(ServerPlayer player) {
+         UUID uuid = player.getUUID();
+-        PlayerAdvancements result = this.advancements.get(uuid);
++        PlayerAdvancements result = this.getAdvancementsIfPresent(uuid);
+         if (result == null) {
+             Path uuidStatsFile = this.server.getWorldPath(LevelResource.PLAYER_ADVANCEMENTS_DIR).resolve(uuid + ".json");
+             result = new PlayerAdvancements(this.server.getFixerUpper(), this, this.server.getAdvancements(), uuidStatsFile, player);
+-            this.advancements.put(uuid, result);
++            this.putAdvancements(uuid, result);
+         }
+ 
++        // Forge: don't overwrite active player with a fake one.
++        if (!(player instanceof net.neoforged.neoforge.common.util.FakePlayer))
+         result.setPlayer(player);
+         return result;
+     }
+ 
++    private synchronized void putAdvancements(UUID uuid, PlayerAdvancements advancements) {
++        this.advancements.put(uuid, advancements);
++    }
++
+     public void setViewDistance(int viewDistance) {
+-        this.viewDistance = viewDistance;
++        if (this.scheduleGlobalIfRegionized(() -> this.setViewDistance(viewDistance))) {
++            return;
++        }
++
++        this.setViewDistanceValue(viewDistance);
+         this.broadcastAll(new ClientboundSetChunkCacheRadiusPacket(viewDistance));
+ 
+         for (ServerLevel level : this.server.getAllLevels()) {
+@@ -804,7 +_,11 @@
+     }
+ 
+     public void setSimulationDistance(int simulationDistance) {
+-        this.simulationDistance = simulationDistance;
++        if (this.scheduleGlobalIfRegionized(() -> this.setSimulationDistance(simulationDistance))) {
++            return;
++        }
++
++        this.setSimulationDistanceValue(simulationDistance);
+         this.broadcastAll(new ClientboundSetSimulationDistancePacket(simulationDistance));
+ 
+         for (ServerLevel level : this.server.getAllLevels()) {
+@@ -813,21 +_,53 @@
+     }
+ 
+     public List<ServerPlayer> getPlayers() {
+-        return this.players;
++        List<ServerPlayer> snapshot = this.playersSnapshot(); // Neo: Return a snapshot, we don't want people removing things without us knowing.
++        if (RegionizedTickContext.isRegionThread()) {
++            snapshot.removeIf(player -> this.restrictPlayerToCurrentRegion(player) == null);
++        }
++
++        return snapshot;
++    }
++
++    public List<ServerPlayer> getAllPlayers() {
++        List<ServerPlayer> snapshot = this.playersSnapshot();
++        if (RegionizedTickContext.isRegionThread()) {
++            snapshot.removeIf(player -> this.restrictPlayerToCurrentRegion(player) == null);
++        }
++
++        return snapshot;
++    }
++
++    public List<ServerPlayer> getPlayersAcrossRegions() {
++        return this.playersSnapshot();
+     }
+ 
+     public @Nullable ServerPlayer getPlayer(UUID uuid) {
+-        return this.playersByUUID.get(uuid);
++        return this.restrictPlayerToCurrentRegion(this.getListedPlayer(uuid));
+     }
+ 
+     public @Nullable ServerPlayer getPlayer(String playerName) {
+-        for (ServerPlayer player : this.players) {
+-            if (player.getGameProfile().name().equalsIgnoreCase(playerName)) {
+-                return player;
+-            }
++        return this.restrictPlayerToCurrentRegion(this.getListedPlayerByName(playerName));
++    }
++
++    public @Nullable ServerPlayer getAllPlayer(UUID uuid) {
++        return this.restrictPlayerToCurrentRegion(this.getListedPlayer(uuid));
++    }
++
++    public @Nullable ServerPlayer getAnyRegionPlayer(UUID uuid) {
++        return this.getListedPlayer(uuid);
++    }
++
++    public @Nullable ServerPlayer getAllPlayer(String playerName) {
++        return this.restrictPlayerToCurrentRegion(this.getListedPlayerByName(playerName));
++    }
++
++    private @Nullable ServerPlayer restrictPlayerToCurrentRegion(@Nullable ServerPlayer player) {
++        if (player == null || !RegionizedTickContext.isRegionThread()) {
++            return player;
+         }
+ 
+-        return null;
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(player.level(), player);
+     }
+ 
+     public boolean canBypassPlayerLimit(NameAndId nameAndId) {
+@@ -835,23 +_,39 @@
+     }
+ 
+     public void reloadResources() {
+-        for (PlayerAdvancements advancements : this.advancements.values()) {
++        if (this.scheduleGlobalIfRegionized(this::reloadResources)) {
++            return;
++        }
++
++        for (PlayerAdvancements advancements : this.advancementsSnapshot()) {
+             advancements.reload(this.server.getAdvancements());
+         }
+ 
++        var dataSyncEvent = net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.OnDatapackSyncEvent(this, null));
+         this.broadcastAll(new ClientboundUpdateTagsPacket(TagNetworkSerialization.serializeTagsToNetwork(this.registries)));
+         RecipeManager recipeManager = this.server.getRecipeManager();
+         ClientboundUpdateRecipesPacket recipes = new ClientboundUpdateRecipesPacket(
+             recipeManager.getSynchronizedItemProperties(), recipeManager.getSynchronizedStonecutterRecipes()
+         );
+ 
+-        for (ServerPlayer player : this.players) {
+-            player.connection.send(recipes);
+-            player.getRecipeBook().sendInitialRecipeBook(player);
++        for (ServerPlayer player : this.playersSnapshot()) {
++            this.executeOnPlayerRegionAndWait(player, "player resource reload sync", () -> {
++                RegionizedWorldGuard.sendToPlayer(player, recipes);
++                player.getRecipeBook().sendInitialRecipeBook(player);
++                net.neoforged.neoforge.common.CommonHooks.sendRecipes(player, dataSyncEvent.getRecipeTypesToSend(), recipeManager.recipeMap());
++            });
+         }
+     }
+ 
+-    public boolean isAllowCommandsForAllPlayers() {
++    private synchronized List<PlayerAdvancements> advancementsSnapshot() {
++        return List.copyOf(this.advancements.values());
++    }
++
++    public synchronized boolean isAllowCommandsForAllPlayers() {
+         return this.allowCommandsForAllPlayers;
++    }
++
++    public synchronized PlayerDataStorage getPlayerIo() {
++        return this.playerIo;
+     }
+ }

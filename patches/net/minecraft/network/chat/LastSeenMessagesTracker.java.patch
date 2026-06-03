@@ -1,0 +1,53 @@
+--- a/net/minecraft/network/chat/LastSeenMessagesTracker.java
++++ b/net/minecraft/network/chat/LastSeenMessagesTracker.java
+@@ -16,7 +_,7 @@
+         this.trackedMessages = new LastSeenTrackedEntry[lastSeenCount];
+     }
+ 
+-    public boolean addPending(MessageSignature message, boolean wasShown) {
++    public synchronized boolean addPending(MessageSignature message, boolean wasShown) {
+         if (Objects.equals(message, this.lastTrackedMessage)) {
+             return false;
+         } else {
+@@ -26,14 +_,14 @@
+         }
+     }
+ 
+-    private void addEntry(@Nullable LastSeenTrackedEntry entry) {
++    private synchronized void addEntry(@Nullable LastSeenTrackedEntry entry) {
+         int index = this.tail;
+         this.tail = (index + 1) % this.trackedMessages.length;
+         this.offset++;
+         this.trackedMessages[index] = entry;
+     }
+ 
+-    public void ignorePending(MessageSignature pendingMessage) {
++    public synchronized void ignorePending(MessageSignature pendingMessage) {
+         for (int i = 0; i < this.trackedMessages.length; i++) {
+             LastSeenTrackedEntry entry = this.trackedMessages[i];
+             if (entry != null && entry.pending() && pendingMessage.equals(entry.signature())) {
+@@ -43,13 +_,13 @@
+         }
+     }
+ 
+-    public int getAndClearOffset() {
++    public synchronized int getAndClearOffset() {
+         int originalOffset = this.offset;
+         this.offset = 0;
+         return originalOffset;
+     }
+ 
+-    public LastSeenMessagesTracker.Update generateAndApplyUpdate() {
++    public synchronized LastSeenMessagesTracker.Update generateAndApplyUpdate() {
+         int offset = this.getAndClearOffset();
+         BitSet acknowledged = new BitSet(this.trackedMessages.length);
+         ObjectList<MessageSignature> lastSeenEntries = new ObjectArrayList<>(this.trackedMessages.length);
+@@ -69,7 +_,7 @@
+         return new LastSeenMessagesTracker.Update(lastSeen, update);
+     }
+ 
+-    public int offset() {
++    public synchronized int offset() {
+         return this.offset;
+     }
+ 

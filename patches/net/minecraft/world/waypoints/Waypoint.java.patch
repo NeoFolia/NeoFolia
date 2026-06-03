@@ -1,0 +1,73 @@
+--- a/net/minecraft/world/waypoints/Waypoint.java
++++ b/net/minecraft/world/waypoints/Waypoint.java
+@@ -50,8 +_,8 @@
+             Waypoint.Icon::new
+         );
+         public static final Waypoint.Icon NULL = new Waypoint.Icon();
+-        public ResourceKey<WaypointStyleAsset> style = WaypointStyleAssets.DEFAULT;
+-        public Optional<Integer> color = Optional.empty();
++        public volatile ResourceKey<WaypointStyleAsset> style = WaypointStyleAssets.DEFAULT;
++        public volatile Optional<Integer> color = Optional.empty();
+ 
+         public Icon() {
+         }
+@@ -61,11 +_,31 @@
+             this.color = color;
+         }
+ 
+-        public boolean hasData() {
++        public synchronized boolean hasData() {
+             return this.style != WaypointStyleAssets.DEFAULT || this.color.isPresent();
+         }
+ 
+-        public Waypoint.Icon cloneAndAssignStyle(LivingEntity livingEntity) {
++        public synchronized ResourceKey<WaypointStyleAsset> style() {
++            return this.style;
++        }
++
++        public synchronized void style(ResourceKey<WaypointStyleAsset> style) {
++            this.style = style;
++        }
++
++        public synchronized Optional<Integer> color() {
++            return this.color;
++        }
++
++        public synchronized void color(Optional<Integer> color) {
++            this.color = color;
++        }
++
++        public synchronized Waypoint.Icon copy() {
++            return new Waypoint.Icon(this.style, this.color);
++        }
++
++        public synchronized Waypoint.Icon cloneAndAssignStyle(LivingEntity livingEntity) {
+             ResourceKey<WaypointStyleAsset> overrideStyle = this.getOverrideStyle();
+             Optional<Integer> colorOverride = this.color
+                 .or(
+@@ -73,15 +_,16 @@
+                         .map(t -> t.getColor().getColor())
+                         .map(teamColor -> teamColor == 0 ? -13619152 : teamColor)
+                 );
+-            return overrideStyle == this.style && colorOverride.isEmpty() ? this : new Waypoint.Icon(overrideStyle, colorOverride);
+-        }
+-
+-        public void copyFrom(Waypoint.Icon other) {
+-            this.color = other.color;
+-            this.style = other.style;
+-        }
+-
+-        private ResourceKey<WaypointStyleAsset> getOverrideStyle() {
++            return new Waypoint.Icon(overrideStyle, colorOverride);
++        }
++
++        public synchronized void copyFrom(Waypoint.Icon other) {
++            Waypoint.Icon snapshot = other.copy();
++            this.color = snapshot.color;
++            this.style = snapshot.style;
++        }
++
++        private synchronized ResourceKey<WaypointStyleAsset> getOverrideStyle() {
+             return this.style != WaypointStyleAssets.DEFAULT ? this.style : WaypointStyleAssets.DEFAULT;
+         }
+     }

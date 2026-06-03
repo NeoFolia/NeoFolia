@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/level/pathfinder/PathTypeCache.java
++++ b/net/minecraft/world/level/pathfinder/PathTypeCache.java
+@@ -11,25 +_,25 @@
+     private final long[] positions = new long[4096];
+     private final PathType[] pathTypes = new PathType[4096];
+ 
+-    public PathType getOrCompute(BlockGetter level, BlockPos pos) {
++    public synchronized PathType getOrCompute(BlockGetter level, BlockPos pos) {
+         long key = pos.asLong();
+         int index = index(key);
+         PathType cachedPathType = this.get(index, key);
+         return cachedPathType != null ? cachedPathType : this.compute(level, pos, index, key);
+     }
+ 
+-    private @Nullable PathType get(int index, long key) {
++    private synchronized @Nullable PathType get(int index, long key) {
+         return this.positions[index] == key ? this.pathTypes[index] : null;
+     }
+ 
+-    private PathType compute(BlockGetter level, BlockPos pos, int index, long key) {
++    private synchronized PathType compute(BlockGetter level, BlockPos pos, int index, long key) {
+         PathType pathType = WalkNodeEvaluator.getPathTypeFromState(level, pos);
+         this.positions[index] = key;
+         this.pathTypes[index] = pathType;
+         return pathType;
+     }
+ 
+-    public void invalidate(BlockPos pos) {
++    public synchronized void invalidate(BlockPos pos) {
+         long key = pos.asLong();
+         int index = index(key);
+         if (this.positions[index] == key) {

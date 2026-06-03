@@ -1,0 +1,144 @@
+--- a/net/minecraft/world/inventory/GrindstoneMenu.java
++++ b/net/minecraft/world/inventory/GrindstoneMenu.java
+@@ -6,6 +_,7 @@
+ import net.minecraft.core.component.DataComponents;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.EnchantmentTags;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.SimpleContainer;
+ import net.minecraft.world.entity.ExperienceOrb;
+@@ -19,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class GrindstoneMenu extends AbstractContainerMenu {
+     public static final int MAX_NAME_LENGTH = 35;
+@@ -36,12 +_,13 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             super.setChanged();
+             GrindstoneMenu.this.slotsChanged(this);
+         }
+     };
+     private final ContainerLevelAccess access;
++    private int xp = -1;
+ 
+     public GrindstoneMenu(int containerId, Inventory inventory) {
+         this(containerId, inventory, ContainerLevelAccess.NULL);
+@@ -56,8 +_,8 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
+-                return itemStack.isDamageableItem() || EnchantmentHelper.hasAnyEnchantments(itemStack);
++            public synchronized boolean mayPlace(ItemStack itemStack) {
++                return itemStack.isDamageableItem() || EnchantmentHelper.hasAnyEnchantments(itemStack) || itemStack.canGrindstoneRepair();
+             }
+         });
+         this.addSlot(new Slot(this.repairSlots, 1, 49, 40) {
+@@ -66,8 +_,8 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
+-                return itemStack.isDamageableItem() || EnchantmentHelper.hasAnyEnchantments(itemStack);
++            public synchronized boolean mayPlace(ItemStack itemStack) {
++                return itemStack.isDamageableItem() || EnchantmentHelper.hasAnyEnchantments(itemStack) || itemStack.canGrindstoneRepair();
+             }
+         });
+         this.addSlot(new Slot(this.resultSlots, 2, 129, 34) {
+@@ -76,12 +_,13 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return false;
+             }
+ 
+             @Override
+-            public void onTake(Player player, ItemStack carried) {
++            public synchronized void onTake(Player player, ItemStack carried) {
++                if (net.neoforged.neoforge.common.CommonHooks.onGrindstoneTake(GrindstoneMenu.this.repairSlots, access, player, this::getExperienceAmount)) return;
+                 access.execute((level, pos) -> {
+                     if (level instanceof ServerLevel) {
+                         ExperienceOrb.award((ServerLevel)level, Vec3.atCenterOf(pos), this.getExperienceAmount(level));
+@@ -94,12 +_,13 @@
+             }
+ 
+             private int getExperienceAmount(Level level) {
++                if (xp > -1) return xp;
+                 int amount = 0;
+                 amount += this.getExperienceFromItem(GrindstoneMenu.this.repairSlots.getItem(0));
+                 amount += this.getExperienceFromItem(GrindstoneMenu.this.repairSlots.getItem(1));
+                 if (amount > 0) {
+                     int halfAmount = (int)Math.ceil(amount / 2.0);
+-                    return halfAmount + level.getRandom().nextInt(halfAmount);
++                    return halfAmount + GrindstoneMenu.randomFor(level).nextInt(halfAmount);
+                 } else {
+                     return 0;
+                 }
+@@ -123,8 +_,12 @@
+         this.addStandardInventorySlots(inventory, 8, 84);
+     }
+ 
++    private static RandomSource randomFor(Level level) {
++        return level instanceof ServerLevel serverLevel ? RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()) : level.getRandom();
++    }
++
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         super.slotsChanged(container);
+         if (container == this.repairSlots) {
+             this.createResult();
+@@ -132,6 +_,8 @@
+     }
+ 
+     private void createResult() {
++        this.xp = net.neoforged.neoforge.common.CommonHooks.onGrindstoneChange(this.repairSlots.getItem(0), this.repairSlots.getItem(1), this.resultSlots, -1);
++        if (this.xp == Integer.MIN_VALUE)
+         this.resultSlots.setItem(0, this.computeResult(this.repairSlots.getItem(0), this.repairSlots.getItem(1)));
+         this.broadcastChanges();
+     }
+@@ -162,7 +_,7 @@
+             int remaining2 = additional.getMaxDamage() - additional.getDamageValue();
+             int remaining = remaining1 + remaining2 + durability * 5 / 100;
+             int count = 1;
+-            if (!input.isDamageableItem()) {
++            if (!input.isDamageableItem() || !input.isCombineRepairable()) {
+                 if (input.getMaxStackSize() < 2 || !ItemStack.matches(input, additional)) {
+                     return ItemStack.EMPTY;
+                 }
+@@ -174,6 +_,7 @@
+             if (newItem.isDamageableItem()) {
+                 newItem.set(DataComponents.MAX_DAMAGE, durability);
+                 newItem.setDamageValue(Math.max(durability - remaining, 0));
++                if (!additional.isCombineRepairable()) newItem.setDamageValue(input.getDamageValue());
+             }
+ 
+             this.mergeEnchantsFrom(newItem, additional);
+@@ -213,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.access.execute((level, pos) -> this.clearContainer(player, this.repairSlots));
+     }
+@@ -224,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {

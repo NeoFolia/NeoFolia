@@ -1,0 +1,89 @@
+--- a/net/minecraft/world/entity/monster/PatrollingMonster.java
++++ b/net/minecraft/world/entity/monster/PatrollingMonster.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.entity.EntitySpawnReason;
+ import net.minecraft.world.entity.EntityType;
+ import net.minecraft.world.entity.EquipmentSlot;
++import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.SpawnGroupData;
+ import net.minecraft.world.entity.ai.goal.Goal;
+ import net.minecraft.world.entity.ai.navigation.PathNavigation;
+@@ -20,7 +_,9 @@
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class PatrollingMonster extends Monster {
+@@ -67,7 +_,7 @@
+         if (spawnReason != EntitySpawnReason.PATROL
+             && spawnReason != EntitySpawnReason.EVENT
+             && spawnReason != EntitySpawnReason.STRUCTURE
+-            && level.getRandom().nextFloat() < 0.06F
++            && this.getRandom().nextFloat() < 0.06F
+             && this.canBeLeader()) {
+             this.patrolLeader = true;
+         }
+@@ -153,7 +_,7 @@
+         public boolean canUse() {
+             boolean isOnCooldown = this.mob.level().getGameTime() < this.cooldownUntil;
+             return this.mob.isPatrolling()
+-                && this.mob.getTarget() == null
++                && this.regionSafeTarget(this.mob.getTarget()) == null
+                 && !this.mob.hasControllingPassenger()
+                 && this.mob.hasPatrolTarget()
+                 && !isOnCooldown;
+@@ -184,6 +_,12 @@
+                     longDistanceTarget = distance.yRot(90.0F).scale(0.4).add(longDistanceTarget);
+                     Vec3 moveTarget = longDistanceTarget.subtract(selfVector).normalize().scale(10.0).add(selfVector);
+                     BlockPos pathTarget = BlockPos.containing(moveTarget);
++                    if (!this.canReadBlock(pathTarget)) {
++                        this.moveRandomly();
++                        this.cooldownUntil = this.mob.level().getGameTime() + 200L;
++                        return;
++                    }
++
+                     pathTarget = this.mob.level().getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pathTarget);
+                     if (!navigation.moveTo(
+                         pathTarget.getX(), pathTarget.getY(), pathTarget.getZ(), patrolLeader ? this.leaderSpeedModifier : this.speedModifier
+@@ -200,19 +_,29 @@
+         }
+ 
+         private List<PatrollingMonster> findPatrolCompanions() {
+-            return this.mob
+-                .level()
+-                .getEntitiesOfClass(PatrollingMonster.class, this.mob.getBoundingBox().inflate(16.0), mob -> mob.canJoinPatrol() && !mob.is(this.mob));
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(16.0));
++            return searchBox == null
++                ? List.of()
++                : this.mob.level().getEntitiesOfClass(PatrollingMonster.class, searchBox, mob -> mob.canJoinPatrol() && !mob.is(this.mob));
+         }
+ 
+         private boolean moveRandomly() {
+             RandomSource random = this.mob.getRandom();
+-            BlockPos pathTarget = this.mob
+-                .level()
+-                .getHeightmapPos(
+-                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, this.mob.blockPosition().offset(-8 + random.nextInt(16), 0, -8 + random.nextInt(16))
+-                );
++            BlockPos pathTarget = this.mob.blockPosition().offset(-8 + random.nextInt(16), 0, -8 + random.nextInt(16));
++            if (!this.canReadBlock(pathTarget)) {
++                return false;
++            }
++
++            pathTarget = this.mob.level().getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pathTarget);
+             return this.mob.getNavigation().moveTo(pathTarget.getX(), pathTarget.getY(), pathTarget.getZ(), this.speedModifier);
++        }
++
++        private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++            return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
++        }
++
++        private boolean canReadBlock(BlockPos pos) {
++            return RegionizedWorldGuard.shouldLoadChunk(this.mob.level(), pos.getX() >> 4, pos.getZ() >> 4);
+         }
+     }
+ }

@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/entity/ai/goal/RandomStandGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RandomStandGoal.java
+@@ -13,12 +_,12 @@
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.horse.standIfPossible();
+         this.playStandSound();
+     }
+ 
+-    private void playStandSound() {
++    private synchronized void playStandSound() {
+         SoundEvent ambientStandSound = this.horse.getAmbientStandSound();
+         if (ambientStandSound != null) {
+             this.horse.playSound(ambientStandSound);
+@@ -26,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return false;
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         this.nextStand++;
+         if (this.nextStand > 0 && this.horse.getRandom().nextInt(1000) < this.nextStand) {
+             this.resetStandInterval(this.horse);
+@@ -41,12 +_,12 @@
+         }
+     }
+ 
+-    private void resetStandInterval(AbstractHorse horse) {
++    private synchronized void resetStandInterval(AbstractHorse horse) {
+         this.nextStand = -horse.getAmbientStandInterval();
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ }

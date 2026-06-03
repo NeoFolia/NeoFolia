@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/Emerging.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/Emerging.java
+@@ -24,16 +_,16 @@
+         );
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, E body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, E body, long timestamp) {
+         return true;
+     }
+ 
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+         body.setPose(Pose.EMERGING);
+         body.playSound(SoundEvents.WARDEN_EMERGE, 5.0F, 1.0F);
+     }
+ 
+-    protected void stop(ServerLevel level, E body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, E body, long timestamp) {
+         if (body.hasPose(Pose.EMERGING)) {
+             body.setPose(Pose.STANDING);
+         }

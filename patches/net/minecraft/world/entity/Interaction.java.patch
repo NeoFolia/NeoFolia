@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/Interaction.java
++++ b/net/minecraft/world/entity/Interaction.java
+@@ -20,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Interaction extends Entity implements Attackable, Targeting {
+@@ -101,7 +_,7 @@
+         if (source instanceof Player player) {
+             this.attack = new Interaction.PlayerAction(player.getUUID(), this.level().getGameTime());
+             if (player instanceof ServerPlayer serverPlayer) {
+-                CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(serverPlayer, this, player.damageSources().generic(), 1.0F, 1.0F, false);
++                this.triggerPlayerHurtEntity(serverPlayer);
+             }
+ 
+             return !this.getResponse();
+@@ -110,6 +_,16 @@
+         }
+     }
+ 
++    private void triggerPlayerHurtEntity(ServerPlayer player) {
++        DamageSource source = player.damageSources().generic();
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(
++            player, () -> CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(player, this, source, 1.0F, 1.0F, false)
++        );
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Interaction hurt advancement", trigger)) {
++            trigger.run();
++        }
++    }
++
+     @Override
+     public final boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+         return false;
+@@ -131,12 +_,14 @@
+ 
+     @Override
+     public @Nullable LivingEntity getLastAttacker() {
+-        return this.attack != null ? this.level().getPlayerByUUID(this.attack.player()) : null;
++        return this.attack != null ? RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.level().getPlayerByUUID(this.attack.player())) : null;
+     }
+ 
+     @Override
+     public @Nullable LivingEntity getTarget() {
+-        return this.interaction != null ? this.level().getPlayerByUUID(this.interaction.player()) : null;
++        return this.interaction != null
++            ? RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.level().getPlayerByUUID(this.interaction.player()))
++            : null;
+     }
+ 
+     private void setWidth(float width) {

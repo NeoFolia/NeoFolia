@@ -1,0 +1,595 @@
+--- a/net/minecraft/server/commands/ExecuteCommand.java
++++ b/net/minecraft/server/commands/ExecuteCommand.java
+@@ -115,12 +_,14 @@
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+ import net.minecraft.world.level.storage.loot.predicates.LootItemCondition;
++import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.scores.Objective;
+ import net.minecraft.world.scores.ReadOnlyScoreInfo;
+ import net.minecraft.world.scores.ScoreAccess;
+ import net.minecraft.world.scores.ScoreHolder;
+ import net.minecraft.world.scores.Scoreboard;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -136,6 +_,9 @@
+     private static final DynamicCommandExceptionType ERROR_CONDITIONAL_FAILED_COUNT = new DynamicCommandExceptionType(
+         count -> Component.translatableEscape("commands.execute.conditional.fail_count", count)
+     );
++    private static final SimpleCommandExceptionType ERROR_REGIONIZED_EXECUTE_REQUIRES_GLOBAL = new SimpleCommandExceptionType(
++        Component.literal("This execute modifier must run on the global server thread while regionized ticking is active")
++    );
+     @VisibleForTesting
+     public static final Dynamic2CommandExceptionType ERROR_FUNCTION_CONDITION_INSTANTATION_FAILURE = new Dynamic2CommandExceptionType(
+         (id, reason) -> Component.translatableEscape("commands.execute.function.instantiationFailure", id, reason)
+@@ -152,21 +_,22 @@
+                 .then(addConditionals(execute, Commands.literal("if"), true, context))
+                 .then(addConditionals(execute, Commands.literal("unless"), false, context))
+                 .then(Commands.literal("as").then(Commands.argument("targets", EntityArgument.entities()).fork(execute, c -> {
++                    requireGlobalExecuteModifier(c.getSource());
+                     List<CommandSourceStack> result = Lists.newArrayList();
+ 
+                     for (Entity entity : EntityArgument.getOptionalEntities(c, "targets")) {
+-                        result.add(c.getSource().withEntity(entity));
++                        sourceWithEntityIfPresent(c.getSource(), entity).ifPresent(result::add);
+                     }
+ 
+                     return result;
+                 })))
+                 .then(Commands.literal("at").then(Commands.argument("targets", EntityArgument.entities()).fork(execute, c -> {
++                    requireGlobalExecuteModifier(c.getSource());
+                     List<CommandSourceStack> result = Lists.newArrayList();
+ 
+                     for (Entity entity : EntityArgument.getOptionalEntities(c, "targets")) {
+-                        result.add(
+-                            c.getSource().withLevel((ServerLevel)entity.level()).withPosition(entity.position()).withRotation(entity.getRotationVector())
+-                        );
++                        ExecuteEntityState entityState = entityState(c.getSource(), entity);
++                        result.add(c.getSource().withLevel(entityState.level()).withPosition(entityState.position()).withRotation(entityState.rotation()));
+                     }
+ 
+                     return result;
+@@ -183,15 +_,17 @@
+                                 .redirect(execute, c -> c.getSource().withPosition(Vec3Argument.getVec3(c, "pos")).withAnchor(EntityAnchorArgument.Anchor.FEET))
+                         )
+                         .then(Commands.literal("as").then(Commands.argument("targets", EntityArgument.entities()).fork(execute, c -> {
++                            requireGlobalExecuteModifier(c.getSource());
+                             List<CommandSourceStack> result = Lists.newArrayList();
+ 
+                             for (Entity entity : EntityArgument.getOptionalEntities(c, "targets")) {
+-                                result.add(c.getSource().withPosition(entity.position()));
++                                result.add(c.getSource().withPosition(entityState(c.getSource(), entity).position()));
+                             }
+ 
+                             return result;
+                         })))
+                         .then(Commands.literal("over").then(Commands.argument("heightmap", HeightmapTypeArgument.heightmap()).redirect(execute, c -> {
++                            requireGlobalExecuteModifier(c.getSource());
+                             Vec3 position = c.getSource().getPosition();
+                             ServerLevel level = c.getSource().getLevel();
+                             double x = position.x();
+@@ -211,10 +_,11 @@
+                                 .redirect(execute, c -> c.getSource().withRotation(RotationArgument.getRotation(c, "rot").getRotation(c.getSource())))
+                         )
+                         .then(Commands.literal("as").then(Commands.argument("targets", EntityArgument.entities()).fork(execute, c -> {
++                            requireGlobalExecuteModifier(c.getSource());
+                             List<CommandSourceStack> result = Lists.newArrayList();
+ 
+                             for (Entity entity : EntityArgument.getOptionalEntities(c, "targets")) {
+-                                result.add(c.getSource().withRotation(entity.getRotationVector()));
++                                result.add(c.getSource().withRotation(entityState(c.getSource(), entity).rotation()));
+                             }
+ 
+                             return result;
+@@ -227,11 +_,13 @@
+                                 .then(
+                                     Commands.argument("targets", EntityArgument.entities())
+                                         .then(Commands.argument("anchor", EntityAnchorArgument.anchor()).fork(execute, c -> {
++                                            requireGlobalExecuteModifier(c.getSource());
+                                             List<CommandSourceStack> result = Lists.newArrayList();
+                                             EntityAnchorArgument.Anchor anchor = EntityAnchorArgument.getAnchor(c, "anchor");
+ 
+                                             for (Entity entity : EntityArgument.getOptionalEntities(c, "targets")) {
+-                                                result.add(c.getSource().facing(entity, anchor));
++                                                Vec3 facingPosition = RegionizedCommandHelper.callOnEntityRegion(c.getSource(), entity, () -> anchor.apply(entity));
++                                                result.add(c.getSource().facing(facingPosition));
+                                             }
+ 
+                                             return result;
+@@ -285,12 +_,7 @@
+                             Commands.argument("objective", ObjectiveArgument.objective())
+                                 .redirect(
+                                     execute,
+-                                    c -> storeValue(
+-                                        c.getSource(),
+-                                        ScoreHolderArgument.getNamesWithDefaultWildcard(c, "targets"),
+-                                        ObjectiveArgument.getObjective(c, "objective"),
+-                                        storeResult
+-                                    )
++                                    c -> storeScoreValue(c, storeResult)
+                                 )
+                         )
+                 )
+@@ -300,8 +_,8 @@
+                 .then(
+                     Commands.argument("id", IdentifierArgument.id())
+                         .suggests(BossBarCommands.SUGGEST_BOSS_BAR)
+-                        .then(Commands.literal("value").redirect(execute, c -> storeValue(c.getSource(), BossBarCommands.getBossBar(c), true, storeResult)))
+-                        .then(Commands.literal("max").redirect(execute, c -> storeValue(c.getSource(), BossBarCommands.getBossBar(c), false, storeResult)))
++                        .then(Commands.literal("value").redirect(execute, c -> storeBossBarValue(c, true, storeResult)))
++                        .then(Commands.literal("max").redirect(execute, c -> storeBossBarValue(c, false, storeResult)))
+                 )
+         );
+ 
+@@ -316,13 +_,7 @@
+                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                         .redirect(
+                                             execute,
+-                                            c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
+-                                                NbtPathArgument.getPath(c, "path"),
+-                                                v -> IntTag.valueOf((int)(v * DoubleArgumentType.getDouble(c, "scale"))),
+-                                                storeResult
+-                                            )
++                                            c -> storeData(c, provider, v -> IntTag.valueOf((int)(v * DoubleArgumentType.getDouble(c, "scale"))), storeResult)
+                                         )
+                                 )
+                         )
+@@ -332,13 +_,7 @@
+                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                         .redirect(
+                                             execute,
+-                                            c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
+-                                                NbtPathArgument.getPath(c, "path"),
+-                                                v -> FloatTag.valueOf((float)(v * DoubleArgumentType.getDouble(c, "scale"))),
+-                                                storeResult
+-                                            )
++                                            c -> storeData(c, provider, v -> FloatTag.valueOf((float)(v * DoubleArgumentType.getDouble(c, "scale"))), storeResult)
+                                         )
+                                 )
+                         )
+@@ -348,13 +_,7 @@
+                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                         .redirect(
+                                             execute,
+-                                            c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
+-                                                NbtPathArgument.getPath(c, "path"),
+-                                                v -> ShortTag.valueOf((short)(v * DoubleArgumentType.getDouble(c, "scale"))),
+-                                                storeResult
+-                                            )
++                                            c -> storeData(c, provider, v -> ShortTag.valueOf((short)(v * DoubleArgumentType.getDouble(c, "scale"))), storeResult)
+                                         )
+                                 )
+                         )
+@@ -364,13 +_,7 @@
+                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                         .redirect(
+                                             execute,
+-                                            c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
+-                                                NbtPathArgument.getPath(c, "path"),
+-                                                v -> LongTag.valueOf((long)(v * DoubleArgumentType.getDouble(c, "scale"))),
+-                                                storeResult
+-                                            )
++                                            c -> storeData(c, provider, v -> LongTag.valueOf((long)(v * DoubleArgumentType.getDouble(c, "scale"))), storeResult)
+                                         )
+                                 )
+                         )
+@@ -380,13 +_,7 @@
+                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                         .redirect(
+                                             execute,
+-                                            c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
+-                                                NbtPathArgument.getPath(c, "path"),
+-                                                v -> DoubleTag.valueOf(v * DoubleArgumentType.getDouble(c, "scale")),
+-                                                storeResult
+-                                            )
++                                            c -> storeData(c, provider, v -> DoubleTag.valueOf(v * DoubleArgumentType.getDouble(c, "scale")), storeResult)
+                                         )
+                                 )
+                         )
+@@ -396,13 +_,7 @@
+                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+                                         .redirect(
+                                             execute,
+-                                            c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
+-                                                NbtPathArgument.getPath(c, "path"),
+-                                                v -> ByteTag.valueOf((byte)(v * DoubleArgumentType.getDouble(c, "scale"))),
+-                                                storeResult
+-                                            )
++                                            c -> storeData(c, provider, v -> ByteTag.valueOf((byte)(v * DoubleArgumentType.getDouble(c, "scale"))), storeResult)
+                                         )
+                                 )
+                         )
+@@ -416,37 +_,100 @@
+     private static CommandSourceStack storeValue(CommandSourceStack source, Collection<ScoreHolder> names, Objective objective, boolean storeResult) {
+         Scoreboard scoreboard = source.getServer().getScoreboard();
+         return source.withCallback((success, result) -> {
+-            for (ScoreHolder name : names) {
+-                ScoreAccess score = scoreboard.getOrCreatePlayerScore(name, objective);
+-                int value = storeResult ? result : (success ? 1 : 0);
+-                score.set(value);
+-            }
++            int value = storeResult ? result : (success ? 1 : 0);
++            if (RegionizedTickContext.isRegionThread()
++                && source.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> storeScoreValue(scoreboard, names, objective, value))) {
++                return;
++            }
++            if (RegionizedTickContext.isRegionThread()) {
++                throw new IllegalStateException("Cannot store command score result from region worker while region dispatcher is not running");
++            }
++
++            storeScoreValue(scoreboard, names, objective, value);
+         }, CommandResultCallback::chain);
++    }
++
++    private static CommandSourceStack storeScoreValue(CommandContext<CommandSourceStack> context, boolean storeResult) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return storeValue(
++            context.getSource(),
++            ScoreHolderArgument.getNamesWithDefaultWildcard(context, "targets"),
++            ObjectiveArgument.getObjective(context, "objective"),
++            storeResult
++        );
++    }
++
++    private static void storeScoreValue(Scoreboard scoreboard, Collection<ScoreHolder> names, Objective objective, int value) {
++        for (ScoreHolder name : names) {
++            ScoreAccess score = scoreboard.getOrCreatePlayerScore(name, objective);
++            score.set(value);
++        }
++    }
++
++    private static CommandSourceStack storeBossBarValue(
++        CommandContext<CommandSourceStack> context, boolean storeIntoValue, boolean storeResult
++    ) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return storeValue(context.getSource(), BossBarCommands.getBossBar(context), storeIntoValue, storeResult);
+     }
+ 
+     private static CommandSourceStack storeValue(CommandSourceStack source, CustomBossEvent event, boolean storeIntoValue, boolean storeResult) {
+         return source.withCallback((success, result) -> {
+             int value = storeResult ? result : (success ? 1 : 0);
+-            if (storeIntoValue) {
+-                event.setValue(value);
+-            } else {
+-                event.setMax(value);
+-            }
++            if (RegionizedTickContext.isRegionThread()
++                && source.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> storeBossBarValue(event, storeIntoValue, value))) {
++                return;
++            }
++            if (RegionizedTickContext.isRegionThread()) {
++                throw new IllegalStateException("Cannot store command bossbar result from region worker while region dispatcher is not running");
++            }
++
++            storeBossBarValue(event, storeIntoValue, value);
+         }, CommandResultCallback::chain);
++    }
++
++    private static void storeBossBarValue(CustomBossEvent event, boolean storeIntoValue, int value) {
++        if (storeIntoValue) {
++            event.setValue(value);
++        } else {
++            event.setMax(value);
++        }
+     }
+ 
+     private static CommandSourceStack storeData(
+         CommandSourceStack source, DataAccessor accessor, NbtPathArgument.NbtPath path, IntFunction<Tag> constructor, boolean storeResult
+     ) {
+         return source.withCallback((success, result) -> {
+-            try {
+-                CompoundTag data = accessor.getData();
+-                int value = storeResult ? result : (success ? 1 : 0);
+-                path.set(data, constructor.apply(value));
+-                accessor.setData(data);
+-            } catch (CommandSyntaxException var8) {
+-            }
++            int value = storeResult ? result : (success ? 1 : 0);
++            if (RegionizedTickContext.isRegionThread()
++                && source.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> storeDataValue(accessor, path, constructor, value))) {
++                return;
++            }
++            if (RegionizedTickContext.isRegionThread()) {
++                throw new IllegalStateException("Cannot store command data result from region worker while region dispatcher is not running");
++            }
++
++            storeDataValue(accessor, path, constructor, value);
+         }, CommandResultCallback::chain);
++    }
++
++    private static CommandSourceStack storeData(
++        CommandContext<CommandSourceStack> context,
++        DataCommands.DataProvider provider,
++        IntFunction<Tag> constructor,
++        boolean storeResult
++    ) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return storeData(context.getSource(), provider.access(context), NbtPathArgument.getPath(context, "path"), constructor, storeResult);
++    }
++
++    private static void storeDataValue(DataAccessor accessor, NbtPathArgument.NbtPath path, IntFunction<Tag> constructor, int value) {
++        try {
++            CompoundTag data = accessor.getData();
++            path.set(data, constructor.apply(value));
++            accessor.setData(data);
++        } catch (CommandSyntaxException var5) {
++        }
+     }
+ 
+     private static boolean isChunkLoaded(ServerLevel level, BlockPos pos) {
+@@ -467,8 +_,7 @@
+                                     execute,
+                                     Commands.argument("block", BlockPredicateArgument.blockPredicate(context)),
+                                     expected,
+-                                    c -> BlockPredicateArgument.getBlockPredicate(c, "block")
+-                                        .test(new BlockInWorld(c.getSource().getLevel(), BlockPosArgument.getLoadedBlockPos(c, "pos"), true))
++                                    ExecuteCommand::checkBlockPredicate
+                                 )
+                             )
+                     )
+@@ -482,8 +_,7 @@
+                                     execute,
+                                     Commands.argument("biome", ResourceOrTagArgument.resourceOrTag(context, Registries.BIOME)),
+                                     expected,
+-                                    c -> ResourceOrTagArgument.getResourceOrTag(c, "biome", Registries.BIOME)
+-                                        .test(c.getSource().getLevel().getBiome(BlockPosArgument.getLoadedBlockPos(c, "pos")))
++                                    ExecuteCommand::checkBiomePredicate
+                                 )
+                             )
+                     )
+@@ -495,7 +_,7 @@
+                             execute,
+                             Commands.argument("pos", BlockPosArgument.blockPos()),
+                             expected,
+-                            c -> isChunkLoaded(c.getSource().getLevel(), BlockPosArgument.getBlockPos(c, "pos"))
++                            ExecuteCommand::checkLoaded
+                         )
+                     )
+             )
+@@ -624,8 +_,8 @@
+                 Commands.literal("entity")
+                     .then(
+                         Commands.argument("entities", EntityArgument.entities())
+-                            .fork(execute, c -> expect(c, expected, !EntityArgument.getOptionalEntities(c, "entities").isEmpty()))
+-                            .executes(createNumericConditionalHandler(expected, c -> EntityArgument.getOptionalEntities(c, "entities").size()))
++                            .fork(execute, c -> expect(c, expected, countEntities(c) > 0))
++                            .executes(createNumericConditionalHandler(expected, ExecuteCommand::countEntities))
+                     )
+             )
+             .then(
+@@ -635,7 +_,7 @@
+                             execute,
+                             Commands.argument("predicate", ResourceOrIdArgument.lootPredicate(context)),
+                             expected,
+-                            c -> checkCustomPredicate(c.getSource(), ResourceOrIdArgument.getLootPredicate(c, "predicate"))
++                            ExecuteCommand::checkCustomPredicate
+                         )
+                     )
+             )
+@@ -662,22 +_,13 @@
+                                                         c -> expect(
+                                                             c,
+                                                             expected,
+-                                                            countItems(
+-                                                                    EntityArgument.getEntities(c, "entities"),
+-                                                                    SlotsArgument.getSlots(c, "slots"),
+-                                                                    ItemPredicateArgument.getItemPredicate(c, "item_predicate")
+-                                                                )
+-                                                                > 0
++                                                            countEntityItems(c) > 0
+                                                         )
+                                                     )
+                                                     .executes(
+                                                         createNumericConditionalHandler(
+                                                             expected,
+-                                                            c -> countItems(
+-                                                                EntityArgument.getEntities(c, "entities"),
+-                                                                SlotsArgument.getSlots(c, "slots"),
+-                                                                ItemPredicateArgument.getItemPredicate(c, "item_predicate")
+-                                                            )
++                                                            ExecuteCommand::countEntityItems
+                                                         )
+                                                     )
+                                             )
+@@ -697,24 +_,13 @@
+                                                         c -> expect(
+                                                             c,
+                                                             expected,
+-                                                            countItems(
+-                                                                    c.getSource(),
+-                                                                    BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                    SlotsArgument.getSlots(c, "slots"),
+-                                                                    ItemPredicateArgument.getItemPredicate(c, "item_predicate")
+-                                                                )
+-                                                                > 0
++                                                            countBlockItems(c) > 0
+                                                         )
+                                                     )
+                                                     .executes(
+                                                         createNumericConditionalHandler(
+                                                             expected,
+-                                                            c -> countItems(
+-                                                                c.getSource(),
+-                                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                                SlotsArgument.getSlots(c, "slots"),
+-                                                                ItemPredicateArgument.getItemPredicate(c, "item_predicate")
+-                                                            )
++                                                            ExecuteCommand::countBlockItems
+                                                         )
+                                                     )
+                                             )
+@@ -744,8 +_,8 @@
+                     Commands.literal("data"),
+                     p -> p.then(
+                         Commands.argument("path", NbtPathArgument.nbtPath())
+-                            .fork(execute, c -> expect(c, expected, checkMatchingData(provider.access(c), NbtPathArgument.getPath(c, "path")) > 0))
+-                            .executes(createNumericConditionalHandler(expected, c -> checkMatchingData(provider.access(c), NbtPathArgument.getPath(c, "path"))))
++                            .fork(execute, c -> expect(c, expected, checkMatchingData(c, provider) > 0))
++                            .executes(createNumericConditionalHandler(expected, c -> checkMatchingData(c, provider)))
+                     )
+                 )
+             );
+@@ -754,6 +_,67 @@
+         return parent;
+     }
+ 
++    private static void requireGlobalExecuteModifier(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw ERROR_REGIONIZED_EXECUTE_REQUIRES_GLOBAL.create();
++        }
++    }
++
++    private static boolean checkBlockPredicate(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return BlockPredicateArgument.getBlockPredicate(context, "block")
++            .test(new BlockInWorld(context.getSource().getLevel(), BlockPosArgument.getLoadedBlockPos(context, "pos"), true));
++    }
++
++    private static boolean checkBiomePredicate(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return ResourceOrTagArgument.getResourceOrTag(context, "biome", Registries.BIOME)
++            .test(context.getSource().getLevel().getBiome(BlockPosArgument.getLoadedBlockPos(context, "pos")));
++    }
++
++    private static boolean checkLoaded(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return isChunkLoaded(context.getSource().getLevel(), BlockPosArgument.getBlockPos(context, "pos"));
++    }
++
++    private static int countEntities(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return EntityArgument.getOptionalEntities(context, "entities").size();
++    }
++
++    private static boolean checkCustomPredicate(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return checkCustomPredicate(context.getSource(), ResourceOrIdArgument.getLootPredicate(context, "predicate"));
++    }
++
++    private static int countEntityItems(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        SlotRange slotRange = SlotsArgument.getSlots(context, "slots");
++        Predicate<ItemStack> predicate = ItemPredicateArgument.getItemPredicate(context, "item_predicate");
++        int count = 0;
++
++        for (Entity entity : EntityArgument.getEntities(context, "entities")) {
++            count += RegionizedCommandHelper.callOnEntityRegion(context.getSource(), entity, () -> countItems(List.of(entity), slotRange, predicate));
++        }
++
++        return count;
++    }
++
++    private static int countBlockItems(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return countItems(
++            context.getSource(),
++            BlockPosArgument.getLoadedBlockPos(context, "pos"),
++            SlotsArgument.getSlots(context, "slots"),
++            ItemPredicateArgument.getItemPredicate(context, "item_predicate")
++        );
++    }
++
++    private static int checkMatchingData(CommandContext<CommandSourceStack> context, DataCommands.DataProvider provider) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
++        return checkMatchingData(provider.access(context), NbtPathArgument.getPath(context, "path"));
++    }
++
+     private static int countItems(Iterable<? extends SlotProvider> sources, SlotRange slotRange, Predicate<ItemStack> predicate) {
+         int count = 0;
+ 
+@@ -854,7 +_,7 @@
+         ServerLevel level = source.getLevel();
+         LootParams lootParams = new LootParams.Builder(level)
+             .withParameter(LootContextParams.ORIGIN, source.getPosition())
+-            .withOptionalParameter(LootContextParams.THIS_ENTITY, source.getEntity())
++            .withOptionalParameter(LootContextParams.THIS_ENTITY, RegionizedCommandHelper.sourceEntityFor(source, level))
+             .create(LootContextParamSets.COMMAND);
+         LootContext context = new LootContext.Builder(lootParams).create(Optional.empty());
+         context.pushVisitedElement(LootContext.createVisitedEntry(predicate.value()));
+@@ -906,6 +_,7 @@
+     }
+ 
+     private static OptionalInt checkRegions(CommandContext<CommandSourceStack> context, boolean skipAir) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(context.getSource());
+         return checkRegions(
+             context.getSource().getLevel(),
+             BlockPosArgument.getLoadedBlockPos(context, "start"),
+@@ -981,18 +_,53 @@
+ 
+     private static RedirectModifier<CommandSourceStack> expandOneToOneEntityRelation(Function<Entity, Optional<Entity>> unpacker) {
+         return context -> {
++            requireGlobalExecuteModifier(context.getSource());
+             CommandSourceStack source = context.getSource();
+             Entity entity = source.getEntity();
+-            return entity == null ? List.of() : unpacker.apply(entity).filter(e -> !e.isRemoved()).map(e -> List.of(source.withEntity(e))).orElse(List.of());
++            if (entity == null) {
++                return List.of();
++            }
++
++            Optional<Entity> related = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> unpacker.apply(entity));
++            return related.flatMap(relatedEntity -> sourceWithEntityIfPresent(source, relatedEntity).map(List::of)).orElse(List.of());
+         };
+     }
+ 
+     private static RedirectModifier<CommandSourceStack> expandOneToManyEntityRelation(Function<Entity, Stream<Entity>> unpacker) {
+         return context -> {
++            requireGlobalExecuteModifier(context.getSource());
+             CommandSourceStack source = context.getSource();
+             Entity entity = source.getEntity();
+-            return entity == null ? List.of() : unpacker.apply(entity).filter(e -> !e.isRemoved()).map(source::withEntity).toList();
++            if (entity == null) {
++                return List.of();
++            }
++
++            List<Entity> related = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> unpacker.apply(entity).toList());
++            List<CommandSourceStack> result = new ArrayList<>(related.size());
++            for (Entity relatedEntity : related) {
++                sourceWithEntityIfPresent(source, relatedEntity).ifPresent(result::add);
++            }
++            return result;
+         };
++    }
++
++    private static ExecuteEntityState entityState(CommandSourceStack source, Entity entity) {
++        return RegionizedCommandHelper.callOnEntityRegion(
++            source,
++            entity,
++            () -> new ExecuteEntityState((ServerLevel)entity.level(), entity.position(), entity.getRotationVector())
++        );
++    }
++
++    private static Optional<CommandSourceStack> sourceWithEntityIfPresent(CommandSourceStack source, Entity entity) {
++        return RegionizedCommandHelper.callOnEntityRegion(
++            source,
++            entity,
++            () -> entity.isRemoved() ? Optional.empty() : Optional.of(source.withEntity(entity))
++        );
++    }
++
++    private record ExecuteEntityState(ServerLevel level, Vec3 position, Vec2 rotation) {
+     }
+ 
+     private static LiteralArgumentBuilder<CommandSourceStack> createRelationOperations(
+@@ -1043,6 +_,7 @@
+     }
+ 
+     private static CommandSourceStack spawnEntityAndRedirect(CommandSourceStack source, Holder.Reference<EntityType<?>> type) throws CommandSyntaxException {
++        requireGlobalExecuteModifier(source);
+         Entity entity = SummonCommand.createEntity(source, type, source.getPosition(), new CompoundTag(), true);
+         return source.withEntity(entity);
+     }

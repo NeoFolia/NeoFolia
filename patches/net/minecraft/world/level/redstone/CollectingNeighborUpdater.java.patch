@@ -1,0 +1,136 @@
+--- a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
++++ b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -18,9 +_,7 @@
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private final Level level;
+     private final int maxChainedNeighborUpdates;
+-    private final ArrayDeque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
+-    private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
+-    private int count = 0;
++    private final ThreadLocal<CollectingNeighborUpdater.UpdateState> updateState = ThreadLocal.withInitial(CollectingNeighborUpdater.UpdateState::new);
+     private @Nullable Consumer<BlockPos> debugListener;
+ 
+     public CollectingNeighborUpdater(Level level, int maxChainedNeighborUpdates) {
+@@ -57,45 +_,60 @@
+     }
+ 
+     private void addAndRun(BlockPos pos, CollectingNeighborUpdater.NeighborUpdates update) {
+-        boolean runningAlready = this.count > 0;
+-        boolean tooManyUpdates = this.maxChainedNeighborUpdates >= 0 && this.count >= this.maxChainedNeighborUpdates;
+-        this.count++;
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this.level, pos, () -> this.addAndRun(pos, update))) {
++            return;
++        }
++
++        CollectingNeighborUpdater.UpdateState state = this.updateState.get();
++        boolean runningAlready = state.count > 0;
++        boolean tooManyUpdates = this.maxChainedNeighborUpdates >= 0 && state.count >= this.maxChainedNeighborUpdates;
++        state.count++;
+         if (!tooManyUpdates) {
+             if (runningAlready) {
+-                this.addedThisLayer.add(update);
++                state.addedThisLayer.add(update);
+             } else {
+-                this.stack.push(update);
++                state.stack.push(update);
+             }
+-        } else if (this.count - 1 == this.maxChainedNeighborUpdates) {
++        } else if (state.count - 1 == this.maxChainedNeighborUpdates) {
+             LOGGER.error("Too many chained neighbor updates. Skipping the rest. First skipped position: {}", pos.toShortString());
+         }
+ 
+         if (!runningAlready) {
+-            this.runUpdates();
++            this.runUpdates(state);
+         }
+     }
+ 
+-    private void runUpdates() {
++    private void runUpdates(CollectingNeighborUpdater.UpdateState state) {
+         try {
+-            while (!this.stack.isEmpty() || !this.addedThisLayer.isEmpty()) {
+-                for (int i = this.addedThisLayer.size() - 1; i >= 0; i--) {
+-                    this.stack.push(this.addedThisLayer.get(i));
++            while (!state.stack.isEmpty() || !state.addedThisLayer.isEmpty()) {
++                for (int i = state.addedThisLayer.size() - 1; i >= 0; i--) {
++                    state.stack.push(state.addedThisLayer.get(i));
+                 }
+ 
+-                this.addedThisLayer.clear();
+-                CollectingNeighborUpdater.NeighborUpdates nextUpdates = this.stack.peek();
++                state.addedThisLayer.clear();
++                CollectingNeighborUpdater.NeighborUpdates nextUpdates = state.stack.peek();
+                 if (this.debugListener != null) {
+                     nextUpdates.forEachUpdatedPos(this.debugListener);
+                 }
+ 
+-                while (this.addedThisLayer.isEmpty()) {
++                while (state.addedThisLayer.isEmpty()) {
+                     if (!nextUpdates.runNext(this.level)) {
+-                        this.stack.pop();
++                        state.stack.pop();
+                         break;
+                     }
+                 }
+             }
+         } finally {
++            state.clear();
++        }
++    }
++
++    private static final class UpdateState {
++        private final ArrayDeque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
++        private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
++        private int count;
++
++        private void clear() {
+             this.stack.clear();
+             this.addedThisLayer.clear();
+             this.count = 0;
+@@ -137,7 +_,6 @@
+         public boolean runNext(Level level) {
+             Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
+             BlockPos neighborPos = this.sourcePos.relative(direction);
+-            BlockState state = level.getBlockState(neighborPos);
+             Orientation orientation = null;
+             if (level.enabledFeatures().contains(FeatureFlags.REDSTONE_EXPERIMENTS)) {
+                 if (this.orientation == null) {
+@@ -149,12 +_,26 @@
+                 orientation = this.orientation.withFront(direction);
+             }
+ 
++            Orientation finalOrientation = orientation;
++            if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(
++                level,
++                neighborPos,
++                () -> NeighborUpdater.executeUpdate(level, level.getBlockState(neighborPos), neighborPos, this.sourceBlock, finalOrientation, false)
++            )) {
++                this.skipSkippedDirection();
++                return this.idx < NeighborUpdater.UPDATE_ORDER.length;
++            }
++
++            BlockState state = level.getBlockState(neighborPos);
+             NeighborUpdater.executeUpdate(level, state, neighborPos, this.sourceBlock, orientation, false);
+-            if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
+-                this.idx++;
+-            }
+-
++            this.skipSkippedDirection();
+             return this.idx < NeighborUpdater.UPDATE_ORDER.length;
++        }
++
++        private void skipSkippedDirection() {
++            if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
++                this.idx++;
++            }
+         }
+ 
+         @Override

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/monster/illager/Vindicator.java
++++ b/net/minecraft/world/entity/monster/illager/Vindicator.java
+@@ -128,7 +_,7 @@
+     ) {
+         SpawnGroupData spawnGroupData = super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+         this.getNavigation().setCanOpenDoors(true);
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         this.populateDefaultEquipmentSlots(random, difficulty);
+         this.populateDefaultEquipmentEnchantments(level, random, difficulty);
+         return spawnGroupData;

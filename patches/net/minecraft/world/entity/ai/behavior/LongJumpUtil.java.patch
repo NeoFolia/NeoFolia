@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/entity/ai/behavior/LongJumpUtil.java
++++ b/net/minecraft/world/entity/ai/behavior/LongJumpUtil.java
+@@ -8,7 +_,7 @@
+ import net.minecraft.world.phys.Vec3;
+ 
+ public final class LongJumpUtil {
+-    public static Optional<Vec3> calculateJumpVectorForAngle(Mob body, Vec3 targetPos, float maxJumpVelocity, int angle, boolean checkCollision) {
++    public static synchronized Optional<Vec3> calculateJumpVectorForAngle(Mob body, Vec3 targetPos, float maxJumpVelocity, int angle, boolean checkCollision) {
+         Vec3 mobPos = body.position();
+         Vec3 directionVectorPlane = new Vec3(targetPos.x - mobPos.x, 0.0, targetPos.z - mobPos.z).normalize().scale(0.5);
+         Vec3 targetPosition = targetPos.subtract(directionVectorPlane);
+@@ -60,7 +_,7 @@
+         }
+     }
+ 
+-    private static boolean isClearTransition(Mob body, EntityDimensions entityDimensions, Vec3 position1, Vec3 position2) {
++    private static synchronized boolean isClearTransition(Mob body, EntityDimensions entityDimensions, Vec3 position1, Vec3 position2) {
+         Vec3 direction = position2.subtract(position1);
+         double minDimension = Math.min(entityDimensions.width(), entityDimensions.height());
+         int checks = Mth.ceil(direction.length() / minDimension);

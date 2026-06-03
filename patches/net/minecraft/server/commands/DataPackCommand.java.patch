@@ -1,0 +1,173 @@
+--- a/net/minecraft/server/commands/DataPackCommand.java
++++ b/net/minecraft/server/commands/DataPackCommand.java
+@@ -104,8 +_,11 @@
+                             Commands.argument("name", StringArgumentType.string())
+                                 .suggests(UNSELECTED_PACKS)
+                                 .executes(
+-                                    c -> enablePack(
+-                                        c.getSource(), getPack(c, "name", true), (l, p) -> p.getDefaultPosition().insert(l, p, Pack::selectionConfig, false)
++                                    c -> runGlobalIfRegionized(
++                                        c.getSource(),
++                                        () -> enablePack(
++                                            c.getSource(), getPack(c, "name", true), (l, p) -> p.getDefaultPosition().insert(l, p, Pack::selectionConfig, false)
++                                        )
+                                     )
+                                 )
+                                 .then(
+@@ -114,10 +_,13 @@
+                                             Commands.argument("existing", StringArgumentType.string())
+                                                 .suggests(SELECTED_PACKS)
+                                                 .executes(
+-                                                    c -> enablePack(
++                                                    c -> runGlobalIfRegionized(
+                                                         c.getSource(),
+-                                                        getPack(c, "name", true),
+-                                                        (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)) + 1, p)
++                                                        () -> enablePack(
++                                                            c.getSource(),
++                                                            getPack(c, "name", true),
++                                                            (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)) + 1, p)
++                                                        )
+                                                     )
+                                                 )
+                                         )
+@@ -128,14 +_,27 @@
+                                             Commands.argument("existing", StringArgumentType.string())
+                                                 .suggests(SELECTED_PACKS)
+                                                 .executes(
+-                                                    c -> enablePack(
+-                                                        c.getSource(), getPack(c, "name", true), (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)), p)
++                                                    c -> runGlobalIfRegionized(
++                                                        c.getSource(),
++                                                        () -> enablePack(
++                                                            c.getSource(), getPack(c, "name", true), (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)), p)
++                                                        )
+                                                     )
+                                                 )
+                                         )
+                                 )
+-                                .then(Commands.literal("last").executes(c -> enablePack(c.getSource(), getPack(c, "name", true), List::add)))
+-                                .then(Commands.literal("first").executes(c -> enablePack(c.getSource(), getPack(c, "name", true), (l, p) -> l.add(0, p))))
++                                .then(
++                                    Commands.literal("last")
++                                        .executes(c -> runGlobalIfRegionized(c.getSource(), () -> enablePack(c.getSource(), getPack(c, "name", true), List::add)))
++                                )
++                                .then(
++                                    Commands.literal("first")
++                                        .executes(
++                                            c -> runGlobalIfRegionized(
++                                                c.getSource(), () -> enablePack(c.getSource(), getPack(c, "name", true), (l, p) -> l.add(0, p))
++                                            )
++                                        )
++                                )
+                         )
+                 )
+                 .then(
+@@ -143,7 +_,7 @@
+                         .then(
+                             Commands.argument("name", StringArgumentType.string())
+                                 .suggests(SELECTED_PACKS)
+-                                .executes(c -> disablePack(c.getSource(), getPack(c, "name", false)))
++                                .executes(c -> runGlobalIfRegionized(c.getSource(), () -> disablePack(c.getSource(), getPack(c, "name", false))))
+                         )
+                 )
+                 .then(
+@@ -160,8 +_,11 @@
+                                 .then(
+                                     Commands.argument("description", ComponentArgument.textComponent(context))
+                                         .executes(
+-                                            c -> createPack(
+-                                                c.getSource(), StringArgumentType.getString(c, "id"), ComponentArgument.getResolvedComponent(c, "description")
++                                            c -> runGlobalIfRegionized(
++                                                c.getSource(),
++                                                () -> createPack(
++                                                    c.getSource(), StringArgumentType.getString(c, "id"), ComponentArgument.getResolvedComponent(c, "description")
++                                                )
+                                             )
+                                         )
+                                 )
+@@ -171,6 +_,10 @@
+     }
+ 
+     private static int createPack(CommandSourceStack source, String id, Component description) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> createPack(source, id, description))) {
++            return 0;
++        }
++
+         Path datapackDir = source.getServer().getWorldPath(LevelResource.DATAPACK_DIR);
+         if (!FileUtil.isValidPathSegment(id)) {
+             throw ERROR_PACK_INVALID_NAME.create(id);
+@@ -217,6 +_,10 @@
+     }
+ 
+     private static int enablePack(CommandSourceStack source, Pack unopened, DataPackCommand.Inserter inserter) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> enablePack(source, unopened, inserter))) {
++            return 0;
++        }
++
+         PackRepository packRepository = source.getServer().getPackRepository();
+         List<Pack> selected = Lists.newArrayList(packRepository.getSelectedPacks());
+         inserter.apply(selected, unopened);
+@@ -226,6 +_,10 @@
+     }
+ 
+     private static int disablePack(CommandSourceStack source, Pack unopened) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> disablePack(source, unopened))) {
++            return 0;
++        }
++
+         PackRepository packRepository = source.getServer().getPackRepository();
+         List<Pack> selected = Lists.newArrayList(packRepository.getSelectedPacks());
+         selected.remove(unopened);
+@@ -235,10 +_,18 @@
+     }
+ 
+     private static int listPacks(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listPacks(source))) {
++            return 0;
++        }
++
+         return listEnabledPacks(source) + listAvailablePacks(source);
+     }
+ 
+     private static int listAvailablePacks(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listAvailablePacks(source))) {
++            return 0;
++        }
++
+         PackRepository repository = source.getServer().getPackRepository();
+         repository.reload();
+         Collection<Pack> selectedPacks = repository.getSelectedPacks();
+@@ -262,9 +_,13 @@
+     }
+ 
+     private static int listEnabledPacks(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listEnabledPacks(source))) {
++            return 0;
++        }
++
+         PackRepository repository = source.getServer().getPackRepository();
+         repository.reload();
+-        Collection<? extends Pack> selectedPacks = repository.getSelectedPacks();
++        Collection<? extends Pack> selectedPacks = repository.getSelectedPacks().stream().filter(p -> !p.isHidden()).toList();;
+         if (selectedPacks.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.datapack.list.enabled.none"), false);
+         } else {
+@@ -307,5 +_,17 @@
+ 
+     private interface Inserter {
+         void apply(final List<Pack> selected, final Pack pack) throws CommandSyntaxException;
++    }
++
++    private static int runGlobalIfRegionized(CommandSourceStack source, DataPackCommand.CommandOperation operation) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> operation.run())) {
++            return 0;
++        }
++
++        return operation.run();
++    }
++
++    private interface CommandOperation {
++        int run() throws CommandSyntaxException;
+     }
+ }

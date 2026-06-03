@@ -1,0 +1,11 @@
+--- a/net/minecraft/util/debug/DebugBrainDump.java
++++ b/net/minecraft/util/debug/DebugBrainDump.java
+@@ -198,7 +_,7 @@
+             case UUID uuid -> getShortDescription(level, level.getEntity(uuid));
+             case Entity entity -> DebugEntityNameGenerator.getEntityName(entity);
+             case WalkTarget walkTarget -> getShortDescription(level, walkTarget.getTarget());
+-            case EntityTracker entityTracker -> getShortDescription(level, entityTracker.getEntity());
++            case EntityTracker entityTracker -> getShortDescription(level, entityTracker.getEntityIfRegionSafe(level));
+             case GlobalPos globalPos -> getShortDescription(level, globalPos.pos());
+             case BlockPosTracker tracker -> getShortDescription(level, tracker.currentBlockPosition());
+             case DamageSource damageSource -> {

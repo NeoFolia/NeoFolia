@@ -1,0 +1,108 @@
+--- a/net/minecraft/server/bossevents/CustomBossEvent.java
++++ b/net/minecraft/server/bossevents/CustomBossEvent.java
+@@ -32,12 +_,12 @@
+         this.setProgress(0.0F);
+     }
+ 
+-    public Identifier customId() {
++    public synchronized Identifier customId() {
+         return this.customId;
+     }
+ 
+     @Override
+-    public void addPlayer(ServerPlayer player) {
++    public synchronized void addPlayer(ServerPlayer player) {
+         super.addPlayer(player);
+         if (this.players.add(player.getUUID())) {
+             this.setDirty();
+@@ -45,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removePlayer(ServerPlayer player) {
++    public synchronized void removePlayer(ServerPlayer player) {
+         super.removePlayer(player);
+         if (this.players.remove(player.getUUID())) {
+             this.setDirty();
+@@ -53,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removeAllPlayers() {
++    public synchronized void removeAllPlayers() {
+         super.removeAllPlayers();
+         if (!this.players.isEmpty()) {
+             this.players.clear();
+@@ -61,27 +_,27 @@
+         }
+     }
+ 
+-    public int value() {
++    public synchronized int value() {
+         return this.value;
+     }
+ 
+-    public int max() {
++    public synchronized int max() {
+         return this.max;
+     }
+ 
+-    public void setValue(int value) {
++    public synchronized void setValue(int value) {
+         this.value = value;
+         this.setProgress(Mth.clamp((float)value / this.max, 0.0F, 1.0F));
+         this.setDirty();
+     }
+ 
+-    public void setMax(int max) {
++    public synchronized void setMax(int max) {
+         this.max = max;
+         this.setProgress(Mth.clamp((float)this.value / max, 0.0F, 1.0F));
+         this.setDirty();
+     }
+ 
+-    public final Component getDisplayName() {
++    public final synchronized Component getDisplayName() {
+         return ComponentUtils.wrapInSquareBrackets(this.getName())
+             .withStyle(
+                 s -> s.withColor(this.getColor().getFormatting())
+@@ -90,7 +_,7 @@
+             );
+     }
+ 
+-    public boolean setPlayers(Collection<ServerPlayer> players) {
++    public synchronized boolean setPlayers(Collection<ServerPlayer> players) {
+         Set<UUID> toRemove = Sets.newHashSet();
+         Set<ServerPlayer> toAdd = Sets.newHashSet();
+ 
+@@ -161,7 +_,7 @@
+         return event;
+     }
+ 
+-    public CustomBossEvent.Packed pack() {
++    public synchronized CustomBossEvent.Packed pack() {
+         return new CustomBossEvent.Packed(
+             this.getName(),
+             this.isVisible(),
+@@ -176,18 +_,18 @@
+         );
+     }
+ 
+-    public void onPlayerConnect(ServerPlayer player) {
++    public synchronized void onPlayerConnect(ServerPlayer player) {
+         if (this.players.contains(player.getUUID())) {
+             this.addPlayer(player);
+         }
+     }
+ 
+-    public void onPlayerDisconnect(ServerPlayer player) {
++    public synchronized void onPlayerDisconnect(ServerPlayer player) {
+         super.removePlayer(player);
+     }
+ 
+     @Override
+-    public void setDirty() {
++    public synchronized void setDirty() {
+         this.dirtyCallback.run();
+     }
+ 

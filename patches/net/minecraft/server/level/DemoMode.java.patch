@@ -1,0 +1,42 @@
+--- a/net/minecraft/server/level/DemoMode.java
++++ b/net/minecraft/server/level/DemoMode.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.BlockHitResult;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class DemoMode extends ServerPlayerGameMode {
+     public static final int DEMO_DAYS = 5;
+@@ -31,7 +_,7 @@
+         long day = time / 24000L + 1L;
+         if (!this.displayedIntro && this.gameModeTicks > 20) {
+             this.displayedIntro = true;
+-            this.player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 0.0F));
++            RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 0.0F));
+         }
+ 
+         this.demoHasEnded = time > 120500L;
+@@ -42,18 +_,18 @@
+         if (time % 24000L == 500L) {
+             if (day <= 6L) {
+                 if (day == 6L) {
+-                    this.player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 104.0F));
++                    RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 104.0F));
+                 } else {
+                     this.player.sendSystemMessage(Component.translatable("demo.day." + day));
+                 }
+             }
+         } else if (day == 1L) {
+             if (time == 100L) {
+-                this.player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 101.0F));
++                RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 101.0F));
+             } else if (time == 175L) {
+-                this.player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 102.0F));
++                RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 102.0F));
+             } else if (time == 250L) {
+-                this.player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 103.0F));
++                RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundGameEventPacket(ClientboundGameEventPacket.DEMO_EVENT, 103.0F));
+             }
+         } else if (day == 5L && time % 24000L == 22000L) {
+             this.player.sendSystemMessage(Component.translatable("demo.day.warning"));

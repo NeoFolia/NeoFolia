@@ -1,0 +1,31 @@
+--- a/net/minecraft/world/entity/ai/goal/target/NearestHealableRaiderTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/NearestHealableRaiderTargetGoal.java
+@@ -13,16 +_,16 @@
+         super(raider, targetType, 500, mustSee, false, subselector);
+     }
+ 
+-    public int getCooldown() {
++    public synchronized int getCooldown() {
+         return this.cooldown;
+     }
+ 
+-    public void decrementCooldown() {
++    public synchronized void decrementCooldown() {
+         this.cooldown--;
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.cooldown > 0 || !this.mob.getRandom().nextBoolean()) {
+             return false;
+         } else if (!((Raider)this.mob).hasActiveRaid()) {
+@@ -34,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.cooldown = reducedTickDelay(200);
+         super.start();
+     }

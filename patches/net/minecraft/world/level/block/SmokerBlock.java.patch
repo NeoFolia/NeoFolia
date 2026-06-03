@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/SmokerBlock.java
++++ b/net/minecraft/world/level/block/SmokerBlock.java
+@@ -6,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.MenuProvider;
+ import net.minecraft.world.entity.player.Player;
+@@ -45,7 +_,7 @@
+         BlockEntity blockEntity = level.getBlockEntity(pos);
+         if (blockEntity instanceof SmokerBlockEntity) {
+             player.openMenu((MenuProvider)blockEntity);
+-            player.awardStat(Stats.INTERACT_WITH_SMOKER);
++            RegionizedWorldGuard.awardStat(player, Stats.INTERACT_WITH_SMOKER);
+         }
+     }
+ 

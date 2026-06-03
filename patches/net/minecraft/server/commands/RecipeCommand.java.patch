@@ -1,0 +1,156 @@
+--- a/net/minecraft/server/commands/RecipeCommand.java
++++ b/net/minecraft/server/commands/RecipeCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.Collection;
+@@ -28,23 +_,11 @@
+                             Commands.argument("targets", EntityArgument.players())
+                                 .then(
+                                     Commands.argument("recipe", ResourceKeyArgument.key(Registries.RECIPE))
+-                                        .executes(
+-                                            c -> giveRecipes(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                Collections.singleton(ResourceKeyArgument.getRecipe(c, "recipe"))
+-                                            )
+-                                        )
++                                        .executes(c -> giveRecipes(c, false))
+                                 )
+                                 .then(
+                                     Commands.literal("*")
+-                                        .executes(
+-                                            c -> giveRecipes(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                c.getSource().getServer().getRecipeManager().getRecipes()
+-                                            )
+-                                        )
++                                        .executes(c -> giveRecipes(c, true))
+                                 )
+                         )
+                 )
+@@ -54,42 +_,51 @@
+                             Commands.argument("targets", EntityArgument.players())
+                                 .then(
+                                     Commands.argument("recipe", ResourceKeyArgument.key(Registries.RECIPE))
+-                                        .executes(
+-                                            c -> takeRecipes(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                Collections.singleton(ResourceKeyArgument.getRecipe(c, "recipe"))
+-                                            )
+-                                        )
++                                        .executes(c -> takeRecipes(c, false))
+                                 )
+                                 .then(
+                                     Commands.literal("*")
+-                                        .executes(
+-                                            c -> takeRecipes(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                c.getSource().getServer().getRecipeManager().getRecipes()
+-                                            )
+-                                        )
++                                        .executes(c -> takeRecipes(c, true))
+                                 )
+                         )
+                 )
++        );
++    }
++
++    private static int giveRecipes(CommandContext<CommandSourceStack> context, boolean allRecipes) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> giveRecipes(context, allRecipes))) {
++            return 0;
++        }
++
++        return giveRecipes(
++            source,
++            EntityArgument.getPlayers(context, "targets"),
++            allRecipes ? source.getServer().getRecipeManager().getRecipes() : Collections.singleton(ResourceKeyArgument.getRecipe(context, "recipe"))
+         );
+     }
+ 
+     private static int giveRecipes(CommandSourceStack source, Collection<ServerPlayer> players, Collection<RecipeHolder<?>> recipes) throws CommandSyntaxException {
+         int success = 0;
++        Component singlePlayerName = null;
+ 
+         for (ServerPlayer player : players) {
+-            success += player.awardRecipes(recipes);
++            RecipeResult result = RegionizedCommandHelper.callOnPlayerRegion(
++                source,
++                player,
++                () -> new RecipeResult(player.awardRecipes(recipes), player.getDisplayName())
++            );
++            success += result.count();
++            singlePlayerName = result.playerName();
+         }
+ 
+         if (success == 0) {
+             throw ERROR_GIVE_FAILED.create();
+         } else {
+             if (players.size() == 1) {
++                Component finalSinglePlayerName = singlePlayerName;
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.recipe.give.success.single", recipes.size(), players.iterator().next().getDisplayName()), true
++                    () -> Component.translatable("commands.recipe.give.success.single", recipes.size(), finalSinglePlayerName), true
+                 );
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.recipe.give.success.multiple", recipes.size(), players.size()), true);
+@@ -99,19 +_,40 @@
+         }
+     }
+ 
++    private static int takeRecipes(CommandContext<CommandSourceStack> context, boolean allRecipes) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> takeRecipes(context, allRecipes))) {
++            return 0;
++        }
++
++        return takeRecipes(
++            source,
++            EntityArgument.getPlayers(context, "targets"),
++            allRecipes ? source.getServer().getRecipeManager().getRecipes() : Collections.singleton(ResourceKeyArgument.getRecipe(context, "recipe"))
++        );
++    }
++
+     private static int takeRecipes(CommandSourceStack source, Collection<ServerPlayer> players, Collection<RecipeHolder<?>> recipes) throws CommandSyntaxException {
+         int success = 0;
++        Component singlePlayerName = null;
+ 
+         for (ServerPlayer player : players) {
+-            success += player.resetRecipes(recipes);
++            RecipeResult result = RegionizedCommandHelper.callOnPlayerRegion(
++                source,
++                player,
++                () -> new RecipeResult(player.resetRecipes(recipes), player.getDisplayName())
++            );
++            success += result.count();
++            singlePlayerName = result.playerName();
+         }
+ 
+         if (success == 0) {
+             throw ERROR_TAKE_FAILED.create();
+         } else {
+             if (players.size() == 1) {
++                Component finalSinglePlayerName = singlePlayerName;
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.recipe.take.success.single", recipes.size(), players.iterator().next().getDisplayName()), true
++                    () -> Component.translatable("commands.recipe.take.success.single", recipes.size(), finalSinglePlayerName), true
+                 );
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.recipe.take.success.multiple", recipes.size(), players.size()), true);
+@@ -119,5 +_,8 @@
+ 
+             return success;
+         }
++    }
++
++    private record RecipeResult(int count, Component playerName) {
+     }
+ }

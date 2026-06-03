@@ -1,0 +1,112 @@
+--- a/net/minecraft/server/commands/data/EntityDataAccessor.java
++++ b/net/minecraft/server/commands/data/EntityDataAccessor.java
+@@ -17,19 +_,25 @@
+ import net.minecraft.nbt.NbtUtils;
+ import net.minecraft.nbt.Tag;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.server.commands.RegionizedCommandHelper;
+ import net.minecraft.util.ProblemReporter;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.storage.TagValueInput;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.slf4j.Logger;
+ 
+ public class EntityDataAccessor implements DataAccessor {
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private static final SimpleCommandExceptionType ERROR_NO_PLAYERS = new SimpleCommandExceptionType(Component.translatable("commands.data.entity.invalid"));
++    private static final SimpleCommandExceptionType ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL = new SimpleCommandExceptionType(
++        Component.literal("This entity data accessor must run on the global server thread while regionized ticking is active")
++    );
+     public static final Function<String, DataCommands.DataProvider> PROVIDER = arg -> new DataCommands.DataProvider() {
+         @Override
+         public DataAccessor access(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+-            return new EntityDataAccessor(EntityArgument.getEntity(context, arg));
++            requireGlobalDataAccess(context.getSource());
++            return new EntityDataAccessor(context.getSource(), EntityArgument.getEntity(context, arg));
+         }
+ 
+         @Override
+@@ -39,45 +_,68 @@
+             return parent.then(Commands.literal("entity").then(function.apply(Commands.argument(arg, EntityArgument.entity()))));
+         }
+     };
++    private final CommandSourceStack source;
+     private final Entity entity;
+ 
+-    public EntityDataAccessor(Entity entity) {
++    public EntityDataAccessor(CommandSourceStack source, Entity entity) {
++        this.source = source;
+         this.entity = entity;
+     }
+ 
+     @Override
+     public void setData(CompoundTag tag) throws CommandSyntaxException {
+-        if (this.entity instanceof Player) {
+-            throw ERROR_NO_PLAYERS.create();
+-        } else {
+-            UUID uuid = this.entity.getUUID();
++        requireGlobalDataAccess();
++        RegionizedCommandHelper.callOnEntityRegionThrowing(this.source, this.entity, () -> {
++            if (this.entity instanceof Player) {
++                throw ERROR_NO_PLAYERS.create();
++            } else {
++                UUID uuid = this.entity.getUUID();
+ 
+-            try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.entity.problemPath(), LOGGER)) {
+-                this.entity.load(TagValueInput.create(reporter, this.entity.registryAccess(), tag));
+-                this.entity.setUUID(uuid);
++                try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.entity.problemPath(), LOGGER)) {
++                    this.entity.load(TagValueInput.create(reporter, this.entity.registryAccess(), tag));
++                    this.entity.setUUID(uuid);
++                }
+             }
+-        }
++            return null;
++        });
+     }
+ 
+     @Override
+-    public CompoundTag getData() {
+-        return NbtPredicate.getEntityTagToCompare(this.entity);
++    public CompoundTag getData() throws CommandSyntaxException {
++        requireGlobalDataAccess();
++        return RegionizedCommandHelper.callOnEntityRegion(this.source, this.entity, () -> NbtPredicate.getEntityTagToCompare(this.entity));
++    }
++
++    private static void requireGlobalDataAccess(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL.create();
++        }
++    }
++
++    private static void requireGlobalDataAccess() throws CommandSyntaxException {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL.create();
++        }
+     }
+ 
+     @Override
+     public Component getModifiedSuccess() {
+-        return Component.translatable("commands.data.entity.modified", this.entity.getDisplayName());
++        return Component.translatable("commands.data.entity.modified", this.entityName());
+     }
+ 
+     @Override
+     public Component getPrintSuccess(Tag data) {
+-        return Component.translatable("commands.data.entity.query", this.entity.getDisplayName(), NbtUtils.toPrettyComponent(data));
++        return Component.translatable("commands.data.entity.query", this.entityName(), NbtUtils.toPrettyComponent(data));
+     }
+ 
+     @Override
+     public Component getPrintSuccess(NbtPathArgument.NbtPath path, double scale, int value) {
+         return Component.translatable(
+-            "commands.data.entity.get", path.asString(), this.entity.getDisplayName(), String.format(Locale.ROOT, "%.2f", scale), value
++            "commands.data.entity.get", path.asString(), this.entityName(), String.format(Locale.ROOT, "%.2f", scale), value
+         );
++    }
++
++    private Component entityName() {
++        return RegionizedCommandHelper.callOnEntityRegion(this.source, this.entity, this.entity::getDisplayName);
+     }
+ }

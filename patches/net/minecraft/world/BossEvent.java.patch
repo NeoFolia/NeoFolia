@@ -1,0 +1,84 @@
+--- a/net/minecraft/world/BossEvent.java
++++ b/net/minecraft/world/BossEvent.java
+@@ -24,66 +_,66 @@
+         this.progress = 1.0F;
+     }
+ 
+-    public UUID getId() {
++    public synchronized UUID getId() {
+         return this.id;
+     }
+ 
+-    public Component getName() {
++    public synchronized Component getName() {
+         return this.name;
+     }
+ 
+-    public void setName(Component name) {
++    public synchronized void setName(Component name) {
+         this.name = name;
+     }
+ 
+-    public float getProgress() {
++    public synchronized float getProgress() {
+         return this.progress;
+     }
+ 
+-    public void setProgress(float progress) {
++    public synchronized void setProgress(float progress) {
+         this.progress = progress;
+     }
+ 
+-    public BossEvent.BossBarColor getColor() {
++    public synchronized BossEvent.BossBarColor getColor() {
+         return this.color;
+     }
+ 
+-    public void setColor(BossEvent.BossBarColor color) {
++    public synchronized void setColor(BossEvent.BossBarColor color) {
+         this.color = color;
+     }
+ 
+-    public BossEvent.BossBarOverlay getOverlay() {
++    public synchronized BossEvent.BossBarOverlay getOverlay() {
+         return this.overlay;
+     }
+ 
+-    public void setOverlay(BossEvent.BossBarOverlay overlay) {
++    public synchronized void setOverlay(BossEvent.BossBarOverlay overlay) {
+         this.overlay = overlay;
+     }
+ 
+-    public boolean shouldDarkenScreen() {
++    public synchronized boolean shouldDarkenScreen() {
+         return this.darkenScreen;
+     }
+ 
+-    public BossEvent setDarkenScreen(boolean darkenScreen) {
++    public synchronized BossEvent setDarkenScreen(boolean darkenScreen) {
+         this.darkenScreen = darkenScreen;
+         return this;
+     }
+ 
+-    public boolean shouldPlayBossMusic() {
++    public synchronized boolean shouldPlayBossMusic() {
+         return this.playBossMusic;
+     }
+ 
+-    public BossEvent setPlayBossMusic(boolean playBossMusic) {
++    public synchronized BossEvent setPlayBossMusic(boolean playBossMusic) {
+         this.playBossMusic = playBossMusic;
+         return this;
+     }
+ 
+-    public BossEvent setCreateWorldFog(boolean createWorldFog) {
++    public synchronized BossEvent setCreateWorldFog(boolean createWorldFog) {
+         this.createWorldFog = createWorldFog;
+         return this;
+     }
+ 
+-    public boolean shouldCreateWorldFog() {
++    public synchronized boolean shouldCreateWorldFog() {
+         return this.createWorldFog;
+     }
+ 

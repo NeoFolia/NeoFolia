@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/entity/animal/golem/IronGolem.java
++++ b/net/minecraft/world/entity/animal/golem/IronGolem.java
+@@ -46,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class IronGolem extends AbstractGolem implements NeutralMob {
+@@ -306,21 +_,37 @@
+     public boolean checkSpawnObstruction(LevelReader level) {
+         BlockPos pos = this.blockPosition();
+         BlockPos belowPos = pos.below();
++        if (!canReadBlock(level, belowPos)) {
++            return false;
++        }
++
+         BlockState below = level.getBlockState(belowPos);
+         if (!below.entityCanStandOn(level, belowPos, this)) {
+             return false;
+         } else {
+             for (int i = 1; i < 3; i++) {
+                 BlockPos abovePos = pos.above(i);
++                if (!canReadBlock(level, abovePos)) {
++                    return false;
++                }
++
+                 BlockState above = level.getBlockState(abovePos);
+                 if (!NaturalSpawner.isValidEmptySpawnBlock(level, abovePos, above, above.getFluidState(), EntityType.IRON_GOLEM)) {
+                     return false;
+                 }
+             }
+ 
++            if (!canReadBlock(level, pos)) {
++                return false;
++            }
++
+             return NaturalSpawner.isValidEmptySpawnBlock(level, pos, level.getBlockState(pos), Fluids.EMPTY.defaultFluidState(), EntityType.IRON_GOLEM)
+                 && level.isUnobstructed(this);
+         }
++    }
++
++    private static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override

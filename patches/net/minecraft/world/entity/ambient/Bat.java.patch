@@ -1,0 +1,65 @@
+--- a/net/minecraft/world/entity/ambient/Bat.java
++++ b/net/minecraft/world/entity/ambient/Bat.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Bat extends AmbientCreature {
+@@ -132,7 +_,7 @@
+         BlockPos above = pos.above();
+         if (this.isResting()) {
+             boolean isSilent = this.isSilent();
+-            if (level.getBlockState(above).isRedstoneConductor(level, pos)) {
++            if (canReadBlock(level, above) && level.getBlockState(above).isRedstoneConductor(level, pos)) {
+                 if (this.random.nextInt(200) == 0) {
+                     this.yHeadRot = this.random.nextInt(360);
+                 }
+@@ -150,7 +_,8 @@
+                 }
+             }
+         } else {
+-            if (this.targetPosition != null && (!level.isEmptyBlock(this.targetPosition) || this.targetPosition.getY() <= level.getMinY())) {
++            if (this.targetPosition != null
++                && (!canReadBlock(level, this.targetPosition) || !level.isEmptyBlock(this.targetPosition) || this.targetPosition.getY() <= level.getMinY())) {
+                 this.targetPosition = null;
+             }
+ 
+@@ -174,7 +_,7 @@
+             float rotDiff = Mth.wrapDegrees(yRotD - this.getYRot());
+             this.zza = 0.5F;
+             this.setYRot(this.getYRot() + rotDiff);
+-            if (this.random.nextInt(100) == 0 && level.getBlockState(above).isRedstoneConductor(level, above)) {
++            if (this.random.nextInt(100) == 0 && canReadBlock(level, above) && level.getBlockState(above).isRedstoneConductor(level, above)) {
+                 this.setResting(true);
+             }
+         }
+@@ -220,15 +_,24 @@
+     }
+ 
+     public static boolean checkBatSpawnRules(EntityType<Bat> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random) {
+-        if (pos.getY() >= level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, pos).getY()) {
++        BlockPos below = pos.below();
++        if (!canReadBlock(level, pos)) {
++            return false;
++        } else if (pos.getY() >= level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, pos).getY()) {
+             return false;
+         } else if (random.nextBoolean()) {
+             return false;
+         } else if (level.getMaxLocalRawBrightness(pos) > random.nextInt(4)) {
+             return false;
+         } else {
+-            return !level.getBlockState(pos.below()).is(BlockTags.BATS_SPAWNABLE_ON) ? false : checkMobSpawnRules(type, level, spawnReason, pos, random);
++            return !canReadBlock(level, below) || !level.getBlockState(below).is(BlockTags.BATS_SPAWNABLE_ON)
++                ? false
++                : checkMobSpawnRules(type, level, spawnReason, pos, random);
+         }
++    }
++
++    private static boolean canReadBlock(LevelAccessor level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     private void setupAnimationStates() {

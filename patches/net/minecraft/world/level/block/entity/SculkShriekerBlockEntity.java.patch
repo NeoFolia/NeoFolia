@@ -1,0 +1,28 @@
+--- a/net/minecraft/world/level/block/entity/SculkShriekerBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/SculkShriekerBlockEntity.java
+@@ -37,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class SculkShriekerBlockEntity extends BlockEntity implements GameEventListener.Provider<VibrationSystem.Listener>, VibrationSystem {
+@@ -152,12 +_,16 @@
+         SoundEvent sound = SOUND_BY_LEVEL.get(this.warningLevel);
+         if (sound != null) {
+             BlockPos pos = this.getBlockPos();
+-            RandomSource random = level.getRandom();
++            RandomSource random = shriekerRandom(level);
+             int x = pos.getX() + Mth.randomBetweenInclusive(random, -10, 10);
+             int y = pos.getY() + Mth.randomBetweenInclusive(random, -10, 10);
+             int z = pos.getZ() + Mth.randomBetweenInclusive(random, -10, 10);
+             level.playSound(null, (double)x, (double)y, (double)z, sound, SoundSource.HOSTILE, 5.0F, 1.0F);
+         }
++    }
++
++    private static RandomSource shriekerRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     private boolean trySummonWarden(ServerLevel level) {

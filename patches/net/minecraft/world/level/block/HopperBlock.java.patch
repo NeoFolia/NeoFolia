@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/HopperBlock.java
++++ b/net/minecraft/world/level/block/HopperBlock.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.world.Containers;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.Entity;
+@@ -106,7 +_,7 @@
+     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+         if (!level.isClientSide() && level.getBlockEntity(pos) instanceof HopperBlockEntity hopper) {
+             player.openMenu(hopper);
+-            player.awardStat(Stats.INSPECT_HOPPER);
++            RegionizedWorldGuard.awardStat(player, Stats.INSPECT_HOPPER);
+         }
+ 
+         return InteractionResult.SUCCESS;

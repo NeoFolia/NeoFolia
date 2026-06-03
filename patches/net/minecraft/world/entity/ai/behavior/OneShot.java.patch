@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/entity/ai/behavior/OneShot.java
++++ b/net/minecraft/world/entity/ai/behavior/OneShot.java
+@@ -8,12 +_,12 @@
+     private Behavior.Status status = Behavior.Status.STOPPED;
+ 
+     @Override
+-    public final Behavior.Status getStatus() {
++    public final synchronized Behavior.Status getStatus() {
+         return this.status;
+     }
+ 
+     @Override
+-    public final boolean tryStart(ServerLevel level, E body, long timestamp) {
++    public final synchronized boolean tryStart(ServerLevel level, E body, long timestamp) {
+         if (this.trigger(level, body, timestamp)) {
+             this.status = Behavior.Status.RUNNING;
+             return true;
+@@ -23,17 +_,17 @@
+     }
+ 
+     @Override
+-    public final void tickOrStop(ServerLevel level, E body, long timestamp) {
++    public final synchronized void tickOrStop(ServerLevel level, E body, long timestamp) {
+         this.doStop(level, body, timestamp);
+     }
+ 
+     @Override
+-    public final void doStop(ServerLevel level, E body, long timestamp) {
++    public final synchronized void doStop(ServerLevel level, E body, long timestamp) {
+         this.status = Behavior.Status.STOPPED;
+     }
+ 
+     @Override
+-    public String debugString() {
++    public synchronized String debugString() {
+         return this.getClass().getSimpleName();
+     }
+ }

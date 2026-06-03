@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/entity/AgeableMob.java
++++ b/net/minecraft/world/entity/AgeableMob.java
+@@ -54,7 +_,7 @@
+         AgeableMob.AgeableMobGroupData ageableMobGroupData = (AgeableMob.AgeableMobGroupData)groupData;
+         if (ageableMobGroupData.isShouldSpawnBaby()
+             && ageableMobGroupData.getGroupSize() > 0
+-            && level.getRandom().nextFloat() <= ageableMobGroupData.getBabySpawnChance()) {
++            && this.getRandom().nextFloat() <= ageableMobGroupData.getBabySpawnChance()) {
+             this.setAge(this.getBabyStartAge());
+         }
+ 
+@@ -232,7 +_,7 @@
+     }
+ 
+     protected void ageBoundaryReached() {
+-        if (!this.isBaby() && this.isPassenger() && this.getVehicle() instanceof AbstractBoat boat && !boat.hasEnoughSpaceFor(this)) {
++        if (!this.isBaby() && this.getVehicle() instanceof AbstractBoat boat && !boat.hasEnoughSpaceFor(this)) {
+             this.stopRiding();
+         }
+     }

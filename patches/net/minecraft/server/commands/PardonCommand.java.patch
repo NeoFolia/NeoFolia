@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/PardonCommand.java
++++ b/net/minecraft/server/commands/PardonCommand.java
+@@ -28,6 +_,10 @@
+     }
+ 
+     private static int pardonPlayers(CommandSourceStack source, Collection<NameAndId> players) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> pardonPlayers(source, players))) {
++            return players.size();
++        }
++
+         UserBanList list = source.getServer().getPlayerList().getBans();
+         int count = 0;
+ 

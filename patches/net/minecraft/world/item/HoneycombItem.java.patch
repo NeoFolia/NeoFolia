@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/item/HoneycombItem.java
++++ b/net/minecraft/world/item/HoneycombItem.java
+@@ -23,8 +_,13 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.properties.ChestType;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class HoneycombItem extends Item implements SignApplicator {
++    /**
++     * @deprecated Neo: Use the {@link net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps#WAXABLES data map}, this field will be ignored in a future version
++     */
++    @Deprecated
+     public static final Supplier<BiMap<Block, Block>> WAXABLES = Suppliers.memoize(
+         () -> ImmutableBiMap.<Block, Block>builder()
+             .put(Blocks.COPPER_BLOCK, Blocks.WAXED_COPPER_BLOCK)
+@@ -80,6 +_,10 @@
+             .putAll(Blocks.COPPER_CHAIN.waxedMapping())
+             .build()
+     );
++    /**
++     * @deprecated Use the {@link net.neoforged.neoforge.common.DataMapHooks#INVERSE_WAXABLES_DATAMAP inverse map} generated from the data map, this field will be ignored in a future version
++     */
++    @Deprecated
+     public static final Supplier<BiMap<Block, Block>> WAX_OFF_BY_BLOCK = Suppliers.memoize(() -> WAXABLES.get().inverse());
+     private static final String WAXED_COPPER_DOOR = "waxed_copper_door";
+     private static final String WAXED_COPPER_TRAPDOOR = "waxed_copper_trapdoor";
+@@ -146,7 +_,10 @@
+             Player player = context.getPlayer();
+             ItemStack itemInHand = context.getItemInHand();
+             if (player instanceof ServerPlayer serverPlayer) {
+-                CriteriaTriggers.ITEM_USED_ON_BLOCK.trigger(serverPlayer, pos, itemInHand);
++                ItemStack itemSnapshot = itemInHand.copy();
++                RegionizedWorldGuard.executeOnPlayerRegion(
++                    serverPlayer, () -> CriteriaTriggers.ITEM_USED_ON_BLOCK.trigger(serverPlayer, pos, itemSnapshot)
++                );
+             }
+ 
+             itemInHand.shrink(1);
+@@ -164,7 +_,7 @@
+     }
+ 
+     public static Optional<BlockState> getWaxed(BlockState oldState) {
+-        return Optional.ofNullable(WAXABLES.get().get(oldState.getBlock())).map(b -> b.withPropertiesOf(oldState));
++        return Optional.ofNullable(net.neoforged.neoforge.common.DataMapHooks.getBlockWaxed(oldState.getBlock())).map(b -> b.withPropertiesOf(oldState));
+     }
+ 
+     @Override

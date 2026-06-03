@@ -1,0 +1,191 @@
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ThrownEnderpearl extends ThrowableItemProjectile {
+@@ -52,14 +_,14 @@
+     }
+ 
+     private void deregisterFromCurrentOwner() {
+-        if (this.getOwner() instanceof ServerPlayer serverPlayer) {
+-            serverPlayer.deregisterEnderPearl(this);
++        if (this.getOwnerIncludingDeadPlayerForRegistration() instanceof ServerPlayer serverPlayer) {
++            RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> serverPlayer.deregisterEnderPearl(this));
+         }
+     }
+ 
+     private void registerToCurrentOwner() {
+-        if (this.getOwner() instanceof ServerPlayer serverPlayer) {
+-            serverPlayer.registerEnderPearl(this);
++        if (this.getOwnerIncludingDeadPlayerForRegistration() instanceof ServerPlayer serverPlayer) {
++            RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> serverPlayer.registerEnderPearl(this));
+         }
+     }
+ 
+@@ -69,8 +_,42 @@
+     }
+ 
+     private static @Nullable Entity findOwnerIncludingDeadPlayer(ServerLevel serverLevel, UUID uuid) {
+-        Entity owner = serverLevel.getEntityInAnyDimension(uuid);
+-        return (Entity)(owner != null ? owner : serverLevel.getServer().getPlayerList().getPlayer(uuid));
++        Entity owner = findOwnerIncludingDeadPlayerRaw(serverLevel, uuid);
++        return owner == null ? null : RegionizedWorldGuard.restrictEntityToCurrentRegion(owner.level(), owner);
++    }
++
++    private static @Nullable Entity findOwnerIncludingDeadPlayerRaw(ServerLevel serverLevel, UUID uuid) {
++        Entity owner = serverLevel.getEntities().get(uuid);
++        if (owner == null) {
++            for (ServerLevel otherLevel : serverLevel.getServer().getAllLevels()) {
++                if (otherLevel != serverLevel) {
++                    owner = otherLevel.getEntities().get(uuid);
++                    if (owner != null) {
++                        break;
++                    }
++                }
++            }
++        }
++
++        return owner != null ? owner : serverLevel.getServer().getPlayerList().getAnyRegionPlayer(uuid);
++    }
++
++    private @Nullable Entity getOwnerIncludingDeadPlayer() {
++        return this.owner != null && this.level() instanceof ServerLevel serverLevel
++            ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID())
++            : super.getOwner();
++    }
++
++    private @Nullable Entity getOwnerIncludingDeadPlayerRaw(ServerLevel serverLevel) {
++        return this.owner != null ? findOwnerIncludingDeadPlayerRaw(serverLevel, this.owner.getUUID()) : super.getOwner();
++    }
++
++    private @Nullable Entity getOwnerIncludingDeadPlayerForRegistration() {
++        return this.level() instanceof ServerLevel serverLevel ? this.getOwnerIncludingDeadPlayerRaw(serverLevel) : this.getOwnerIncludingDeadPlayer();
++    }
++
++    private @Nullable ServerPlayer getOwnerPlayerAcrossRegions(ServerLevel serverLevel) {
++        return this.getOwnerIncludingDeadPlayerRaw(serverLevel) instanceof ServerPlayer player ? player : null;
+     }
+ 
+     @Override
+@@ -98,10 +_,21 @@
+ 
+         if (this.level() instanceof ServerLevel level && !this.isRemoved()) {
+             Entity owner = this.getOwner();
++            if (owner == null) {
++                Entity rawOwner = this.getOwnerIncludingDeadPlayerRaw(level);
++                if (rawOwner != null && RegionizedWorldGuard.scheduleGlobalIfRegionized(level, "Ender pearl hit", () -> this.onHit(hitResult))) {
++                    return;
++                }
++
++                owner = rawOwner;
++            }
++
+             if (owner != null && isAllowedToTeleportOwner(owner, level)) {
+                 Vec3 teleportPos = this.oldPosition();
+                 if (owner instanceof ServerPlayer player) {
+                     if (player.connection.isAcceptingMessages()) {
++                        net.neoforged.neoforge.event.entity.EntityTeleportEvent.EnderPearl event = net.neoforged.neoforge.event.EventHooks.onEnderPearlLand(player, this.getX(), this.getY(), this.getZ(), this, 5.0F, hitResult);
++                        if (!event.isCanceled()) { // Don't indent to lower patch size
+                         if (this.random.nextFloat() < 0.05F && level.isSpawningMonsters()) {
+                             Endermite endermite = EntityType.ENDERMITE.create(level, EntitySpawnReason.TRIGGERED);
+                             if (endermite != null) {
+@@ -116,16 +_,17 @@
+ 
+                         ServerPlayer newOwner = player.teleport(
+                             new TeleportTransition(
+-                                level, teleportPos, Vec3.ZERO, 0.0F, 0.0F, Relative.union(Relative.ROTATION, Relative.DELTA), TeleportTransition.DO_NOTHING
++                                level, event.getTarget(), player.getDeltaMovement(), player.getYRot(), player.getXRot(), TeleportTransition.DO_NOTHING
+                             )
+                         );
+                         if (newOwner != null) {
+                             newOwner.resetFallDistance();
+                             newOwner.resetCurrentImpulseContext();
+-                            newOwner.hurtServer(player.level(), this.damageSources().enderPearl(), 5.0F);
++                            newOwner.hurtServer(newOwner.level(), this.damageSources().enderPearl(), event.getAttackDamage());
+                         }
+ 
+                         this.playSound(level, teleportPos);
++                        } //Forge: End
+                     }
+                 } else {
+                     Entity newOwner = owner.teleport(
+@@ -162,7 +_,8 @@
+         if (this.level() instanceof ServerLevel serverLevel) {
+             int var7 = SectionPos.blockToSectionCoord(this.position().x());
+             int previousChunkZ = SectionPos.blockToSectionCoord(this.position().z());
+-            Entity owner = this.owner != null ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID()) : null;
++            Entity owner = this.getOwnerIncludingDeadPlayer();
++            Entity ownerForTicket = owner != null ? owner : this.getOwnerIncludingDeadPlayerRaw(serverLevel);
+             if (owner instanceof ServerPlayer serverPlayer
+                 && !owner.isAlive()
+                 && !serverPlayer.wonGame
+@@ -179,8 +_,10 @@
+                             || var7 != SectionPos.blockToSectionCoord(currentPos.getX())
+                             || previousChunkZ != SectionPos.blockToSectionCoord(currentPos.getZ())
+                     )
+-                    && owner instanceof ServerPlayer serverPlayer) {
+-                    this.ticketTimer = serverPlayer.registerAndUpdateEnderPearlTicket(this);
++                    && ownerForTicket instanceof ServerPlayer serverPlayer) {
++                    this.ticketTimer = ServerPlayer.placeEnderPearlTicket(serverLevel, this.chunkPosition()) - 1L;
++                    serverLevel.resetEmptyTime();
++                    RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> serverPlayer.registerEnderPearl(this));
+                 }
+             }
+         } else {
+@@ -204,16 +_,24 @@
+ 
+     @Override
+     public boolean canTeleport(Level from, Level to) {
+-        return from.dimension() == Level.END && to.dimension() == Level.OVERWORLD && this.getOwner() instanceof ServerPlayer player
+-            ? super.canTeleport(from, to) && player.seenCredits
+-            : super.canTeleport(from, to);
++        if (from.dimension() == Level.END && to.dimension() == Level.OVERWORLD && this.level() instanceof ServerLevel serverLevel) {
++            ServerPlayer player = this.getOwnerPlayerAcrossRegions(serverLevel);
++            if (player != null) {
++                return super.canTeleport(from, to) && player.seenCredits;
++            }
++        }
++
++        return super.canTeleport(from, to);
+     }
+ 
+     @Override
+     protected void onInsideBlock(BlockState state) {
+         super.onInsideBlock(state);
+-        if (state.is(Blocks.END_GATEWAY) && this.getOwner() instanceof ServerPlayer player) {
+-            player.onInsideBlock(state);
++        if (state.is(Blocks.END_GATEWAY) && this.level() instanceof ServerLevel serverLevel) {
++            ServerPlayer player = this.getOwnerPlayerAcrossRegions(serverLevel);
++            if (player != null) {
++                RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.onInsideBlock(state));
++            }
+         }
+     }
+ 
+@@ -224,6 +_,21 @@
+         }
+ 
+         super.onRemoval(reason);
++    }
++
++    public void removeWithOwner() {
++        if (this.isRemoved()) {
++            return;
++        }
++
++        if (this.level() instanceof ServerLevel serverLevel && !RegionizedWorldGuard.isRegionThreadFor(serverLevel, this.blockPosition())) {
++            BlockPos pos = this.blockPosition();
++            if (serverLevel.getServer().regionizedTaskDispatcher().tryExecute(RegionizedWorldGuard.regionFor(serverLevel, pos), this::removeWithOwner)) {
++                return;
++            }
++        }
++
++        this.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER);
+     }
+ 
+     @Override

@@ -1,0 +1,64 @@
+--- a/net/minecraft/world/inventory/CraftingMenu.java
++++ b/net/minecraft/world/inventory/CraftingMenu.java
+@@ -14,6 +_,7 @@
+ import net.minecraft.world.item.crafting.RecipeHolder;
+ import net.minecraft.world.item.crafting.RecipeType;
+ import net.minecraft.world.level.block.Blocks;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CraftingMenu extends AbstractCraftingMenu {
+@@ -69,11 +_,11 @@
+ 
+         resultSlots.setItem(0, result);
+         menu.setRemoteSlot(0, result);
+-        serverPlayer.connection.send(new ClientboundContainerSetSlotPacket(menu.containerId, menu.incrementStateId(), 0, result));
++        RegionizedWorldGuard.sendToPlayer(serverPlayer, new ClientboundContainerSetSlotPacket(menu.containerId, menu.incrementStateId(), 0, result));
+     }
+ 
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         if (!this.placingRecipe) {
+             this.access.execute((level, pos) -> {
+                 if (level instanceof ServerLevel serverLevel) {
+@@ -84,18 +_,18 @@
+     }
+ 
+     @Override
+-    public void beginPlacingRecipe() {
++    public synchronized void beginPlacingRecipe() {
+         this.placingRecipe = true;
+     }
+ 
+     @Override
+-    public void finishPlacingRecipe(ServerLevel level, RecipeHolder<CraftingRecipe> recipe) {
++    public synchronized void finishPlacingRecipe(ServerLevel level, RecipeHolder<CraftingRecipe> recipe) {
+         this.placingRecipe = false;
+         slotChangedCraftingGrid(this, level, this.player, this.craftSlots, this.resultSlots, recipe);
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.access.execute((level, pos) -> this.clearContainer(player, this.craftSlots));
+     }
+@@ -106,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -153,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
++    public synchronized boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
+         return target.container != this.resultSlots && super.canTakeItemForPickAll(carried, target);
+     }
+ 

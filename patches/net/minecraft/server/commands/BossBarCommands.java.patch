@@ -1,0 +1,330 @@
+--- a/net/minecraft/server/commands/BossBarCommands.java
++++ b/net/minecraft/server/commands/BossBarCommands.java
+@@ -25,7 +_,6 @@
+ import net.minecraft.server.bossevents.CustomBossEvents;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.world.BossEvent;
+-import net.minecraft.world.entity.player.Player;
+ 
+ public class BossBarCommands {
+     private static final DynamicCommandExceptionType ERROR_ALREADY_EXISTS = new DynamicCommandExceptionType(
+@@ -72,16 +_,14 @@
+                             Commands.argument("id", IdentifierArgument.id())
+                                 .then(
+                                     Commands.argument("name", ComponentArgument.textComponent(context))
+-                                        .executes(
+-                                            c -> createBar(c.getSource(), IdentifierArgument.getId(c, "id"), ComponentArgument.getResolvedComponent(c, "name"))
+-                                        )
++                                        .executes(BossBarCommands::createBar)
+                                 )
+                         )
+                 )
+                 .then(
+                     Commands.literal("remove")
+                         .then(
+-                            Commands.argument("id", IdentifierArgument.id()).suggests(SUGGEST_BOSS_BAR).executes(c -> removeBar(c.getSource(), getBossBar(c)))
++                            Commands.argument("id", IdentifierArgument.id()).suggests(SUGGEST_BOSS_BAR).executes(c -> withBossBar(c, BossBarCommands::removeBar))
+                         )
+                 )
+                 .then(Commands.literal("list").executes(c -> listBars(c.getSource())))
+@@ -94,69 +_,69 @@
+                                     Commands.literal("name")
+                                         .then(
+                                             Commands.argument("name", ComponentArgument.textComponent(context))
+-                                                .executes(c -> setName(c.getSource(), getBossBar(c), ComponentArgument.getResolvedComponent(c, "name")))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setName(source, bossBar, ComponentArgument.getResolvedComponent(c, "name"))))
+                                         )
+                                 )
+                                 .then(
+                                     Commands.literal("color")
+-                                        .then(Commands.literal("pink").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.PINK)))
+-                                        .then(Commands.literal("blue").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.BLUE)))
+-                                        .then(Commands.literal("red").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.RED)))
+-                                        .then(Commands.literal("green").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.GREEN)))
+-                                        .then(Commands.literal("yellow").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.YELLOW)))
+-                                        .then(Commands.literal("purple").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.PURPLE)))
+-                                        .then(Commands.literal("white").executes(c -> setColor(c.getSource(), getBossBar(c), BossEvent.BossBarColor.WHITE)))
++                                        .then(Commands.literal("pink").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.PINK))))
++                                        .then(Commands.literal("blue").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.BLUE))))
++                                        .then(Commands.literal("red").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.RED))))
++                                        .then(Commands.literal("green").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.GREEN))))
++                                        .then(Commands.literal("yellow").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.YELLOW))))
++                                        .then(Commands.literal("purple").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.PURPLE))))
++                                        .then(Commands.literal("white").executes(c -> withBossBar(c, (source, bossBar) -> setColor(source, bossBar, BossEvent.BossBarColor.WHITE))))
+                                 )
+                                 .then(
+                                     Commands.literal("style")
+                                         .then(
+                                             Commands.literal("progress")
+-                                                .executes(c -> setStyle(c.getSource(), getBossBar(c), BossEvent.BossBarOverlay.PROGRESS))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setStyle(source, bossBar, BossEvent.BossBarOverlay.PROGRESS)))
+                                         )
+                                         .then(
+                                             Commands.literal("notched_6")
+-                                                .executes(c -> setStyle(c.getSource(), getBossBar(c), BossEvent.BossBarOverlay.NOTCHED_6))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setStyle(source, bossBar, BossEvent.BossBarOverlay.NOTCHED_6)))
+                                         )
+                                         .then(
+                                             Commands.literal("notched_10")
+-                                                .executes(c -> setStyle(c.getSource(), getBossBar(c), BossEvent.BossBarOverlay.NOTCHED_10))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setStyle(source, bossBar, BossEvent.BossBarOverlay.NOTCHED_10)))
+                                         )
+                                         .then(
+                                             Commands.literal("notched_12")
+-                                                .executes(c -> setStyle(c.getSource(), getBossBar(c), BossEvent.BossBarOverlay.NOTCHED_12))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setStyle(source, bossBar, BossEvent.BossBarOverlay.NOTCHED_12)))
+                                         )
+                                         .then(
+                                             Commands.literal("notched_20")
+-                                                .executes(c -> setStyle(c.getSource(), getBossBar(c), BossEvent.BossBarOverlay.NOTCHED_20))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setStyle(source, bossBar, BossEvent.BossBarOverlay.NOTCHED_20)))
+                                         )
+                                 )
+                                 .then(
+                                     Commands.literal("value")
+                                         .then(
+                                             Commands.argument("value", IntegerArgumentType.integer(0))
+-                                                .executes(c -> setValue(c.getSource(), getBossBar(c), IntegerArgumentType.getInteger(c, "value")))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setValue(source, bossBar, IntegerArgumentType.getInteger(c, "value"))))
+                                         )
+                                 )
+                                 .then(
+                                     Commands.literal("max")
+                                         .then(
+                                             Commands.argument("max", IntegerArgumentType.integer(1))
+-                                                .executes(c -> setMax(c.getSource(), getBossBar(c), IntegerArgumentType.getInteger(c, "max")))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setMax(source, bossBar, IntegerArgumentType.getInteger(c, "max"))))
+                                         )
+                                 )
+                                 .then(
+                                     Commands.literal("visible")
+                                         .then(
+                                             Commands.argument("visible", BoolArgumentType.bool())
+-                                                .executes(c -> setVisible(c.getSource(), getBossBar(c), BoolArgumentType.getBool(c, "visible")))
++                                                .executes(c -> withBossBar(c, (source, bossBar) -> setVisible(source, bossBar, BoolArgumentType.getBool(c, "visible"))))
+                                         )
+                                 )
+                                 .then(
+                                     Commands.literal("players")
+-                                        .executes(c -> setPlayers(c.getSource(), getBossBar(c), Collections.emptyList()))
++                                        .executes(c -> setPlayers(c, false))
+                                         .then(
+                                             Commands.argument("targets", EntityArgument.players())
+-                                                .executes(c -> setPlayers(c.getSource(), getBossBar(c), EntityArgument.getOptionalPlayers(c, "targets")))
++                                                .executes(c -> setPlayers(c, true))
+                                         )
+                                 )
+                         )
+@@ -166,15 +_,24 @@
+                         .then(
+                             Commands.argument("id", IdentifierArgument.id())
+                                 .suggests(SUGGEST_BOSS_BAR)
+-                                .then(Commands.literal("value").executes(c -> getValue(c.getSource(), getBossBar(c))))
+-                                .then(Commands.literal("max").executes(c -> getMax(c.getSource(), getBossBar(c))))
+-                                .then(Commands.literal("visible").executes(c -> getVisible(c.getSource(), getBossBar(c))))
+-                                .then(Commands.literal("players").executes(c -> getPlayers(c.getSource(), getBossBar(c))))
++                                .then(Commands.literal("value").executes(c -> withBossBar(c, BossBarCommands::getValue)))
++                                .then(Commands.literal("max").executes(c -> withBossBar(c, BossBarCommands::getMax)))
++                                .then(Commands.literal("visible").executes(c -> withBossBar(c, BossBarCommands::getVisible)))
++                                .then(Commands.literal("players").executes(c -> withBossBar(c, BossBarCommands::getPlayers)))
+                         )
+                 )
+         );
+     }
+ 
++    private static int withBossBar(CommandContext<CommandSourceStack> context, BossBarTask task) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> withBossBar(context, task))) {
++            return 0;
++        }
++
++        return task.run(source, getBossBar(context));
++    }
++
+     private static int getValue(CommandSourceStack source, CustomBossEvent bossBar) {
+         source.sendSuccess(() -> Component.translatable("commands.bossbar.get.value", bossBar.getDisplayName(), bossBar.value()), true);
+         return bossBar.value();
+@@ -196,24 +_,30 @@
+     }
+ 
+     private static int getPlayers(CommandSourceStack source, CustomBossEvent bossBar) {
+-        if (bossBar.getPlayers().isEmpty()) {
++        Collection<ServerPlayer> players = bossBar.getPlayers();
++        if (players.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.bossbar.get.players.none", bossBar.getDisplayName()), true);
+         } else {
++            Component playerList = formatPlayerList(source, players);
+             source.sendSuccess(
+                 () -> Component.translatable(
+                     "commands.bossbar.get.players.some",
+                     bossBar.getDisplayName(),
+-                    bossBar.getPlayers().size(),
+-                    ComponentUtils.formatList(bossBar.getPlayers(), Player::getDisplayName)
++                    players.size(),
++                    playerList
+                 ),
+                 true
+             );
+         }
+ 
+-        return bossBar.getPlayers().size();
++        return players.size();
+     }
+ 
+     private static int setVisible(CommandSourceStack source, CustomBossEvent bossBar, boolean visible) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setVisible(source, bossBar, visible))) {
++            return bossBar.isVisible() ? 1 : 0;
++        }
++
+         if (bossBar.isVisible() == visible) {
+             if (visible) {
+                 throw ERROR_ALREADY_VISIBLE.create();
+@@ -233,6 +_,10 @@
+     }
+ 
+     private static int setValue(CommandSourceStack source, CustomBossEvent bossBar, int value) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setValue(source, bossBar, value))) {
++            return value;
++        }
++
+         if (bossBar.value() == value) {
+             throw ERROR_NO_VALUE_CHANGE.create();
+         } else {
+@@ -243,6 +_,10 @@
+     }
+ 
+     private static int setMax(CommandSourceStack source, CustomBossEvent bossBar, int value) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setMax(source, bossBar, value))) {
++            return value;
++        }
++
+         if (bossBar.max() == value) {
+             throw ERROR_NO_MAX_CHANGE.create();
+         } else {
+@@ -253,6 +_,10 @@
+     }
+ 
+     private static int setColor(CommandSourceStack source, CustomBossEvent bossBar, BossEvent.BossBarColor color) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setColor(source, bossBar, color))) {
++            return 0;
++        }
++
+         if (bossBar.getColor().equals(color)) {
+             throw ERROR_NO_COLOR_CHANGE.create();
+         } else {
+@@ -263,6 +_,10 @@
+     }
+ 
+     private static int setStyle(CommandSourceStack source, CustomBossEvent bossBar, BossEvent.BossBarOverlay style) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setStyle(source, bossBar, style))) {
++            return 0;
++        }
++
+         if (bossBar.getOverlay().equals(style)) {
+             throw ERROR_NO_STYLE_CHANGE.create();
+         } else {
+@@ -273,6 +_,10 @@
+     }
+ 
+     private static int setName(CommandSourceStack source, CustomBossEvent bossBar, Component name) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setName(source, bossBar, name))) {
++            return 0;
++        }
++
+         Component replaced = ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(null).build(), name);
+         if (bossBar.getName().equals(replaced)) {
+             throw ERROR_NO_NAME_CHANGE.create();
+@@ -284,6 +_,10 @@
+     }
+ 
+     private static int setPlayers(CommandSourceStack source, CustomBossEvent bossBar, Collection<ServerPlayer> targets) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setPlayers(source, bossBar, targets))) {
++            return bossBar.getPlayers().size();
++        }
++
+         boolean changed = bossBar.setPlayers(targets);
+         if (!changed) {
+             throw ERROR_NO_PLAYER_CHANGE.create();
+@@ -291,12 +_,13 @@
+             if (bossBar.getPlayers().isEmpty()) {
+                 source.sendSuccess(() -> Component.translatable("commands.bossbar.set.players.success.none", bossBar.getDisplayName()), true);
+             } else {
++                Component targetList = formatPlayerList(source, targets);
+                 source.sendSuccess(
+                     () -> Component.translatable(
+                         "commands.bossbar.set.players.success.some",
+                         bossBar.getDisplayName(),
+                         targets.size(),
+-                        ComponentUtils.formatList(targets, Player::getDisplayName)
++                        targetList
+                     ),
+                     true
+                 );
+@@ -306,7 +_,20 @@
+         }
+     }
+ 
++    private static int setPlayers(com.mojang.brigadier.context.CommandContext<CommandSourceStack> context, boolean hasTargets) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setPlayers(context, hasTargets))) {
++            return 0;
++        }
++
++        return setPlayers(source, getBossBar(context), hasTargets ? EntityArgument.getOptionalPlayers(context, "targets") : Collections.emptyList());
++    }
++
+     private static int listBars(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listBars(source))) {
++            return 0;
++        }
++
+         Collection<CustomBossEvent> events = source.getServer().getCustomBossEvents().getEvents();
+         if (events.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.bossbar.list.bars.none"), false);
+@@ -322,7 +_,20 @@
+         return events.size();
+     }
+ 
++    private static int createBar(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> createBar(context))) {
++            return source.getServer().getCustomBossEvents().getEvents().size();
++        }
++
++        return createBar(source, IdentifierArgument.getId(context, "id"), ComponentArgument.getResolvedComponent(context, "name"));
++    }
++
+     private static int createBar(CommandSourceStack source, Identifier id, Component name) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> createBar(source, id, name))) {
++            return source.getServer().getCustomBossEvents().getEvents().size();
++        }
++
+         CustomBossEvents events = source.getServer().getCustomBossEvents();
+         if (events.get(id) != null) {
+             throw ERROR_ALREADY_EXISTS.create(id.toString());
+@@ -338,6 +_,10 @@
+     }
+ 
+     private static int removeBar(CommandSourceStack source, CustomBossEvent bossBar) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> removeBar(source, bossBar))) {
++            return source.getServer().getCustomBossEvents().getEvents().size();
++        }
++
+         CustomBossEvents events = source.getServer().getCustomBossEvents();
+         bossBar.removeAllPlayers();
+         events.remove(bossBar);
+@@ -353,5 +_,14 @@
+         } else {
+             return event;
+         }
++    }
++
++    private static Component formatPlayerList(CommandSourceStack source, Collection<ServerPlayer> players) {
++        return ComponentUtils.formatList(players, player -> RegionizedCommandHelper.callOnPlayerRegion(source, player, player::getDisplayName));
++    }
++
++    @FunctionalInterface
++    private interface BossBarTask {
++        int run(CommandSourceStack source, CustomBossEvent bossBar) throws CommandSyntaxException;
+     }
+ }

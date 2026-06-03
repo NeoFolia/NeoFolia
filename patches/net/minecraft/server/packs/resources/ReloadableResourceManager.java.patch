@@ -1,0 +1,100 @@
+--- a/net/minecraft/server/packs/resources/ReloadableResourceManager.java
++++ b/net/minecraft/server/packs/resources/ReloadableResourceManager.java
+@@ -19,8 +_,8 @@
+ 
+ public class ReloadableResourceManager implements AutoCloseable, ResourceManager {
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private CloseableResourceManager resources;
+-    private List<PreparableReloadListener> listeners = Lists.newArrayList();
++    private volatile CloseableResourceManager resources;
++    private volatile List<PreparableReloadListener> listeners = Lists.newArrayList();
+     private final PackType type;
+ 
+     public ReloadableResourceManager(PackType type) {
+@@ -29,50 +_,75 @@
+     }
+ 
+     @Override
+-    public void close() {
++    public synchronized void close() {
+         this.resources.close();
+     }
+ 
+-    public void registerReloadListener(PreparableReloadListener listener) {
++    /**
++     * @deprecated Neo: Use {@link net.neoforged.neoforge.client.event.AddClientReloadListenerEvent}.
++     *
++     * @throws UnsupportedOperationException if called after the event has been fired.
++     */
++    @Deprecated
++    public synchronized void registerReloadListener(PreparableReloadListener listener) {
+         this.listeners.add(listener);
+     }
+ 
+-    public ReloadInstance createReload(
++    public synchronized ReloadInstance createReload(
+         Executor backgroundExecutor, Executor mainThreadExecutor, CompletableFuture<Unit> initialTask, List<PackResources> resourcePacks
+     ) {
+         LOGGER.info("Reloading ResourceManager: {}", LogUtils.defer(() -> resourcePacks.stream().map(PackResources::packId).collect(Collectors.joining(", "))));
+         this.resources.close();
+         this.resources = new MultiPackResourceManager(this.type, resourcePacks);
+-        return SimpleReloadInstance.create(this.resources, this.listeners, backgroundExecutor, mainThreadExecutor, initialTask, LOGGER.isDebugEnabled());
++        return SimpleReloadInstance.create(this.resources, List.copyOf(this.listeners), backgroundExecutor, mainThreadExecutor, initialTask, LOGGER.isDebugEnabled());
+     }
+ 
+     @Override
+-    public Optional<Resource> getResource(Identifier location) {
++    public synchronized Optional<Resource> getResource(Identifier location) {
+         return this.resources.getResource(location);
+     }
+ 
+     @Override
+-    public Set<String> getNamespaces() {
++    public synchronized Set<String> getNamespaces() {
+         return this.resources.getNamespaces();
+     }
+ 
+     @Override
+-    public List<Resource> getResourceStack(Identifier location) {
++    public synchronized List<Resource> getResourceStack(Identifier location) {
+         return this.resources.getResourceStack(location);
+     }
+ 
+     @Override
+-    public Map<Identifier, Resource> listResources(String directory, Predicate<Identifier> filenameFilter) {
++    public synchronized Map<Identifier, Resource> listResources(String directory, Predicate<Identifier> filenameFilter) {
+         return this.resources.listResources(directory, filenameFilter);
+     }
+ 
+     @Override
+-    public Map<Identifier, List<Resource>> listResourceStacks(String directory, Predicate<Identifier> filter) {
++    public synchronized Map<Identifier, List<Resource>> listResourceStacks(String directory, Predicate<Identifier> filter) {
+         return this.resources.listResourceStacks(directory, filter);
+     }
+ 
+     @Override
+-    public Stream<PackResources> listPacks() {
+-        return this.resources.listPacks();
++    public synchronized Stream<PackResources> listPacks() {
++        return this.resources.listPacks().toList().stream();
++    }
++
++    /**
++     * Neo: Expose the reload listeners so they can be passed to the event.
++     *
++     * @return The (immutable) list of reload listeners.
++     */
++    public synchronized List<PreparableReloadListener> getListeners() {
++        return List.copyOf(this.listeners);
++    }
++
++    /**
++     * Neo: Updates the {@link #listeners} with the sorted list from the event.
++     *
++     * @implNote The returned list is immutable, so after this method is called, {@link #registerReloadListener(PreparableReloadListener)} will throw.
++     */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public synchronized void updateListenersFrom(net.neoforged.neoforge.event.SortedReloadListenerEvent event) {
++        this.listeners = net.neoforged.neoforge.resource.ReloadListenerSort.sort(event);
+     }
+ }

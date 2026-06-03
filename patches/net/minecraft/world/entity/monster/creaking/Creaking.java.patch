@@ -1,0 +1,92 @@
+--- a/net/minecraft/world/entity/monster/creaking/Creaking.java
++++ b/net/minecraft/world/entity/monster/creaking/Creaking.java
+@@ -51,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Creaking extends Monster {
+@@ -138,6 +_,10 @@
+         return this.entityData.get(CAN_MOVE);
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public boolean doHurtTarget(ServerLevel level, Entity target) {
+         if (!(target instanceof LivingEntity)) {
+@@ -156,14 +_,15 @@
+             return super.hurtServer(level, source, damage);
+         } else if (!this.isInvulnerableTo(level, source) && this.invulnerabilityAnimationRemainingTicks <= 0 && !this.isDeadOrDying()) {
+             Player responsiblePlayer = this.blameSourceForDamage(source);
+-            Entity directEntity = source.getDirectEntity();
++            Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
+             if (!(directEntity instanceof LivingEntity) && !(directEntity instanceof Projectile) && responsiblePlayer == null) {
+                 return false;
+             } else {
+                 this.invulnerabilityAnimationRemainingTicks = 8;
+                 this.level().broadcastEntityEvent(this, (byte)66);
+                 this.gameEvent(GameEvent.ENTITY_ACTION);
+-                if (this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity
++                if (canReadBlock(this.level(), homePos)
++                    && this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity
+                     && creakingHeartBlockEntity.isProtector(this)) {
+                     if (responsiblePlayer != null) {
+                         creakingHeartBlockEntity.creakingHurt();
+@@ -244,8 +_,9 @@
+         if (!this.level().isClientSide()) {
+             BlockPos homePos = this.getHomePos();
+             if (homePos != null) {
+-                boolean hasProtectionFromCreakingHeart = this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity
+-                    && creakingHeartBlockEntity.isProtector(this);
++                boolean hasProtectionFromCreakingHeart = !canReadBlock(this.level(), homePos)
++                    || this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity
++                        && creakingHeartBlockEntity.isProtector(this);
+                 if (!hasProtectionFromCreakingHeart) {
+                     this.setHealth(0.0F);
+                 }
+@@ -363,6 +_,11 @@
+             AABB ownBox = this.getBoundingBox();
+ 
+             for (Player player : players) {
++                player = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), player);
++                if (player == null) {
++                    continue;
++                }
++
+                 if (ownBox.contains(player.getEyePosition())) {
+                     this.playerStuckCounter++;
+                     return this.playerStuckCounter > 4;
+@@ -464,9 +_,15 @@
+             boolean hasPotentialTarget = false;
+ 
+             for (Player player : players) {
++                player = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), player);
++                if (player == null) {
++                    continue;
++                }
++
+                 if (this.canAttack(player) && !this.isAlliedTo(player)) {
+                     hasPotentialTarget = true;
+-                    if ((!active || LivingEntity.PLAYER_NOT_WEARING_DISGUISE_ITEM.test(player))
++                    // Neo: provide entity being looked at to disguise check
++                    if ((!active || LivingEntity.PLAYER_NOT_WEARING_DISGUISE_ITEM_FOR_TARGET.test(player, this))
+                         && this.isLookingAtMe(
+                             player, 0.5, false, true, this.getEyeY(), this.getY() + 0.5 * this.getScale(), (this.getEyeY() + this.getY()) / 2.0
+                         )) {
+@@ -491,6 +_,11 @@
+     }
+ 
+     public void activate(Player player) {
++        player = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), player);
++        if (player == null) {
++            return;
++        }
++
+         this.getBrain().setMemory(MemoryModuleType.ATTACK_TARGET, player);
+         this.gameEvent(GameEvent.ENTITY_ACTION);
+         this.makeSound(SoundEvents.CREAKING_ACTIVATE);

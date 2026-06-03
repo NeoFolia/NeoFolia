@@ -1,0 +1,288 @@
+--- a/net/minecraft/world/level/pathfinder/WalkNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/WalkNodeEvaluator.java
+@@ -13,6 +_,7 @@
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.level.BlockGetter;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.PathNavigationRegion;
+ import net.minecraft.world.level.block.BaseRailBlock;
+ import net.minecraft.world.level.block.Block;
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class WalkNodeEvaluator extends NodeEvaluator {
+@@ -36,13 +_,13 @@
+     private final Node[] reusableNeighbors = new Node[Direction.Plane.HORIZONTAL.length()];
+ 
+     @Override
+-    public void prepare(PathNavigationRegion level, Mob entity) {
++    public synchronized void prepare(PathNavigationRegion level, Mob entity) {
+         super.prepare(level, entity);
+         entity.onPathfindingStart();
+     }
+ 
+     @Override
+-    public void done() {
++    public synchronized void done() {
+         this.mob.onPathfindingDone();
+         this.pathTypesByPosCacheByMob.clear();
+         this.collisionCache.clear();
+@@ -50,7 +_,7 @@
+     }
+ 
+     @Override
+-    public Node getStart() {
++    public synchronized Node getStart() {
+         BlockPos.MutableBlockPos reusablePos = new BlockPos.MutableBlockPos();
+         int startY = this.mob.getBlockY();
+         BlockState blockState = this.currentContext.getBlockState(reusablePos.set(this.mob.getX(), (double)startY, this.mob.getZ()));
+@@ -100,25 +_,25 @@
+         return this.getStartNode(new BlockPos(startPos.getX(), startY, startPos.getZ()));
+     }
+ 
+-    protected Node getStartNode(BlockPos pos) {
++    protected synchronized Node getStartNode(BlockPos pos) {
+         Node node = this.getNode(pos);
+         node.type = this.getCachedPathType(node.x, node.y, node.z);
+         node.costMalus = this.mob.getPathfindingMalus(node.type);
+         return node;
+     }
+ 
+-    protected boolean canStartAt(BlockPos pos) {
++    protected synchronized boolean canStartAt(BlockPos pos) {
+         PathType blockPathType = this.getCachedPathType(pos.getX(), pos.getY(), pos.getZ());
+         return blockPathType != PathType.OPEN && this.mob.getPathfindingMalus(blockPathType) >= 0.0F;
+     }
+ 
+     @Override
+-    public Target getTarget(double x, double y, double z) {
++    public synchronized Target getTarget(double x, double y, double z) {
+         return this.getTargetNodeAt(x, y, z);
+     }
+ 
+     @Override
+-    public int getNeighbors(Node[] neighbors, Node pos) {
++    public synchronized int getNeighbors(Node[] neighbors, Node pos) {
+         int p = 0;
+         int jumpSize = 0;
+         PathType blockPathTypeAbove = this.getCachedPathType(pos.x, pos.y + 1, pos.z);
+@@ -160,11 +_,11 @@
+         return p;
+     }
+ 
+-    protected boolean isNeighborValid(@Nullable Node neighbor, Node current) {
++    protected synchronized boolean isNeighborValid(@Nullable Node neighbor, Node current) {
+         return neighbor != null && !neighbor.closed && (neighbor.costMalus >= 0.0F || current.costMalus < 0.0F);
+     }
+ 
+-    protected boolean isDiagonalValid(Node pos, @Nullable Node ew, @Nullable Node ns) {
++    protected synchronized boolean isDiagonalValid(Node pos, @Nullable Node ew, @Nullable Node ns) {
+         if (ns == null || ew == null || ns.y > pos.y || ew.y > pos.y) {
+             return false;
+         } else if (ew.type != PathType.WALKABLE_DOOR && ns.type != PathType.WALKABLE_DOOR) {
+@@ -179,7 +_,7 @@
+         }
+     }
+ 
+-    protected boolean isDiagonalValid(@Nullable Node diagonal) {
++    protected synchronized boolean isDiagonalValid(@Nullable Node diagonal) {
+         if (diagonal == null || diagonal.closed) {
+             return false;
+         } else {
+@@ -191,7 +_,7 @@
+         return type == PathType.FENCE || type == PathType.DOOR_WOOD_CLOSED || type == PathType.DOOR_IRON_CLOSED;
+     }
+ 
+-    private boolean canReachWithoutCollision(Node posTo) {
++    private synchronized boolean canReachWithoutCollision(Node posTo) {
+         AABB bb = this.mob.getBoundingBox();
+         Vec3 delta = new Vec3(
+             posTo.x - this.mob.getX() + bb.getXsize() / 2.0, posTo.y - this.mob.getY() + bb.getYsize() / 2.0, posTo.z - this.mob.getZ() + bb.getZsize() / 2.0
+@@ -209,22 +_,28 @@
+         return true;
+     }
+ 
+-    protected double getFloorLevel(BlockPos pos) {
++    protected synchronized double getFloorLevel(BlockPos pos) {
+         BlockGetter level = this.currentContext.level();
+-        return (this.canFloat() || this.isAmphibious()) && level.getFluidState(pos).is(FluidTags.WATER) ? pos.getY() + 0.5 : getFloorLevel(level, pos);
++        return canReadBlock(level, pos) && (this.canFloat() || this.isAmphibious()) && level.getFluidState(pos).is(FluidTags.WATER)
++            ? pos.getY() + 0.5
++            : getFloorLevel(level, pos);
+     }
+ 
+     public static double getFloorLevel(BlockGetter level, BlockPos pos) {
+         BlockPos target = pos.below();
++        if (!canReadBlock(level, target)) {
++            return target.getY();
++        }
++
+         VoxelShape shape = level.getBlockState(target).getCollisionShape(level, target);
+         return target.getY() + (shape.isEmpty() ? 0.0 : shape.max(Direction.Axis.Y));
+     }
+ 
+-    protected boolean isAmphibious() {
++    protected synchronized boolean isAmphibious() {
+         return false;
+     }
+ 
+-    protected @Nullable Node findAcceptedNode(int x, int y, int z, int jumpSize, double nodeHeight, Direction travelDirection, PathType blockPathTypeCurrent) {
++    protected synchronized @Nullable Node findAcceptedNode(int x, int y, int z, int jumpSize, double nodeHeight, Direction travelDirection, PathType blockPathTypeCurrent) {
+         Node best = null;
+         BlockPos.MutableBlockPos reusablePos = new BlockPos.MutableBlockPos();
+         double maxYTarget = this.getFloorLevel(reusablePos.set(x, y, z));
+@@ -264,25 +_,25 @@
+         }
+     }
+ 
+-    private double getMobJumpHeight() {
++    private synchronized double getMobJumpHeight() {
+         return Math.max(1.125, (double)this.mob.maxUpStep());
+     }
+ 
+-    private Node getNodeAndUpdateCostToMax(int x, int y, int z, PathType pathType, float cost) {
++    private synchronized Node getNodeAndUpdateCostToMax(int x, int y, int z, PathType pathType, float cost) {
+         Node node = this.getNode(x, y, z);
+         node.type = pathType;
+         node.costMalus = Math.max(node.costMalus, cost);
+         return node;
+     }
+ 
+-    private Node getBlockedNode(int x, int y, int z) {
++    private synchronized Node getBlockedNode(int x, int y, int z) {
+         Node node = this.getNode(x, y, z);
+         node.type = PathType.BLOCKED;
+         node.costMalus = -1.0F;
+         return node;
+     }
+ 
+-    private Node getClosedNode(int x, int y, int z, PathType pathType) {
++    private synchronized Node getClosedNode(int x, int y, int z, PathType pathType) {
+         Node node = this.getNode(x, y, z);
+         node.closed = true;
+         node.type = pathType;
+@@ -290,7 +_,7 @@
+         return node;
+     }
+ 
+-    private @Nullable Node tryJumpOn(
++    private synchronized @Nullable Node tryJumpOn(
+         int x, int y, int z, int jumpSize, double nodeHeight, Direction travelDirection, PathType blockPathTypeCurrent, BlockPos.MutableBlockPos reusablePos
+     ) {
+         Node nodeAbove = this.findAcceptedNode(x, y + 1, z, jumpSize - 1, nodeHeight, travelDirection, blockPathTypeCurrent);
+@@ -316,7 +_,7 @@
+         }
+     }
+ 
+-    private @Nullable Node tryFindFirstNonWaterBelow(int x, int y, int z, @Nullable Node best) {
++    private synchronized @Nullable Node tryFindFirstNonWaterBelow(int x, int y, int z, @Nullable Node best) {
+         y--;
+ 
+         while (y > this.mob.level().getMinY()) {
+@@ -332,7 +_,7 @@
+         return best;
+     }
+ 
+-    private Node tryFindFirstGroundNodeBelow(int x, int y, int z) {
++    private synchronized Node tryFindFirstGroundNodeBelow(int x, int y, int z) {
+         for (int currentY = y - 1; currentY >= this.mob.level().getMinY(); currentY--) {
+             if (y - currentY > this.mob.getMaxFallDistance()) {
+                 return this.getBlockedNode(x, currentY, z);
+@@ -352,16 +_,16 @@
+         return this.getBlockedNode(x, y, z);
+     }
+ 
+-    private boolean hasCollisions(AABB aabb) {
++    private synchronized boolean hasCollisions(AABB aabb) {
+         return this.collisionCache.computeIfAbsent(aabb, bb -> !this.currentContext.level().noCollision(this.mob, aabb));
+     }
+ 
+-    protected PathType getCachedPathType(int x, int y, int z) {
++    protected synchronized PathType getCachedPathType(int x, int y, int z) {
+         return this.pathTypesByPosCacheByMob.computeIfAbsent(BlockPos.asLong(x, y, z), k -> this.getPathTypeOfMob(this.currentContext, x, y, z, this.mob));
+     }
+ 
+     @Override
+-    public PathType getPathTypeOfMob(PathfindingContext context, int x, int y, int z, Mob mob) {
++    public synchronized PathType getPathTypeOfMob(PathfindingContext context, int x, int y, int z, Mob mob) {
+         Set<PathType> blockTypes = this.getPathTypeWithinMobBB(context, x, y, z);
+         if (blockTypes.size() == 1) {
+             return blockTypes.iterator().next();
+@@ -399,7 +_,7 @@
+         }
+     }
+ 
+-    public Set<PathType> getPathTypeWithinMobBB(PathfindingContext context, int x, int y, int z) {
++    public synchronized Set<PathType> getPathTypeWithinMobBB(PathfindingContext context, int x, int y, int z) {
+         EnumSet<PathType> blockTypes = EnumSet.noneOf(PathType.class);
+ 
+         for (int dx = 0; dx < this.entityWidth; dx++) {
+@@ -434,7 +_,7 @@
+     }
+ 
+     @Override
+-    public PathType getPathType(PathfindingContext context, int x, int y, int z) {
++    public synchronized PathType getPathType(PathfindingContext context, int x, int y, int z) {
+         return getPathTypeStatic(context, new BlockPos.MutableBlockPos(x, y, z));
+     }
+ 
+@@ -469,6 +_,12 @@
+                 for (int dz = -1; dz <= 1; dz++) {
+                     if (dx != 0 || dz != 0) {
+                         PathType pathType = context.getPathTypeFromState(x + dx, y + dy, z + dz);
++                        BlockState blockState = context.getBlockState(context.currentEvalPos());
++                        PathType adjBlockPathType = blockState.getAdjacentBlockPathType(context.level(), context.currentEvalPos(), null, pathType);
++                        if (adjBlockPathType != null) return adjBlockPathType;
++                        net.minecraft.world.level.material.FluidState fluidState = blockState.getFluidState();
++                        PathType adjFluidPathType = fluidState.getAdjacentBlockPathType(context.level(), context.currentEvalPos(), null, pathType);
++                        if (adjFluidPathType != null) return adjFluidPathType;
+                         if (pathType == PathType.DAMAGING) {
+                             return PathType.DAMAGING_IN_NEIGHBOR;
+                         }
+@@ -493,7 +_,13 @@
+     }
+ 
+     protected static PathType getPathTypeFromState(BlockGetter level, BlockPos pos) {
++        if (!canReadBlock(level, pos)) {
++            return PathType.BLOCKED;
++        }
++
+         BlockState blockState = level.getBlockState(pos);
++        PathType type = blockState.getBlockPathType(level, pos, null);
++        if (type != null) return type;
+         Block block = blockState.getBlock();
+         if (blockState.isAir()) {
+             return PathType.OPEN;
+@@ -509,6 +_,8 @@
+             return PathType.COCOA;
+         } else if (!blockState.is(Blocks.WITHER_ROSE) && !blockState.is(Blocks.POINTED_DRIPSTONE)) {
+             FluidState fluidState = blockState.getFluidState();
++            PathType nonLoggableFluidPathType = fluidState.getBlockPathType(level, pos, null, false);
++            if (nonLoggableFluidPathType != null) return nonLoggableFluidPathType;
+             if (fluidState.is(FluidTags.LAVA)) {
+                 return PathType.LAVA;
+             } else if (isBurningBlock(blockState)) {
+@@ -529,6 +_,8 @@
+                 if (!blockState.isPathfindable(PathComputationType.LAND)) {
+                     return PathType.BLOCKED;
+                 } else {
++                    PathType loggableFluidPathType = fluidState.getBlockPathType(level, pos, null, true);
++                    if (loggableFluidPathType != null) return loggableFluidPathType;
+                     return fluidState.is(FluidTags.WATER) ? PathType.WATER : PathType.OPEN;
+                 }
+             } else {
+@@ -537,5 +_,9 @@
+         } else {
+             return PathType.DAMAGE_CAUTIOUS;
+         }
++    }
++
++    private static boolean canReadBlock(BlockGetter level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

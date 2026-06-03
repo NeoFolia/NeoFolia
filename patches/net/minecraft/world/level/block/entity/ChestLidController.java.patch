@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/level/block/entity/ChestLidController.java
++++ b/net/minecraft/world/level/block/entity/ChestLidController.java
+@@ -7,7 +_,7 @@
+     private float openness;
+     private float oOpenness;
+ 
+-    public void tickLid() {
++    public synchronized void tickLid() {
+         this.oOpenness = this.openness;
+         float speed = 0.1F;
+         if (!this.shouldBeOpen && this.openness > 0.0F) {
+@@ -17,11 +_,11 @@
+         }
+     }
+ 
+-    public float getOpenness(float a) {
++    public synchronized float getOpenness(float a) {
+         return Mth.lerp(a, this.oOpenness, this.openness);
+     }
+ 
+-    public void shouldBeOpen(boolean shouldBeOpen) {
++    public synchronized void shouldBeOpen(boolean shouldBeOpen) {
+         this.shouldBeOpen = shouldBeOpen;
+     }
+ }

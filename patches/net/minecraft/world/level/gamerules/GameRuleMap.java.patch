@@ -1,0 +1,95 @@
+--- a/net/minecraft/world/level/gamerules/GameRuleMap.java
++++ b/net/minecraft/world/level/gamerules/GameRuleMap.java
+@@ -42,51 +_,51 @@
+     }
+ 
+     public static GameRuleMap copyOf(GameRuleMap gameRuleMap) {
+-        return new GameRuleMap(new Reference2ObjectOpenHashMap<>(gameRuleMap.map));
++        return new GameRuleMap(new Reference2ObjectOpenHashMap<>(gameRuleMap.map()));
+     }
+ 
+-    public boolean has(GameRule<?> gameRule) {
++    public synchronized boolean has(GameRule<?> gameRule) {
+         return this.map.containsKey(gameRule);
+     }
+ 
+-    public <T> @Nullable T get(GameRule<T> gameRule) {
++    public synchronized <T> @Nullable T get(GameRule<T> gameRule) {
+         return (T)this.map.get(gameRule);
+     }
+ 
+-    public <T> void set(GameRule<T> gameRule, T value) {
++    public synchronized <T> void set(GameRule<T> gameRule, T value) {
+         this.setDirty();
+         this.map.put(gameRule, value);
+     }
+ 
+-    public <T> void reset(GameRule<T> gameRule) {
++    public synchronized <T> void reset(GameRule<T> gameRule) {
+         this.set(gameRule, gameRule.defaultValue());
+     }
+ 
+-    public <T> @Nullable T remove(GameRule<T> gameRule) {
++    public synchronized <T> @Nullable T remove(GameRule<T> gameRule) {
+         this.setDirty();
+         return (T)this.map.remove(gameRule);
+     }
+ 
+-    public Set<GameRule<?>> keySet() {
+-        return this.map.keySet();
++    public synchronized Set<GameRule<?>> keySet() {
++        return Set.copyOf(this.map.keySet());
+     }
+ 
+-    public int size() {
++    public synchronized int size() {
+         return this.map.size();
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return this.map.toString();
+     }
+ 
+-    public GameRuleMap withOther(GameRuleMap other) {
++    public synchronized GameRuleMap withOther(GameRuleMap other) {
+         GameRuleMap result = copyOf(this);
+         result.setFromIf(other, r -> true);
+         return result;
+     }
+ 
+-    public void setFromIf(GameRuleMap other, Predicate<GameRule<?>> predicate) {
++    public synchronized void setFromIf(GameRuleMap other, Predicate<GameRule<?>> predicate) {
+         for (GameRule<?> gameRule : other.keySet()) {
+             if (predicate.test(gameRule)) {
+                 setGameRule(other, gameRule, this);
+@@ -98,8 +_,8 @@
+         result.set(gameRule, Objects.requireNonNull(other.get(gameRule)));
+     }
+ 
+-    private Reference2ObjectMap<GameRule<?>, Object> map() {
+-        return this.map;
++    private synchronized Reference2ObjectMap<GameRule<?>, Object> map() {
++        return new Reference2ObjectOpenHashMap<>(this.map);
+     }
+ 
+     @Override
+@@ -108,7 +_,7 @@
+             return true;
+         } else if (obj != null && obj.getClass() == this.getClass()) {
+             GameRuleMap that = (GameRuleMap)obj;
+-            return Objects.equals(this.map, that.map);
++            return Objects.equals(this.map(), that.map());
+         } else {
+             return false;
+         }
+@@ -116,7 +_,7 @@
+ 
+     @Override
+     public int hashCode() {
+-        return Objects.hash(this.map);
++        return Objects.hash(this.map());
+     }
+ 
+     public static class Builder {

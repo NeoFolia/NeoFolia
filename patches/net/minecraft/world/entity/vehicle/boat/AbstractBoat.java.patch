@@ -1,0 +1,111 @@
+--- a/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
++++ b/net/minecraft/world/entity/vehicle/boat/AbstractBoat.java
+@@ -46,6 +_,7 @@
+ import net.minecraft.world.phys.shapes.BooleanOp;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class AbstractBoat extends VehicleEntity implements Leashable, net.neoforged.neoforge.common.extensions.IAbstractBoatExtension {
+@@ -280,7 +_,8 @@
+             }
+         }
+ 
+-        List<Entity> entities = this.level().getEntities(this, this.getBoundingBox().inflate(0.2F, -0.01F, 0.2F), EntitySelector.pushableBy(this));
++        AABB pushBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(0.2F, -0.01F, 0.2F));
++        List<Entity> entities = pushBox == null ? List.of() : this.level().getEntities(this, pushBox, EntitySelector.pushableBy(this));
+         if (!entities.isEmpty()) {
+             boolean addNewPassengers = !this.level().isClientSide() && !(this.getControllingPassenger() instanceof Player);
+ 
+@@ -415,8 +_,12 @@
+             for (int x = minX; x < maxX; x++) {
+                 for (int z = minZ; z < maxZ; z++) {
+                     pos.set(x, y, z);
++                    if (!this.canReadBlock(pos)) {
++                        continue;
++                    }
++
+                     FluidState fluidState = this.level().getFluidState(pos);
+-                    if (fluidState.is(FluidTags.WATER)) {
++                    if (this.canBoatInFluid(fluidState)) {
+                         blockHeight = Math.max(blockHeight, fluidState.getHeight(this.level(), pos));
+                     }
+ 
+@@ -455,10 +_,14 @@
+                     for (int y = y0; y < y1; y++) {
+                         if (edges <= 0 || y != y0 && y != y1 - 1) {
+                             blockPos.set(x, y, z);
++                            if (!this.canReadBlock(blockPos)) {
++                                continue;
++                            }
++
+                             BlockState blockState = this.level().getBlockState(blockPos);
+                             if (!(blockState.getBlock() instanceof LilyPadBlock)
+                                 && Shapes.joinIsNotEmpty(blockState.getCollisionShape(this.level(), blockPos).move(blockPos), boatShape, BooleanOp.AND)) {
+-                                friction += blockState.getBlock().getFriction();
++                                friction += blockState.getFriction(this.level(), blockPos, this);
+                                 count++;
+                             }
+                         }
+@@ -467,7 +_,7 @@
+             }
+         }
+ 
+-        return friction / count;
++        return count == 0 ? 0.0F : friction / count;
+     }
+ 
+     private boolean checkInWater() {
+@@ -486,8 +_,12 @@
+             for (int y = minY; y < maxY; y++) {
+                 for (int z = minZ; z < maxZ; z++) {
+                     pos.set(x, y, z);
++                    if (!this.canReadBlock(pos)) {
++                        continue;
++                    }
++
+                     FluidState fluidState = this.level().getFluidState(pos);
+-                    if (fluidState.is(FluidTags.WATER)) {
++                    if (this.canBoatInFluid(fluidState)) {
+                         float height = y + fluidState.getHeight(this.level(), pos);
+                         this.waterLevel = Math.max((double)height, this.waterLevel);
+                         inWater |= bb.minY < height;
+@@ -515,8 +_,12 @@
+             for (int y = y0; y < y1; y++) {
+                 for (int z = z0; z < z1; z++) {
+                     pos.set(x, y, z);
++                    if (!this.canReadBlock(pos)) {
++                        continue;
++                    }
++
+                     FluidState fluidState = this.level().getFluidState(pos);
+-                    if (fluidState.is(FluidTags.WATER) && maxY < pos.getY() + fluidState.getHeight(this.level(), pos)) {
++                    if (this.canBoatInFluid(fluidState) && maxY < pos.getY() + fluidState.getHeight(this.level(), pos)) {
+                         if (!fluidState.isSource()) {
+                             return AbstractBoat.Status.UNDER_FLOWING_WATER;
+                         }
+@@ -530,6 +_,10 @@
+         return underWater ? AbstractBoat.Status.UNDER_WATER : null;
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     protected double getDefaultGravity() {
+         return 0.04;
+@@ -722,8 +_,11 @@
+         if (!this.isPassenger()) {
+             if (onGround) {
+                 this.resetFallDistance();
+-            } else if (!this.level().getFluidState(this.blockPosition().below()).is(FluidTags.WATER) && ya < 0.0) {
++            } else {
++                BlockPos below = this.blockPosition().below();
++                if ((!this.canReadBlock(below) || !this.canBoatInFluid(this.level().getFluidState(below))) && ya < 0.0) {
+                 this.fallDistance -= (float)ya;
++                }
+             }
+         }
+     }

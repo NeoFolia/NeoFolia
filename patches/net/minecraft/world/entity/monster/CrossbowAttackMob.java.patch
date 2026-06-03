@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/monster/CrossbowAttackMob.java
++++ b/net/minecraft/world/entity/monster/CrossbowAttackMob.java
+@@ -6,6 +_,7 @@
+ import net.minecraft.world.item.CrossbowItem;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface CrossbowAttackMob extends RangedAttackMob {
+@@ -16,10 +_,11 @@
+     void onCrossbowAttackPerformed();
+ 
+     default void performCrossbowAttack(LivingEntity body, float crossbowPower) {
+-        InteractionHand hand = ProjectileUtil.getWeaponHoldingHand(body, Items.CROSSBOW);
++        InteractionHand hand = ProjectileUtil.getWeaponHoldingHand(body, item -> item instanceof CrossbowItem);
+         ItemStack usedItem = body.getItemInHand(hand);
+         if (usedItem.getItem() instanceof CrossbowItem crossbow) {
+-            crossbow.performShooting(body.level(), body, hand, usedItem, crossbowPower, 14 - body.level().getDifficulty().getId() * 4, this.getTarget());
++            LivingEntity target = RegionizedWorldGuard.restrictEntityToCurrentRegion(body.level(), this.getTarget());
++            crossbow.performShooting(body.level(), body, hand, usedItem, crossbowPower, 14 - body.level().getDifficulty().getId() * 4, target);
+         }
+ 
+         this.onCrossbowAttackPerformed();

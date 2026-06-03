@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/enchantment/effects/SummonEntityEffect.java
++++ b/net/minecraft/world/item/enchantment/effects/SummonEntityEffect.java
+@@ -18,6 +_,7 @@
+ import net.minecraft.world.item.enchantment.EnchantedItemInUse;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public record SummonEntityEffect(HolderSet<EntityType<?>> entityTypes, boolean joinTeam) implements EnchantmentEntityEffect {
+     public static final MapCodec<SummonEntityEffect> CODEC = RecordCodecBuilder.mapCodec(
+@@ -32,7 +_,7 @@
+     public void apply(ServerLevel serverLevel, int enchantmentLevel, EnchantedItemInUse item, Entity entity, Vec3 position) {
+         BlockPos blockPos = BlockPos.containing(position);
+         if (Level.isInSpawnableBounds(blockPos)) {
+-            Optional<Holder<EntityType<?>>> entityType = this.entityTypes().getRandomElement(serverLevel.getRandom());
++            Optional<Holder<EntityType<?>>> entityType = this.entityTypes().getRandomElement(RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()));
+             if (!entityType.isEmpty()) {
+                 Entity spawned = entityType.get().value().spawn(serverLevel, blockPos, EntitySpawnReason.TRIGGERED);
+                 if (spawned != null) {

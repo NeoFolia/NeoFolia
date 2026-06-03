@@ -1,0 +1,57 @@
+--- a/net/minecraft/world/item/FishingRodItem.java
++++ b/net/minecraft/world/item/FishingRodItem.java
+@@ -12,6 +_,7 @@
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class FishingRodItem extends Item {
+     public FishingRodItem(Item.Properties properties) {
+@@ -24,7 +_,11 @@
+         if (player.fishing != null) {
+             if (!level.isClientSide()) {
+                 int dmg = player.fishing.retrieve(itemStack);
++                ItemStack original = itemStack.copy();
+                 itemStack.hurtAndBreak(dmg, player, hand.asEquipmentSlot());
++                if(itemStack.isEmpty()) {
++                    net.neoforged.neoforge.event.EventHooks.onPlayerDestroyItem(player, original, hand);
++                }
+             }
+ 
+             level.playSound(
+@@ -35,7 +_,7 @@
+                 SoundEvents.FISHING_BOBBER_RETRIEVE,
+                 SoundSource.NEUTRAL,
+                 1.0F,
+-                0.4F / (level.getRandom().nextFloat() * 0.4F + 0.8F)
++                0.4F / (player.getRandom().nextFloat() * 0.4F + 0.8F)
+             );
+             itemStack.causeUseVibration(player, GameEvent.ITEM_INTERACT_FINISH);
+         } else {
+@@ -47,7 +_,7 @@
+                 SoundEvents.FISHING_BOBBER_THROW,
+                 SoundSource.NEUTRAL,
+                 0.5F,
+-                0.4F / (level.getRandom().nextFloat() * 0.4F + 0.8F)
++                0.4F / (player.getRandom().nextFloat() * 0.4F + 0.8F)
+             );
+             if (level instanceof ServerLevel serverLevel) {
+                 int lureSpeed = (int)(EnchantmentHelper.getFishingTimeReduction(serverLevel, itemStack, player) * 20.0F);
+@@ -55,10 +_,15 @@
+                 Projectile.spawnProjectile(new FishingHook(player, level, luck, lureSpeed), serverLevel, itemStack);
+             }
+ 
+-            player.awardStat(Stats.ITEM_USED.get(this));
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+             itemStack.causeUseVibration(player, GameEvent.ITEM_INTERACT_START);
+         }
+ 
+         return InteractionResult.SUCCESS;
++    }
++
++    @Override
++    public boolean canPerformAction(ItemInstance stack, net.neoforged.neoforge.common.ItemAbility itemAbility) {
++        return net.neoforged.neoforge.common.ItemAbilities.DEFAULT_FISHING_ROD_ACTIONS.contains(itemAbility);
+     }
+ }

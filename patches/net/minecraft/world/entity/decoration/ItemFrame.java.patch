@@ -1,0 +1,49 @@
+--- a/net/minecraft/world/entity/decoration/ItemFrame.java
++++ b/net/minecraft/world/entity/decoration/ItemFrame.java
+@@ -39,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ItemFrame extends HangingEntity {
+@@ -129,7 +_,12 @@
+         } else if (this.hasLevelCollision(this.getPopBox())) {
+             return false;
+         } else {
+-            BlockState state = this.level().getBlockState(this.pos.relative(this.getDirection().getOpposite()));
++            BlockPos supportPos = this.pos.relative(this.getDirection().getOpposite());
++            if (!RegionizedWorldGuard.shouldLoadChunk(this.level(), supportPos.getX() >> 4, supportPos.getZ() >> 4)) {
++                return false;
++            }
++
++            BlockState state = this.level().getBlockState(supportPos);
+             return state.isSolid() || this.getDirection().getAxis().isHorizontal() && DiodeBlock.isDiode(state) ? this.canCoexist(true) : false;
+         }
+     }
+@@ -169,12 +_,13 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+         if (!this.fixed) {
+             if (this.isInvulnerableToBase(source)) {
+                 return false;
+             } else if (this.shouldDamageDropItem(source)) {
+-                this.dropItem(level, source.getEntity(), false);
+-                this.gameEvent(GameEvent.BLOCK_CHANGE, source.getEntity());
++                this.dropItem(level, sourceEntity, false);
++                this.gameEvent(GameEvent.BLOCK_CHANGE, sourceEntity);
+                 this.playSound(this.getRemoveItemSound(), 1.0F, 1.0F);
+                 return true;
+             } else {
+@@ -245,7 +_,7 @@
+     private void removeFramedMap(ItemStack itemStack) {
+         MapId mapId = this.getFramedMapId(itemStack);
+         if (mapId != null) {
+-            MapItemSavedData mapItemSavedData = MapItem.getSavedData(mapId, this.level());
++            MapItemSavedData mapItemSavedData = MapItem.getSavedData(itemStack, this.level());
+             if (mapItemSavedData != null) {
+                 mapItemSavedData.removedFromFrame(this.pos, this.getId());
+             }

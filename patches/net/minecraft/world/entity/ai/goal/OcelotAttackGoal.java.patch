@@ -1,0 +1,93 @@
+--- a/net/minecraft/world/entity/ai/goal/OcelotAttackGoal.java
++++ b/net/minecraft/world/entity/ai/goal/OcelotAttackGoal.java
+@@ -3,10 +_,12 @@
+ import java.util.EnumSet;
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.Mob;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class OcelotAttackGoal extends Goal {
+     private final Mob mob;
+-    private LivingEntity target;
++    private @Nullable LivingEntity target;
+     private int attackTime;
+ 
+     public OcelotAttackGoal(Mob mob) {
+@@ -15,8 +_,8 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        LivingEntity bestTarget = this.mob.getTarget();
++    public synchronized boolean canUse() {
++        LivingEntity bestTarget = this.regionSafeTarget(this.mob.getTarget());
+         if (bestTarget == null) {
+             return false;
+         } else {
+@@ -26,30 +_,37 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        if (!this.target.isAlive()) {
++    public synchronized boolean canContinueToUse() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        if (target == null || !target.isAlive()) {
+             return false;
+         } else {
+-            return this.mob.distanceToSqr(this.target) > 225.0 ? false : !this.mob.getNavigation().isDone() || this.canUse();
++            return this.mob.distanceToSqr(target) > 225.0 ? false : !this.mob.getNavigation().isDone() || this.canUse();
+         }
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.target = null;
++        this.attackTime = 0;
+         this.mob.getNavigation().stop();
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
+-        this.mob.getLookControl().setLookAt(this.target, 30.0F, 30.0F);
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        if (target == null) {
++            return;
++        }
++
++        this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+         double meleeRadiusSqr = this.mob.getBbWidth() * 2.0F * (this.mob.getBbWidth() * 2.0F);
+-        double distSqr = this.mob.distanceToSqr(this.target.getX(), this.target.getY(), this.target.getZ());
++        double distSqr = this.mob.distanceToSqr(target.getX(), target.getY(), target.getZ());
+         double speedModifier = 0.8;
+         if (distSqr > meleeRadiusSqr && distSqr < 16.0) {
+             speedModifier = 1.33;
+@@ -57,13 +_,17 @@
+             speedModifier = 0.6;
+         }
+ 
+-        this.mob.getNavigation().moveTo(this.target, speedModifier);
++        this.mob.getNavigation().moveTo(target, speedModifier);
+         this.attackTime = Math.max(this.attackTime - 1, 0);
+         if (!(distSqr > meleeRadiusSqr)) {
+             if (this.attackTime <= 0) {
+                 this.attackTime = 20;
+-                this.mob.doHurtTarget(getServerLevel(this.mob), this.target);
++                this.mob.doHurtTarget(getServerLevel(this.mob), target);
+             }
+         }
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

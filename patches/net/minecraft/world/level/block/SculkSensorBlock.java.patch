@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/level/block/SculkSensorBlock.java
++++ b/net/minecraft/world/level/block/SculkSensorBlock.java
+@@ -39,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.PathComputationType;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class SculkSensorBlock extends BaseEntityBlock implements SimpleWaterloggedBlock {
+@@ -85,7 +_,7 @@
+             if (getPhase(state) == SculkSensorPhase.COOLDOWN) {
+                 level.setBlock(pos, state.setValue(PHASE, SculkSensorPhase.INACTIVE), 3);
+                 if (!state.getValue(WATERLOGGED)) {
+-                    level.playSound(null, pos, SoundEvents.SCULK_CLICKING_STOP, SoundSource.BLOCKS, 1.0F, level.getRandom().nextFloat() * 0.2F + 0.8F);
++                    level.playSound(null, pos, SoundEvents.SCULK_CLICKING_STOP, SoundSource.BLOCKS, 1.0F, sculkSensorRandom(level).nextFloat() * 0.2F + 0.8F);
+                 }
+             }
+         } else {
+@@ -217,11 +_,15 @@
+                 SoundEvents.SCULK_CLICKING,
+                 SoundSource.BLOCKS,
+                 1.0F,
+-                level.getRandom().nextFloat() * 0.2F + 0.8F
++                sculkSensorRandom(level).nextFloat() * 0.2F + 0.8F
+             );
+         }
+     }
+ 
++    private static RandomSource sculkSensorRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
++    }
++
+     public static void tryResonateVibration(@Nullable Entity sourceEntity, Level level, BlockPos pos, int vibrationFrequency) {
+         for (Direction direction : Direction.values()) {
+             BlockPos relativePos = pos.relative(direction);
+@@ -280,8 +_,13 @@
+     @Override
+     protected void spawnAfterBreak(BlockState state, ServerLevel level, BlockPos pos, ItemStack tool, boolean dropExperience) {
+         super.spawnAfterBreak(state, level, pos, tool, dropExperience);
+-        if (dropExperience) {
+-            this.tryDropExperience(level, pos, tool, ConstantInt.of(5));
+-        }
++    }
++
++    // Neo: Patch-in override for getExpDrop. Original vanilla logic passes ConstantInt.of(5) to tryDropExperience.
++    @Override
++    public int getExpDrop(BlockState state, net.minecraft.world.level.LevelAccessor level, BlockPos pos,
++            net.minecraft.world.level.block.entity.@Nullable BlockEntity blockEntity,
++            net.minecraft.world.entity.@Nullable Entity breaker, ItemStack tool) {
++        return 5;
+     }
+ }

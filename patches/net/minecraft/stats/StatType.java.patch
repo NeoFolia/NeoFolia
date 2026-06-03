@@ -1,0 +1,35 @@
+--- a/net/minecraft/stats/StatType.java
++++ b/net/minecraft/stats/StatType.java
+@@ -2,6 +_,7 @@
+ 
+ import java.util.IdentityHashMap;
+ import java.util.Iterator;
++import java.util.List;
+ import java.util.Map;
+ import net.minecraft.core.Registry;
+ import net.minecraft.network.RegistryFriendlyByteBuf;
+@@ -25,11 +_,11 @@
+         return this.streamCodec;
+     }
+ 
+-    public boolean contains(T key) {
++    public synchronized boolean contains(T key) {
+         return this.map.containsKey(key);
+     }
+ 
+-    public Stat<T> get(T argument, StatFormatter formatter) {
++    public synchronized Stat<T> get(T argument, StatFormatter formatter) {
+         return this.map.computeIfAbsent(argument, t -> new Stat<>(this, (T)t, formatter));
+     }
+ 
+@@ -38,8 +_,8 @@
+     }
+ 
+     @Override
+-    public Iterator<Stat<T>> iterator() {
+-        return this.map.values().iterator();
++    public synchronized Iterator<Stat<T>> iterator() {
++        return List.copyOf(this.map.values()).iterator();
+     }
+ 
+     public Stat<T> get(T argument) {

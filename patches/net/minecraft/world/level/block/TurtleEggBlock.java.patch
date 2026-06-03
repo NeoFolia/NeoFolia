@@ -1,0 +1,60 @@
+--- a/net/minecraft/world/level/block/TurtleEggBlock.java
++++ b/net/minecraft/world/level/block/TurtleEggBlock.java
+@@ -30,6 +_,7 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class TurtleEggBlock extends Block {
+@@ -74,13 +_,13 @@
+         if (state.is(Blocks.TURTLE_EGG)
+             && level instanceof ServerLevel serverLevel
+             && this.canDestroyEgg(serverLevel, entity)
+-            && level.getRandom().nextInt(randomness) == 0) {
++            && turtleEggRandom(serverLevel).nextInt(randomness) == 0) {
+             this.decreaseEggs(serverLevel, pos, state);
+         }
+     }
+ 
+     private void decreaseEggs(Level level, BlockPos pos, BlockState state) {
+-        level.playSound(null, pos, SoundEvents.TURTLE_EGG_BREAK, SoundSource.BLOCKS, 0.7F, 0.9F + level.getRandom().nextFloat() * 0.2F);
++        level.playSound(null, pos, SoundEvents.TURTLE_EGG_BREAK, SoundSource.BLOCKS, 0.7F, 0.9F + turtleEggRandom(level).nextFloat() * 0.2F);
+         int numberOfEggs = state.getValue(EGGS);
+         if (numberOfEggs <= 1) {
+             level.destroyBlock(pos, false);
+@@ -93,7 +_,7 @@
+ 
+     @Override
+     protected void randomTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+-        if (this.shouldUpdateHatchLevel(level, pos) && onSand(level, pos)) {
++        if (this.shouldUpdateHatchLevel(level, pos, random) && onSand(level, pos)) {
+             int hatch = state.getValue(HATCH);
+             if (hatch < 2) {
+                 level.playSound(null, pos, SoundEvents.TURTLE_EGG_CRACK, SoundSource.BLOCKS, 0.7F, 0.9F + random.nextFloat() * 0.2F);
+@@ -133,9 +_,13 @@
+         }
+     }
+ 
+-    private boolean shouldUpdateHatchLevel(Level level, BlockPos pos) {
++    private boolean shouldUpdateHatchLevel(Level level, BlockPos pos, RandomSource random) {
+         float chance = level.environmentAttributes().getValue(EnvironmentAttributes.TURTLE_EGG_HATCH_CHANCE, pos);
+-        return chance > 0.0F && level.getRandom().nextFloat() < chance;
++        return chance > 0.0F && random.nextFloat() < chance;
++    }
++
++    private static RandomSource turtleEggRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     @Override
+@@ -171,7 +_,7 @@
+         if (entity instanceof Turtle || entity instanceof Bat) {
+             return false;
+         } else {
+-            return !(entity instanceof LivingEntity) ? false : entity instanceof Player || level.getGameRules().get(GameRules.MOB_GRIEFING);
++            return !(entity instanceof LivingEntity) ? false : entity instanceof Player || net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, entity);
+         }
+     }
+ }

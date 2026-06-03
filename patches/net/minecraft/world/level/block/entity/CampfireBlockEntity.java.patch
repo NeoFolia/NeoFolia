@@ -1,0 +1,225 @@
+--- a/net/minecraft/world/level/block/entity/CampfireBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/CampfireBlockEntity.java
+@@ -35,6 +_,7 @@
+ import net.minecraft.world.level.storage.TagValueOutput;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -58,25 +_,37 @@
+         RecipeManager.CachedCheck<SingleRecipeInput, CampfireCookingRecipe> recipeCache
+     ) {
+         boolean changed = false;
++        boolean cooked = false;
++        java.util.List<ItemStack> drops = new java.util.ArrayList<>();
+ 
+-        for (int slot = 0; slot < entity.items.size(); slot++) {
+-            ItemStack itemStack = entity.items.get(slot);
+-            if (!itemStack.isEmpty()) {
+-                changed = true;
+-                entity.cookingProgress[slot]++;
+-                if (entity.cookingProgress[slot] >= entity.cookingTime[slot]) {
+-                    SingleRecipeInput input = new SingleRecipeInput(itemStack);
+-                    ItemStack result = recipeCache.getRecipeFor(input, level).map(r -> r.value().assemble(input)).orElse(itemStack);
+-                    if (result.isItemEnabled(level.enabledFeatures())) {
+-                        Containers.dropItemStack(level, pos.getX(), pos.getY(), pos.getZ(), result);
+-                        entity.items.set(slot, ItemStack.EMPTY);
+-                        level.sendBlockUpdated(pos, state, state, 3);
+-                        level.gameEvent(GameEvent.BLOCK_CHANGE, pos, GameEvent.Context.of(state));
++        synchronized (entity) {
++            for (int slot = 0; slot < entity.items.size(); slot++) {
++                ItemStack itemStack = entity.items.get(slot);
++                if (!itemStack.isEmpty()) {
++                    changed = true;
++                    entity.cookingProgress[slot]++;
++                    if (entity.cookingProgress[slot] >= entity.cookingTime[slot]) {
++                        SingleRecipeInput input = new SingleRecipeInput(itemStack);
++                        ItemStack result = recipeCache.getRecipeFor(input, level).map(r -> r.value().assemble(input)).orElse(itemStack);
++                        if (result.isItemEnabled(level.enabledFeatures())) {
++                            drops.add(result);
++                            entity.items.set(slot, ItemStack.EMPTY);
++                            cooked = true;
++                        }
+                     }
+                 }
+             }
+         }
+ 
++        for (ItemStack drop : drops) {
++            Containers.dropItemStack(level, pos.getX(), pos.getY(), pos.getZ(), drop);
++        }
++
++        if (cooked) {
++            level.sendBlockUpdated(pos, state, state, 3);
++            level.gameEvent(GameEvent.BLOCK_CHANGE, pos, GameEvent.Context.of(state));
++        }
++
+         if (changed) {
+             setChanged(level, pos, state);
+         }
+@@ -85,10 +_,12 @@
+     public static void cooldownTick(Level level, BlockPos pos, BlockState state, CampfireBlockEntity entity) {
+         boolean changed = false;
+ 
+-        for (int slot = 0; slot < entity.items.size(); slot++) {
+-            if (entity.cookingProgress[slot] > 0) {
+-                changed = true;
+-                entity.cookingProgress[slot] = Mth.clamp(entity.cookingProgress[slot] - 2, 0, entity.cookingTime[slot]);
++        synchronized (entity) {
++            for (int slot = 0; slot < entity.items.size(); slot++) {
++                if (entity.cookingProgress[slot] > 0) {
++                    changed = true;
++                    entity.cookingProgress[slot] = Mth.clamp(entity.cookingProgress[slot] - 2, 0, entity.cookingTime[slot]);
++                }
+             }
+         }
+ 
+@@ -98,7 +_,7 @@
+     }
+ 
+     public static void particleTick(Level level, BlockPos pos, BlockState state, CampfireBlockEntity entity) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+         if (random.nextFloat() < 0.11F) {
+             for (int i = 0; i < random.nextInt(2) + 2; i++) {
+                 CampfireBlock.makeParticles(level, pos, state.getValue(CampfireBlock.SIGNAL_FIRE), false);
+@@ -107,8 +_,15 @@
+ 
+         int rotation = state.getValue(CampfireBlock.FACING).get2DDataValue();
+ 
+-        for (int slot = 0; slot < entity.items.size(); slot++) {
+-            if (!entity.items.get(slot).isEmpty() && random.nextFloat() < 0.2F) {
++        boolean[] occupiedSlots = new boolean[4];
++        synchronized (entity) {
++            for (int slot = 0; slot < entity.items.size(); slot++) {
++                occupiedSlots[slot] = !entity.items.get(slot).isEmpty();
++            }
++        }
++
++        for (int slot = 0; slot < occupiedSlots.length; slot++) {
++            if (occupiedSlots[slot] && random.nextFloat() < 0.2F) {
+                 Direction direction = Direction.from2DDataValue(Math.floorMod(slot + rotation, 4));
+                 float distanceFromCenter = 0.3125F;
+                 double x = pos.getX() + 0.5 - direction.getStepX() * 0.3125F + direction.getClockWise().getStepX() * 0.3125F;
+@@ -122,12 +_,12 @@
+         }
+     }
+ 
+-    public NonNullList<ItemStack> getItems() {
++    public synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.items.clear();
+         ContainerHelper.loadAllItems(input, this.items);
+@@ -144,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         ContainerHelper.saveAllItems(output, this.items, true);
+         output.putIntArray("CookingTimes", this.cookingProgress);
+@@ -160,7 +_,9 @@
+         CompoundTag var4;
+         try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.problemPath(), LOGGER)) {
+             TagValueOutput output = TagValueOutput.createWithContext(reporter, registries);
+-            ContainerHelper.saveAllItems(output, this.items, true);
++            synchronized (this) {
++                ContainerHelper.saveAllItems(output, this.items, true);
++            }
+             var4 = output.buildResult();
+         }
+ 
+@@ -168,22 +_,30 @@
+     }
+ 
+     public boolean placeFood(ServerLevel serverLevel, @Nullable LivingEntity sourceEntity, ItemStack placeItem) {
+-        for (int slot = 0; slot < this.items.size(); slot++) {
+-            ItemStack item = this.items.get(slot);
+-            if (item.isEmpty()) {
+-                Optional<RecipeHolder<CampfireCookingRecipe>> recipe = serverLevel.recipeAccess()
+-                    .getRecipeFor(RecipeType.CAMPFIRE_COOKING, new SingleRecipeInput(placeItem), serverLevel);
+-                if (recipe.isEmpty()) {
+-                    return false;
++        Optional<RecipeHolder<CampfireCookingRecipe>> recipe = serverLevel.recipeAccess()
++            .getRecipeFor(RecipeType.CAMPFIRE_COOKING, new SingleRecipeInput(placeItem), serverLevel);
++        if (recipe.isEmpty()) {
++            return false;
++        }
++
++        boolean placed = false;
++        synchronized (this) {
++            for (int slot = 0; slot < this.items.size(); slot++) {
++                ItemStack item = this.items.get(slot);
++                if (item.isEmpty()) {
++                    this.cookingTime[slot] = recipe.get().value().cookingTime();
++                    this.cookingProgress[slot] = 0;
++                    this.items.set(slot, placeItem.consumeAndReturn(1, sourceEntity));
++                    placed = true;
++                    break;
+                 }
+-
+-                this.cookingTime[slot] = recipe.get().value().cookingTime();
+-                this.cookingProgress[slot] = 0;
+-                this.items.set(slot, placeItem.consumeAndReturn(1, sourceEntity));
+-                serverLevel.gameEvent(GameEvent.BLOCK_CHANGE, this.getBlockPos(), GameEvent.Context.of(sourceEntity, this.getBlockState()));
+-                this.markUpdated();
+-                return true;
+             }
++        }
++
++        if (placed) {
++            serverLevel.gameEvent(GameEvent.BLOCK_CHANGE, this.getBlockPos(), GameEvent.Context.of(sourceEntity, this.getBlockState()));
++            this.markUpdated();
++            return true;
+         }
+ 
+         return false;
+@@ -195,27 +_,33 @@
+     }
+ 
+     @Override
+-    public void clearContent() {
++    public synchronized void clearContent() {
+         this.items.clear();
+     }
+ 
+     @Override
+     public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+         if (this.level != null) {
+-            Containers.dropContents(this.level, pos, this.getItems());
++            NonNullList<ItemStack> itemsSnapshot = NonNullList.withSize(this.items.size(), ItemStack.EMPTY);
++            synchronized (this) {
++                for (int slot = 0; slot < this.items.size(); slot++) {
++                    itemsSnapshot.set(slot, this.items.get(slot).copy());
++                }
++            }
++            Containers.dropContents(this.level, pos, itemsSnapshot);
+         }
+     }
+ 
+     @Override
+-    protected void applyImplicitComponents(DataComponentGetter components) {
++    protected synchronized void applyImplicitComponents(DataComponentGetter components) {
+         super.applyImplicitComponents(components);
+-        components.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyInto(this.getItems());
++        components.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyInto(this.items);
+     }
+ 
+     @Override
+-    protected void collectImplicitComponents(DataComponentMap.Builder components) {
++    protected synchronized void collectImplicitComponents(DataComponentMap.Builder components) {
+         super.collectImplicitComponents(components);
+-        components.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(this.getItems()));
++        components.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(this.items));
+     }
+ 
+     @Override

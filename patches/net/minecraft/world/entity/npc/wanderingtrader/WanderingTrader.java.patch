@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java
++++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java
+@@ -7,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -109,7 +_,7 @@
+         ItemStack itemStack = player.getItemInHand(hand);
+         if (!itemStack.is(Items.VILLAGER_SPAWN_EGG) && this.isAlive() && !this.isTrading() && !this.isBaby()) {
+             if (hand == InteractionHand.MAIN_HAND) {
+-                player.awardStat(Stats.TALKED_TO_VILLAGER);
++                RegionizedWorldGuard.awardStat(player, Stats.TALKED_TO_VILLAGER);
+             }
+ 
+             if (!this.level().isClientSide()) {

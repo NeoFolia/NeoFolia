@@ -1,0 +1,68 @@
+--- a/net/minecraft/server/commands/TickCommand.java
++++ b/net/minecraft/server/commands/TickCommand.java
+@@ -59,6 +_,10 @@
+     }
+ 
+     private static int setTickingRate(CommandSourceStack source, float rate) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setTickingRate(source, rate))) {
++            return 0;
++        }
++
+         ServerTickRateManager manager = source.getServer().tickRateManager();
+         manager.setTickRate(rate);
+         String tickRateString = String.format(Locale.ROOT, "%.1f", rate);
+@@ -97,6 +_,10 @@
+     }
+ 
+     private static int sprint(CommandSourceStack source, int time) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> sprint(source, time))) {
++            return 0;
++        }
++
+         boolean interrupted = source.getServer().tickRateManager().requestGameToSprint(time);
+         if (interrupted) {
+             source.sendSuccess(() -> Component.translatable("commands.tick.sprint.stop.success"), true);
+@@ -107,6 +_,10 @@
+     }
+ 
+     private static int setFreeze(CommandSourceStack source, boolean freeze) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setFreeze(source, freeze))) {
++            return 0;
++        }
++
+         ServerTickRateManager manager = source.getServer().tickRateManager();
+         if (freeze) {
+             if (manager.isSprinting()) {
+@@ -129,6 +_,10 @@
+     }
+ 
+     private static int step(CommandSourceStack source, int advance) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> step(source, advance))) {
++            return 0;
++        }
++
+         ServerTickRateManager manager = source.getServer().tickRateManager();
+         boolean success = manager.stepGameIfPaused(advance);
+         if (success) {
+@@ -141,6 +_,10 @@
+     }
+ 
+     private static int stopStepping(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> stopStepping(source))) {
++            return 0;
++        }
++
+         ServerTickRateManager manager = source.getServer().tickRateManager();
+         boolean success = manager.stopStepping();
+         if (success) {
+@@ -153,6 +_,10 @@
+     }
+ 
+     private static int stopSprinting(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> stopSprinting(source))) {
++            return 0;
++        }
++
+         ServerTickRateManager manager = source.getServer().tickRateManager();
+         boolean success = manager.stopSprinting();
+         if (success) {

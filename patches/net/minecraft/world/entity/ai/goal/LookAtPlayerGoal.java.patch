@@ -1,0 +1,100 @@
+--- a/net/minecraft/world/entity/ai/goal/LookAtPlayerGoal.java
++++ b/net/minecraft/world/entity/ai/goal/LookAtPlayerGoal.java
+@@ -9,6 +_,8 @@
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+ import net.minecraft.world.entity.player.Player;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class LookAtPlayerGoal extends Goal {
+@@ -46,27 +_,30 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.mob.getRandom().nextFloat() >= this.probability) {
+             return false;
+         } else {
+             if (this.mob.getTarget() != null) {
+-                this.lookAt = this.mob.getTarget();
++                this.lookAt = this.regionSafeLookAt(this.mob.getTarget());
+             }
+ 
+             ServerLevel level = getServerLevel(this.mob);
+             if (this.lookAtType == Player.class) {
+-                this.lookAt = level.getNearestPlayer(this.lookAtContext, this.mob, this.mob.getX(), this.mob.getEyeY(), this.mob.getZ());
++                this.lookAt = this.regionSafeLookAt(level.getNearestPlayer(this.lookAtContext, this.mob, this.mob.getX(), this.mob.getEyeY(), this.mob.getZ()));
+             } else {
+-                this.lookAt = level.getNearestEntity(
+-                    this.mob
+-                        .level()
+-                        .getEntitiesOfClass(this.lookAtType, this.mob.getBoundingBox().inflate(this.lookDistance, 3.0, this.lookDistance), entity -> true),
+-                    this.lookAtContext,
+-                    this.mob,
+-                    this.mob.getX(),
+-                    this.mob.getEyeY(),
+-                    this.mob.getZ()
++                AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(
++                    this.mob.level(), this.mob.getBoundingBox().inflate(this.lookDistance, 3.0, this.lookDistance)
++                );
++                this.lookAt = this.regionSafeLookAt(
++                    level.getNearestEntity(
++                        searchBox == null ? java.util.List.of() : java.util.List.copyOf(this.mob.level().getEntitiesOfClass(this.lookAtType, searchBox, entity -> true)),
++                        this.lookAtContext,
++                        this.mob,
++                        this.mob.getX(),
++                        this.mob.getEyeY(),
++                        this.mob.getZ()
++                    )
+                 );
+             }
+ 
+@@ -75,30 +_,36 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        if (!this.lookAt.isAlive()) {
++    public synchronized boolean canContinueToUse() {
++        Entity target = this.regionSafeLookAt(this.lookAt);
++        if (target == null || !target.isAlive()) {
+             return false;
+         } else {
+-            return this.mob.distanceToSqr(this.lookAt) > this.lookDistance * this.lookDistance ? false : this.lookTime > 0;
++            return this.mob.distanceToSqr(target) > this.lookDistance * this.lookDistance ? false : this.lookTime > 0;
+         }
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.lookTime = this.adjustedTickDelay(40 + this.mob.getRandom().nextInt(40));
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.lookAt = null;
+     }
+ 
+     @Override
+-    public void tick() {
+-        if (this.lookAt.isAlive()) {
+-            double targetY = this.onlyHorizontal ? this.mob.getEyeY() : this.lookAt.getEyeY();
+-            this.mob.getLookControl().setLookAt(this.lookAt.getX(), targetY, this.lookAt.getZ());
++    public synchronized void tick() {
++        Entity target = this.regionSafeLookAt(this.lookAt);
++        if (target != null && target.isAlive()) {
++            double targetY = this.onlyHorizontal ? this.mob.getEyeY() : target.getEyeY();
++            this.mob.getLookControl().setLookAt(target.getX(), targetY, target.getZ());
+             this.lookTime--;
+         }
++    }
++
++    protected synchronized @Nullable Entity regionSafeLookAt(@Nullable Entity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

@@ -1,0 +1,35 @@
+--- a/net/minecraft/server/commands/FunctionCommand.java
++++ b/net/minecraft/server/commands/FunctionCommand.java
+@@ -8,6 +_,7 @@
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
++import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import com.mojang.brigadier.suggestion.SuggestionProvider;
+ import com.mojang.datafixers.util.Pair;
+ import java.util.Collection;
+@@ -36,9 +_,13 @@
+ import net.minecraft.server.commands.data.DataAccessor;
+ import net.minecraft.server.commands.data.DataCommands;
+ import net.minecraft.server.permissions.LevelBasedPermissionSet;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FunctionCommand {
++    private static final SimpleCommandExceptionType ERROR_REGIONIZED_FUNCTION_REQUIRES_GLOBAL = new SimpleCommandExceptionType(
++        Component.literal("This function command must run on the global server thread while regionized ticking is active")
++    );
+     private static final DynamicCommandExceptionType ERROR_ARGUMENT_NOT_COMPOUND = new DynamicCommandExceptionType(
+         type -> Component.translatableEscape("commands.function.error.argument_not_compound", type)
+     );
+@@ -239,6 +_,10 @@
+         public void runGuarded(
+             CommandSourceStack sender, ContextChain<CommandSourceStack> currentStep, ChainModifiers modifiers, ExecutionControl<CommandSourceStack> output
+         ) throws CommandSyntaxException {
++            if (RegionizedTickContext.isRegionThread()) {
++                throw ERROR_REGIONIZED_FUNCTION_REQUIRES_GLOBAL.create();
++            }
++
+             CommandContext<CommandSourceStack> currentContext = currentStep.getTopContext().copyFor(sender);
+             Pair<Identifier, Collection<CommandFunction<CommandSourceStack>>> nameAndFunctions = FunctionArgument.getFunctionCollection(currentContext, "name");
+             Collection<CommandFunction<CommandSourceStack>> functions = nameAndFunctions.getSecond();

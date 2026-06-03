@@ -1,0 +1,90 @@
+--- a/net/minecraft/world/level/storage/CommandStorage.java
++++ b/net/minecraft/world/level/storage/CommandStorage.java
+@@ -4,6 +_,7 @@
+ import com.mojang.serialization.codecs.RecordCodecBuilder;
+ import java.util.HashMap;
+ import java.util.Map;
++import java.util.Set;
+ import java.util.stream.Stream;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.resources.Identifier;
+@@ -22,12 +_,12 @@
+         this.savedDataStorage = savedDataStorage;
+     }
+ 
+-    public CompoundTag get(Identifier id) {
++    public synchronized CompoundTag get(Identifier id) {
+         CommandStorage.Container container = this.getContainer(id.getNamespace());
+         return container != null ? container.get(id.getPath()) : new CompoundTag();
+     }
+ 
+-    private CommandStorage.@Nullable Container getContainer(String namespace) {
++    private synchronized CommandStorage.@Nullable Container getContainer(String namespace) {
+         CommandStorage.Container container = this.namespaces.get(namespace);
+         if (container != null) {
+             return container;
+@@ -41,7 +_,7 @@
+         }
+     }
+ 
+-    private CommandStorage.Container getOrCreateContainer(String namespace) {
++    private synchronized CommandStorage.Container getOrCreateContainer(String namespace) {
+         CommandStorage.Container container = this.namespaces.get(namespace);
+         if (container != null) {
+             return container;
+@@ -52,17 +_,17 @@
+         }
+     }
+ 
+-    public void set(Identifier id, CompoundTag contents) {
++    public synchronized void set(Identifier id, CompoundTag contents) {
+         this.getOrCreateContainer(id.getNamespace()).put(id.getPath(), contents);
+     }
+ 
+-    public Stream<Identifier> keys() {
+-        return this.namespaces.entrySet().stream().flatMap(e -> e.getValue().getKeys(e.getKey()));
++    public synchronized Stream<Identifier> keys() {
++        return Map.copyOf(this.namespaces).entrySet().stream().flatMap(e -> e.getValue().getKeys(e.getKey()));
+     }
+ 
+     private static class Container extends SavedData {
+         public static final Codec<CommandStorage.Container> CODEC = RecordCodecBuilder.create(
+-            i -> i.group(Codec.unboundedMap(ExtraCodecs.RESOURCE_PATH_CODEC, CompoundTag.CODEC).fieldOf("contents").forGetter(container -> container.storage))
++            i -> i.group(Codec.unboundedMap(ExtraCodecs.RESOURCE_PATH_CODEC, CompoundTag.CODEC).fieldOf("contents").forGetter(CommandStorage.Container::storage))
+                 .apply(i, CommandStorage.Container::new)
+         );
+         private final Map<String, CompoundTag> storage;
+@@ -81,23 +_,27 @@
+             );
+         }
+ 
+-        public CompoundTag get(String id) {
++        public synchronized CompoundTag get(String id) {
+             CompoundTag result = this.storage.get(id);
+-            return result != null ? result : new CompoundTag();
++            return result != null ? result.copy() : new CompoundTag();
+         }
+ 
+-        public void put(String id, CompoundTag contents) {
++        public synchronized void put(String id, CompoundTag contents) {
+             if (contents.isEmpty()) {
+                 this.storage.remove(id);
+             } else {
+-                this.storage.put(id, contents);
++                this.storage.put(id, contents.copy());
+             }
+ 
+             this.setDirty();
+         }
+ 
+-        public Stream<Identifier> getKeys(String namespace) {
+-            return this.storage.keySet().stream().map(p -> Identifier.fromNamespaceAndPath(namespace, p));
++        public synchronized Stream<Identifier> getKeys(String namespace) {
++            return Set.copyOf(this.storage.keySet()).stream().map(p -> Identifier.fromNamespaceAndPath(namespace, p));
++        }
++
++        private synchronized Map<String, CompoundTag> storage() {
++            return Map.copyOf(this.storage);
+         }
+     }
+ }

@@ -1,0 +1,29 @@
+--- a/net/minecraft/stats/StatsCounter.java
++++ b/net/minecraft/stats/StatsCounter.java
+@@ -12,20 +_,21 @@
+         this.stats.defaultReturnValue(0);
+     }
+ 
+-    public void increment(Player player, Stat<?> stat, int count) {
++    public synchronized void increment(Player player, Stat<?> stat, int count) {
+         int result = (int)Math.min((long)this.getValue(stat) + count, 2147483647L);
+         this.setValue(player, stat, result);
+     }
+ 
+-    public void setValue(Player player, Stat<?> stat, int count) {
+-        this.stats.put(stat, count);
++    public synchronized void setValue(Player player, Stat<?> stat, int count) {
++        net.neoforged.neoforge.event.StatAwardEvent event = net.neoforged.neoforge.event.EventHooks.onStatAward(player, stat,count);
++        if (!event.isCanceled()) this.stats.put(event.getStat(), event.getValue());
+     }
+ 
+-    public <T> int getValue(StatType<T> type, T key) {
++    public synchronized <T> int getValue(StatType<T> type, T key) {
+         return type.contains(key) ? this.getValue(type.get(key)) : 0;
+     }
+ 
+-    public int getValue(Stat<?> stat) {
++    public synchronized int getValue(Stat<?> stat) {
+         return this.stats.getInt(stat);
+     }
+ }

@@ -1,0 +1,42 @@
+--- a/net/minecraft/world/entity/ai/behavior/MoveToSkySeeingSpot.java
++++ b/net/minecraft/world/entity/ai/behavior/MoveToSkySeeingSpot.java
+@@ -10,12 +_,14 @@
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MoveToSkySeeingSpot {
+-    public static OneShot<LivingEntity> create(float speedModifier) {
++    public static synchronized OneShot<LivingEntity> create(float speedModifier) {
+         return BehaviorBuilder.create(i -> i.group(i.absent(MemoryModuleType.WALK_TARGET)).apply(i, walkTarget -> (level, body, timestamp) -> {
+-            if (level.canSeeSky(body.blockPosition())) {
++            BlockPos bodyPos = body.blockPosition();
++            if (!canReadBlock(level, bodyPos) || level.canSeeSky(bodyPos)) {
+                 return false;
+             } else {
+                 Optional<Vec3> landPos = Optional.ofNullable(getOutdoorPosition(level, body));
+@@ -25,7 +_,7 @@
+         }));
+     }
+ 
+-    private static @Nullable Vec3 getOutdoorPosition(ServerLevel level, LivingEntity body) {
++    private static synchronized @Nullable Vec3 getOutdoorPosition(ServerLevel level, LivingEntity body) {
+         RandomSource random = body.getRandom();
+         BlockPos pos = body.blockPosition();
+ 
+@@ -39,7 +_,11 @@
+         return null;
+     }
+ 
+-    public static boolean hasNoBlocksAbove(ServerLevel level, LivingEntity body, BlockPos target) {
+-        return level.canSeeSky(target) && level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, target).getY() <= body.getY();
++    public static synchronized boolean hasNoBlocksAbove(ServerLevel level, LivingEntity body, BlockPos target) {
++        return canReadBlock(level, target) && level.canSeeSky(target) && level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, target).getY() <= body.getY();
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

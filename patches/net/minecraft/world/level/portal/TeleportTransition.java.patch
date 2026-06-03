@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/portal/TeleportTransition.java
++++ b/net/minecraft/world/level/portal/TeleportTransition.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.entity.Relative;
+ import net.minecraft.world.level.storage.LevelData;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public record TeleportTransition(
+     ServerLevel newLevel,
+@@ -45,7 +_,7 @@
+ 
+     private static void playPortalSound(Entity entity) {
+         if (entity instanceof ServerPlayer player) {
+-            player.connection.send(new ClientboundLevelEventPacket(1032, BlockPos.ZERO, 0, false));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundLevelEventPacket(1032, BlockPos.ZERO, 0, false));
+         }
+     }
+ 

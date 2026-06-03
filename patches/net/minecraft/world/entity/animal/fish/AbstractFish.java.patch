@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/animal/fish/AbstractFish.java
++++ b/net/minecraft/world/entity/animal/fish/AbstractFish.java
+@@ -31,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class AbstractFish extends WaterAnimal implements Bucketable {
+     private static final EntityDataAccessor<Boolean> FROM_BUCKET = SynchedEntityData.defineId(AbstractFish.class, EntityDataSerializers.BOOLEAN);
+@@ -106,7 +_,7 @@
+         this.moveRelative(0.01F, input);
+         this.move(MoverType.SELF, this.getDeltaMovement());
+         this.setDeltaMovement(this.getDeltaMovement().scale(0.9));
+-        if (this.getTarget() == null) {
++        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.getTarget()) == null) {
+             this.setDeltaMovement(this.getDeltaMovement().add(0.0, -0.005, 0.0));
+         }
+     }

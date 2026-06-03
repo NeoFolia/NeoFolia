@@ -1,0 +1,321 @@
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -77,6 +_,8 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.level.storage.LevelData;
+ import net.minecraft.world.level.storage.LevelStorageSource;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -97,6 +_,7 @@
+     private final Map<String, String> codeOfConductTexts;
+     private @Nullable ManagementServer jsonRpcServer;
+     private long lastHeartbeat;
++    private net.neoforged.neoforge.server.dedicated.@Nullable DedicatedLanServerPinger dediLanPinger;
+ 
+     public DedicatedServer(
+         Thread serverThread,
+@@ -211,6 +_,7 @@
+ 
+             @Override
+             public void run() {
++                if (net.neoforged.neoforge.server.console.TerminalHandler.handleCommands(DedicatedServer.this)) return;
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+ 
+                 String line;
+@@ -284,11 +_,13 @@
+             this.tickTimeLogger = new RemoteSampleLogger(TpsDebugDimensions.values().length, this.debugSubscribers(), RemoteDebugSampleType.TICK_TIME);
+             long levelNanoTime = Util.getNanos();
+             this.services.nameToIdCache().resolveOfflineUsers(!this.usesAuthentication());
++            net.neoforged.neoforge.server.ServerLifecycleHooks.handleServerAboutToStart(this);
+             LOGGER.info("Preparing level \"{}\"", this.getLevelIdName());
+             this.loadLevel();
+             long elapsed = Util.getNanos() - levelNanoTime;
+             String time = String.format(Locale.ROOT, "%.3fs", elapsed / 1.0E9);
+             LOGGER.info("Done ({})! For help, type \"help\"", time);
++            this.nextTickTimeNanos = Util.getNanos(); // Neo: Update server time to prevent watchdog/spamming during long load.
+             if (properties.announcePlayerAchievements != null) {
+                 this.getGameRules().set(GameRules.SHOW_ADVANCEMENT_MESSAGES, properties.announcePlayerAchievements, this);
+             }
+@@ -318,6 +_,12 @@
+ 
+             this.saveEverything(false, true, true);
+             this.notificationManager().serverStarted();
++            if (net.neoforged.neoforge.common.config.NeoForgeServerConfig.INSTANCE.advertiseDedicatedServerToLan.get()) {
++                this.dediLanPinger = new net.neoforged.neoforge.server.dedicated.DedicatedLanServerPinger(this.getMotd(), String.valueOf(this.getServerPort()));
++                this.dediLanPinger.start();
++            }
++
++            net.neoforged.neoforge.server.ServerLifecycleHooks.handleServerStarting(this);
+             return true;
+         }
+     }
+@@ -329,6 +_,10 @@
+ 
+     @Override
+     public void setEnforceWhitelist(boolean enforceWhitelist) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setEnforceWhitelist(enforceWhitelist))) {
++            return;
++        }
++
+         this.settings.update(p -> p.enforceWhitelist.update(this.registryAccess(), enforceWhitelist));
+     }
+ 
+@@ -339,6 +_,10 @@
+ 
+     @Override
+     public void setUsingWhitelist(boolean usingWhitelist) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setUsingWhitelist(usingWhitelist))) {
++            return;
++        }
++
+         this.settings.update(p -> p.whiteList.update(this.registryAccess(), usingWhitelist));
+     }
+ 
+@@ -370,13 +_,17 @@
+ 
+     @Override
+     public void sendLowDiskSpaceWarning() {
++        if (this.scheduleGlobalIfRegionized(this::sendLowDiskSpaceWarning)) {
++            return;
++        }
++
+         super.sendLowDiskSpaceWarning();
+         Permission.HasCommandLevel adminCheck = new Permission.HasCommandLevel(PermissionLevel.ADMINS);
+         this.getPlayerList()
+-            .getPlayers()
++            .getAllPlayers()
+             .stream()
+             .filter(p -> p.permissions().hasPermission(adminCheck))
+-            .forEach(p -> p.connection.send(ClientboundLowDiskSpaceWarningPacket.INSTANCE));
++            .forEach(p -> RegionizedWorldGuard.sendToPlayer(p, ClientboundLowDiskSpaceWarningPacket.INSTANCE));
+     }
+ 
+     @Override
+@@ -385,6 +_,10 @@
+     }
+ 
+     public void setAllowFlight(boolean allowed) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setAllowFlight(allowed))) {
++            return;
++        }
++
+         this.settings.update(p -> p.allowFlight.update(this.registryAccess(), allowed));
+     }
+ 
+@@ -394,6 +_,10 @@
+     }
+ 
+     public void setDifficulty(Difficulty difficulty) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setDifficulty(difficulty))) {
++            return;
++        }
++
+         this.settings.update(p -> p.difficulty.update(this.registryAccess(), difficulty));
+         this.forceDifficulty();
+     }
+@@ -408,6 +_,10 @@
+     }
+ 
+     public void setViewDistance(int viewDistance) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setViewDistance(viewDistance))) {
++            return;
++        }
++
+         this.settings.update(p -> p.viewDistance.update(this.registryAccess(), viewDistance));
+         this.getPlayerList().setViewDistance(viewDistance);
+     }
+@@ -417,6 +_,10 @@
+     }
+ 
+     public void setSimulationDistance(int simulationDistance) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setSimulationDistance(simulationDistance))) {
++            return;
++        }
++
+         this.settings.update(p -> p.simulationDistance.update(this.registryAccess(), simulationDistance));
+         this.getPlayerList().setSimulationDistance(simulationDistance);
+     }
+@@ -463,6 +_,11 @@
+             this.queryThreadGs4.stop();
+         }
+ 
++        if (this.dediLanPinger != null) {
++            this.dediLanPinger.interrupt();
++            this.dediLanPinger = null;
++        }
++
+         if (this.jsonRpcServer != null) {
+             try {
+                 this.jsonRpcServer.stop(true);
+@@ -514,6 +_,10 @@
+     }
+ 
+     public void setMaxPlayers(int maxPlayers) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setMaxPlayers(maxPlayers))) {
++            return;
++        }
++
+         this.settings.update(p -> p.maxPlayers.update(this.registryAccess(), maxPlayers));
+     }
+ 
+@@ -548,6 +_,10 @@
+     }
+ 
+     public void setSpawnProtectionRadius(int spawnProtectionRadius) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setSpawnProtectionRadius(spawnProtectionRadius))) {
++            return;
++        }
++
+         this.settings.update(p -> p.spawnProtection.update(this.registryAccess(), spawnProtectionRadius));
+     }
+ 
+@@ -577,6 +_,10 @@
+     }
+ 
+     public void setRepliesToStatus(boolean enable) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setRepliesToStatus(enable))) {
++            return;
++        }
++
+         this.settings.update(p -> p.enableStatus.update(this.registryAccess(), enable));
+     }
+ 
+@@ -586,6 +_,10 @@
+     }
+ 
+     public void setHidesOnlinePlayers(boolean hide) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setHidesOnlinePlayers(hide))) {
++            return;
++        }
++
+         this.settings.update(p -> p.hideOnlinePlayers.update(this.registryAccess(), hide));
+     }
+ 
+@@ -595,6 +_,10 @@
+     }
+ 
+     public void setOperatorUserPermissions(LevelBasedPermissionSet permissions) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setOperatorUserPermissions(permissions))) {
++            return;
++        }
++
+         this.settings.update(p -> p.opPermissions.update(this.registryAccess(), permissions));
+     }
+ 
+@@ -610,6 +_,10 @@
+ 
+     @Override
+     public void setPlayerIdleTimeout(int playerIdleTimeout) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setPlayerIdleTimeout(playerIdleTimeout))) {
++            return;
++        }
++
+         this.settings.update(p -> p.playerIdleTimeout.update(this.registryAccess(), playerIdleTimeout));
+     }
+ 
+@@ -618,6 +_,10 @@
+     }
+ 
+     public void setStatusHeartbeatInterval(int statusHeartbeatInterval) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setStatusHeartbeatInterval(statusHeartbeatInterval))) {
++            return;
++        }
++
+         this.settings.update(p -> p.statusHeartbeatInterval.update(this.registryAccess(), statusHeartbeatInterval));
+     }
+ 
+@@ -628,6 +_,10 @@
+ 
+     @Override
+     public void setMotd(String motd) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setMotd(motd))) {
++            return;
++        }
++
+         this.settings.update(p -> p.motd.update(this.registryAccess(), motd));
+     }
+ 
+@@ -752,7 +_,12 @@
+     @Override
+     protected void stopServer() {
+         this.notificationManager().serverShuttingDown();
++        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.GameShuttingDownEvent());
+         super.stopServer();
++        if (this.dediLanPinger != null) {
++            this.dediLanPinger.interrupt();
++            this.dediLanPinger = null;
++        }
+         Util.shutdownExecutors();
+     }
+ 
+@@ -771,6 +_,10 @@
+     }
+ 
+     public void setEntityBroadcastRangePercentage(int range) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setEntityBroadcastRangePercentage(range))) {
++            return;
++        }
++
+         this.settings.update(p -> p.entityBroadcastRangePercentage.update(this.registryAccess(), range));
+     }
+ 
+@@ -799,6 +_,10 @@
+     }
+ 
+     public void setForceGameMode(boolean forceGameMode) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setForceGameMode(forceGameMode))) {
++            return;
++        }
++
+         this.settings.update(p -> p.forceGameMode.update(this.registryAccess(), forceGameMode));
+         this.enforceGameTypeForPlayers(this.getForcedGameType());
+     }
+@@ -808,6 +_,10 @@
+     }
+ 
+     public void setGameMode(GameType gameMode) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setGameMode(gameMode))) {
++            return;
++        }
++
+         this.settings.update(p -> p.gameMode.update(this.registryAccess(), gameMode));
+         this.worldData.setGameType(this.gameMode());
+         this.enforceGameTypeForPlayers(this.getForcedGameType());
+@@ -840,6 +_,10 @@
+     }
+ 
+     public void setAcceptsTransfers(boolean acceptTransfers) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setAcceptsTransfers(acceptTransfers))) {
++            return;
++        }
++
+         this.settings.update(p -> p.acceptsTransfers.update(this.registryAccess(), acceptTransfers));
+     }
+ 
+@@ -854,7 +_,23 @@
+     }
+ 
+     public void setPauseWhenEmptySeconds(int seconds) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setPauseWhenEmptySeconds(seconds))) {
++            return;
++        }
++
+         this.settings.update(p -> p.pauseWhenEmptySeconds.update(this.registryAccess(), seconds));
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate dedicated server state from region worker while region dispatcher is not running");
+     }
+ 
+     private static ServerLinks createServerLinks(DedicatedServerSettings settings) {

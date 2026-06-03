@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/WakeUp.java
++++ b/net/minecraft/world/entity/ai/behavior/WakeUp.java
+@@ -5,7 +_,7 @@
+ import net.minecraft.world.entity.schedule.Activity;
+ 
+ public class WakeUp {
+-    public static BehaviorControl<LivingEntity> create() {
++    public static synchronized BehaviorControl<LivingEntity> create() {
+         return BehaviorBuilder.create(i -> i.point((level, body, timestamp) -> {
+             if (!body.getBrain().isActive(Activity.REST) && body.isSleeping()) {
+                 body.stopSleeping();

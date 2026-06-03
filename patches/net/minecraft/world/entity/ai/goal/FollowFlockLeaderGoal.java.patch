@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/entity/ai/goal/FollowFlockLeaderGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowFlockLeaderGoal.java
+@@ -4,6 +_,8 @@
+ import java.util.List;
+ import java.util.function.Predicate;
+ import net.minecraft.world.entity.animal.fish.AbstractSchoolingFish;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class FollowFlockLeaderGoal extends Goal {
+     private static final int INTERVAL_TICKS = 200;
+@@ -16,12 +_,12 @@
+         this.nextStartTick = this.nextStartTick(mob);
+     }
+ 
+-    protected int nextStartTick(AbstractSchoolingFish mob) {
++    protected synchronized int nextStartTick(AbstractSchoolingFish mob) {
+         return reducedTickDelay(200 + mob.getRandom().nextInt(200) % 20);
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.mob.hasFollowers()) {
+             return false;
+         } else if (this.mob.isFollower()) {
+@@ -32,9 +_,10 @@
+         } else {
+             this.nextStartTick = this.nextStartTick(this.mob);
+             Predicate<AbstractSchoolingFish> predicate = fish -> fish.canBeFollowed() || !fish.isFollower();
+-            List<? extends AbstractSchoolingFish> leadersWithSpaceOrNotFollowers = this.mob
+-                .level()
+-                .getEntitiesOfClass((Class<? extends AbstractSchoolingFish>)this.mob.getClass(), this.mob.getBoundingBox().inflate(8.0, 8.0, 8.0), predicate);
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(8.0, 8.0, 8.0));
++            List<? extends AbstractSchoolingFish> leadersWithSpaceOrNotFollowers = searchBox == null
++                ? List.of()
++                : List.copyOf(this.mob.level().getEntitiesOfClass((Class<? extends AbstractSchoolingFish>)this.mob.getClass(), searchBox, predicate));
+             AbstractSchoolingFish leader = DataFixUtils.orElse(
+                 leadersWithSpaceOrNotFollowers.stream().filter(AbstractSchoolingFish::canBeFollowed).findAny(), this.mob
+             );
+@@ -44,22 +_,22 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return this.mob.isFollower() && this.mob.inRangeOfLeader();
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.timeToRecalcPath = 0;
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.mob.stopFollowing();
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         if (--this.timeToRecalcPath <= 0) {
+             this.timeToRecalcPath = this.adjustedTickDelay(10);
+             this.mob.pathToLeader();

@@ -1,0 +1,131 @@
+--- a/net/minecraft/world/entity/monster/Phantom.java
++++ b/net/minecraft/world/entity/monster/Phantom.java
+@@ -39,7 +_,9 @@
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Phantom extends Mob implements Enemy {
+@@ -57,6 +_,10 @@
+         this.lookControl = new Phantom.PhantomLookControl(this);
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public boolean isFlapping() {
+         return (this.getUniqueFlapTickOffset() + this.tickCount) % TICKS_PER_FLAP == 0;
+@@ -209,6 +_,10 @@
+         return targetConditions.test(level, this, target);
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     private static enum AttackPhase {
+         CIRCLE,
+         SWOOP;
+@@ -251,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            LivingEntity target = Phantom.this.getTarget();
++            LivingEntity target = Phantom.this.regionSafeTarget(Phantom.this.getTarget());
+             return target != null ? Phantom.this.canAttack(getServerLevel(Phantom.this.level()), target, TargetingConditions.DEFAULT) : false;
+         }
+     }
+@@ -266,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity target = Phantom.this.getTarget();
++            LivingEntity target = Phantom.this.regionSafeTarget(Phantom.this.getTarget());
+             return target != null ? Phantom.this.canAttack(getServerLevel(Phantom.this.level()), target, TargetingConditions.DEFAULT) : false;
+         }
+ 
+@@ -300,8 +_,9 @@
+         }
+ 
+         private void setAnchorAboveTarget() {
+-            if (Phantom.this.anchorPoint != null) {
+-                Phantom.this.anchorPoint = Phantom.this.getTarget().blockPosition().above(20 + Phantom.this.random.nextInt(20));
++            LivingEntity target = Phantom.this.regionSafeTarget(Phantom.this.getTarget());
++            if (Phantom.this.anchorPoint != null && target != null) {
++                Phantom.this.anchorPoint = target.blockPosition().above(20 + Phantom.this.random.nextInt(20));
+                 if (Phantom.this.anchorPoint.getY() < Phantom.this.level().getSeaLevel()) {
+                     Phantom.this.anchorPoint = new BlockPos(
+                         Phantom.this.anchorPoint.getX(), Phantom.this.level().getSeaLevel() + 1, Phantom.this.anchorPoint.getZ()
+@@ -337,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            return Phantom.this.getTarget() == null || Phantom.this.attackPhase == Phantom.AttackPhase.CIRCLE;
++            return Phantom.this.regionSafeTarget(Phantom.this.getTarget()) == null || Phantom.this.attackPhase == Phantom.AttackPhase.CIRCLE;
+         }
+ 
+         @Override
+@@ -371,12 +_,18 @@
+                 this.selectNext();
+             }
+ 
+-            if (Phantom.this.moveTargetPoint.y < Phantom.this.getY() && !Phantom.this.level().isEmptyBlock(Phantom.this.blockPosition().below(1))) {
++            BlockPos below = Phantom.this.blockPosition().below(1);
++            if (Phantom.this.moveTargetPoint.y < Phantom.this.getY()
++                && Phantom.canReadBlock(Phantom.this.level(), below)
++                && !Phantom.this.level().isEmptyBlock(below)) {
+                 this.height = Math.max(1.0F, this.height);
+                 this.selectNext();
+             }
+ 
+-            if (Phantom.this.moveTargetPoint.y > Phantom.this.getY() && !Phantom.this.level().isEmptyBlock(Phantom.this.blockPosition().above(1))) {
++            BlockPos above = Phantom.this.blockPosition().above(1);
++            if (Phantom.this.moveTargetPoint.y > Phantom.this.getY()
++                && Phantom.canReadBlock(Phantom.this.level(), above)
++                && !Phantom.this.level().isEmptyBlock(above)) {
+                 this.height = Math.min(-1.0F, this.height);
+                 this.selectNext();
+             }
+@@ -477,12 +_,12 @@
+ 
+         @Override
+         public boolean canUse() {
+-            return Phantom.this.getTarget() != null && Phantom.this.attackPhase == Phantom.AttackPhase.SWOOP;
++            return Phantom.this.regionSafeTarget(Phantom.this.getTarget()) != null && Phantom.this.attackPhase == Phantom.AttackPhase.SWOOP;
+         }
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            LivingEntity target = Phantom.this.getTarget();
++            LivingEntity target = Phantom.this.regionSafeTarget(Phantom.this.getTarget());
+             if (target == null) {
+                 return false;
+             } else if (!target.isAlive()) {
+@@ -494,8 +_,10 @@
+             } else {
+                 if (Phantom.this.tickCount > this.catSearchTick) {
+                     this.catSearchTick = Phantom.this.tickCount + 20;
+-                    List<Cat> cats = Phantom.this.level()
+-                        .getEntitiesOfClass(Cat.class, Phantom.this.getBoundingBox().inflate(16.0), EntitySelector.ENTITY_STILL_ALIVE);
++                    AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(Phantom.this.level(), Phantom.this.getBoundingBox().inflate(16.0));
++                    List<Cat> cats = searchBox == null
++                        ? List.of()
++                        : Phantom.this.level().getEntitiesOfClass(Cat.class, searchBox, EntitySelector.ENTITY_STILL_ALIVE);
+ 
+                     for (Cat cat : cats) {
+                         cat.hiss();
+@@ -516,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = Phantom.this.getTarget();
++            LivingEntity target = Phantom.this.regionSafeTarget(Phantom.this.getTarget());
+             if (target != null) {
+                 Phantom.this.moveTargetPoint = new Vec3(target.getX(), target.getY(0.5), target.getZ());
+                 if (Phantom.this.getBoundingBox().inflate(0.2F).intersects(target.getBoundingBox())) {

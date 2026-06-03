@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/FoodOnAStickItem.java
++++ b/net/minecraft/world/item/FoodOnAStickItem.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.entity.ItemSteerable;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class FoodOnAStickItem<T extends Entity & ItemSteerable> extends Item {
+     private final EntityType<T> canInteractWith;
+@@ -32,7 +_,7 @@
+                 ItemStack result = itemStack.hurtAndConvertOnBreak(this.consumeItemDamage, Items.FISHING_ROD, player, slot);
+                 return InteractionResult.SUCCESS_SERVER.heldItemTransformedTo(result);
+             } else {
+-                player.awardStat(Stats.ITEM_USED.get(this));
++                RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+                 return InteractionResult.PASS;
+             }
+         }

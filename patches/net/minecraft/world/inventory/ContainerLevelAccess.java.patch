@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/inventory/ContainerLevelAccess.java
++++ b/net/minecraft/world/inventory/ContainerLevelAccess.java
+@@ -5,6 +_,8 @@
+ import java.util.function.BiFunction;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public interface ContainerLevelAccess {
+     ContainerLevelAccess NULL = new ContainerLevelAccess() {
+@@ -18,7 +_,20 @@
+         return new ContainerLevelAccess() {
+             @Override
+             public <T> Optional<T> evaluate(BiFunction<Level, BlockPos, T> action) {
++                if (RegionizedTickContext.isRegionThread() && !RegionizedWorldGuard.isRegionThreadFor(level, pos)) {
++                    return Optional.empty();
++                }
++
+                 return Optional.of(action.apply(level, pos));
++            }
++
++            @Override
++            public void execute(BiConsumer<Level, BlockPos> action) {
++                if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(level, pos, () -> action.accept(level, pos))) {
++                    return;
++                }
++
++                action.accept(level, pos);
+             }
+         };
+     }

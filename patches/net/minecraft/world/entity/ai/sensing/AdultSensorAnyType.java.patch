@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/sensing/AdultSensorAnyType.java
++++ b/net/minecraft/world/entity/ai/sensing/AdultSensorAnyType.java
+@@ -8,7 +_,7 @@
+ 
+ public class AdultSensorAnyType extends AdultSensor {
+     @Override
+-    protected void setNearestVisibleAdult(LivingEntity body, NearestVisibleLivingEntities visibleLivingEntities) {
++    protected synchronized void setNearestVisibleAdult(LivingEntity body, NearestVisibleLivingEntities visibleLivingEntities) {
+         Optional<LivingEntity> adult = visibleLivingEntities.findClosest(entity -> entity.is(EntityTypeTags.FOLLOWABLE_FRIENDLY_MOBS) && !entity.isBaby());
+         body.getBrain().setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT, adult);
+     }

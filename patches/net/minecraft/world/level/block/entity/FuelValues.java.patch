@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/level/block/entity/FuelValues.java
++++ b/net/minecraft/world/level/block/entity/FuelValues.java
+@@ -3,6 +_,7 @@
+ import it.unimi.dsi.fastutil.objects.Object2IntLinkedOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.Object2IntSortedMap;
+ import java.util.Collections;
++import java.util.LinkedHashSet;
+ import java.util.SequencedSet;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.HolderLookup;
+@@ -20,7 +_,7 @@
+     private final Object2IntSortedMap<Item> values;
+ 
+     private FuelValues(Object2IntSortedMap<Item> values) {
+-        this.values = values;
++        this.values = new Object2IntLinkedOpenHashMap<>(values);
+     }
+ 
+     public boolean isFuel(ItemStack itemStack) {
+@@ -28,9 +_,13 @@
+     }
+ 
+     public SequencedSet<Item> fuelItems() {
+-        return Collections.unmodifiableSequencedSet(this.values.keySet());
++        return Collections.unmodifiableSequencedSet(new LinkedHashSet<>(this.values.keySet()));
+     }
+ 
++    /**
++     * @deprecated Neo: use {@link ItemStack#getBurnTime(net.minecraft.world.item.crafting.RecipeType, FuelValues)} instead
++     */
++    @Deprecated
+     public int burnDuration(ItemStack itemStack) {
+         return itemStack.isEmpty() ? 0 : this.values.getInt(itemStack.getItem());
+     }
+@@ -40,7 +_,11 @@
+     }
+ 
+     public static FuelValues vanillaBurnTimes(HolderLookup.Provider registries, FeatureFlagSet enabledFeatures, int baseUnit) {
+-        return new FuelValues.Builder(registries, enabledFeatures)
++        return vanillaBurnTimes(new FuelValues.Builder(registries, enabledFeatures), baseUnit);
++    }
++
++    public static FuelValues vanillaBurnTimes(FuelValues.Builder builder, int baseUnit) {
++        return builder
+             .add(Items.LAVA_BUCKET, baseUnit * 100)
+             .add(Blocks.COAL_BLOCK, baseUnit * 8 * 10)
+             .add(Items.BLAZE_ROD, baseUnit * 12)

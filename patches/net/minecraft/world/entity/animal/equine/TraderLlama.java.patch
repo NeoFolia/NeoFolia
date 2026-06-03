@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/animal/equine/TraderLlama.java
++++ b/net/minecraft/world/entity/animal/equine/TraderLlama.java
+@@ -146,7 +_,7 @@
+             } else if (!(this.llama.getLeashHolder() instanceof WanderingTrader owner)) {
+                 return false;
+             } else {
+-                this.ownerLastHurtBy = owner.getLastHurtByMob();
++                this.ownerLastHurtBy = this.regionSafeTarget(owner.getLastHurtByMob());
+                 int timeStamp = owner.getLastHurtByMobTimestamp();
+                 return timeStamp != this.timestamp && this.canAttack(this.ownerLastHurtBy, TargetingConditions.DEFAULT);
+             }

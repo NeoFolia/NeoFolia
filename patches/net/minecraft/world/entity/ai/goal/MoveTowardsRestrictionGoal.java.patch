@@ -1,0 +1,26 @@
+--- a/net/minecraft/world/entity/ai/goal/MoveTowardsRestrictionGoal.java
++++ b/net/minecraft/world/entity/ai/goal/MoveTowardsRestrictionGoal.java
+@@ -19,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.mob.isWithinHome()) {
+             return false;
+         } else {
+@@ -36,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return !this.mob.getNavigation().isDone();
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.mob.getNavigation().moveTo(this.wantedX, this.wantedY, this.wantedZ, this.speedModifier);
+     }
+ }

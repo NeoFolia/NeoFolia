@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonDeathPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonDeathPhase.java
+@@ -18,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doClientTick() {
++    public synchronized void doClientTick() {
+         if (this.time++ % 10 == 0) {
+             float xo = (this.dragon.getRandom().nextFloat() - 0.5F) * 8.0F;
+             float yo = (this.dragon.getRandom().nextFloat() - 0.5F) * 4.0F;
+@@ -30,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         this.time++;
+         if (this.targetLocation == null) {
+             BlockPos egg = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, EndPodiumFeature.getLocation(this.dragon.getFightOrigin()));
+@@ -46,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.targetLocation = null;
+         this.time = 0;
+     }
+@@ -57,7 +_,7 @@
+     }
+ 
+     @Override
+-    public @Nullable Vec3 getFlyTargetLocation() {
++    public synchronized @Nullable Vec3 getFlyTargetLocation() {
+         return this.targetLocation;
+     }
+ 

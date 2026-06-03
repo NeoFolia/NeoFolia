@@ -1,0 +1,58 @@
+--- a/net/minecraft/server/commands/RandomCommand.java
++++ b/net/minecraft/server/commands/RandomCommand.java
+@@ -136,6 +_,10 @@
+     }
+ 
+     private static int randomSample(CommandSourceStack source, MinMaxBounds.Ints range, @Nullable Identifier sequence, boolean announce) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> randomSample(source, range, sequence, announce))) {
++            return 0;
++        }
++
+         RandomSource random;
+         if (sequence != null) {
+             random = source.getServer().getRandomSequence(sequence);
+@@ -165,6 +_,10 @@
+     }
+ 
+     private static int resetSequence(CommandSourceStack source, Identifier sequence) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetSequence(source, sequence))) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         source.getServer().getRandomSequences().reset(sequence, level.getSeed());
+         source.sendSuccess(() -> Component.translatable("commands.random.reset.success", Component.translationArg(sequence)), false);
+@@ -172,6 +_,10 @@
+     }
+ 
+     private static int resetSequence(CommandSourceStack source, Identifier sequence, int salt, boolean includeWorldSeed, boolean includeSequenceId) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetSequence(source, sequence, salt, includeWorldSeed, includeSequenceId))) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         source.getServer().getRandomSequences().reset(sequence, level.getSeed(), salt, includeWorldSeed, includeSequenceId);
+         source.sendSuccess(() -> Component.translatable("commands.random.reset.success", Component.translationArg(sequence)), false);
+@@ -179,12 +_,22 @@
+     }
+ 
+     private static int resetAllSequences(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetAllSequences(source))) {
++            return 0;
++        }
++
+         int count = source.getServer().getRandomSequences().clear();
+         source.sendSuccess(() -> Component.translatable("commands.random.reset.all.success", count), false);
+         return count;
+     }
+ 
+     private static int resetAllSequencesAndSetNewDefaults(CommandSourceStack source, int salt, boolean includeWorldSeed, boolean includeSequenceId) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(
++            source, () -> resetAllSequencesAndSetNewDefaults(source, salt, includeWorldSeed, includeSequenceId)
++        )) {
++            return 0;
++        }
++
+         RandomSequences randomSequences = source.getServer().getRandomSequences();
+         randomSequences.setSeedDefaults(salt, includeWorldSeed, includeSequenceId);
+         int count = randomSequences.clear();

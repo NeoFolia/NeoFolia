@@ -1,0 +1,64 @@
+--- a/net/minecraft/world/level/block/entity/ContainerOpenersCounter.java
++++ b/net/minecraft/world/level/block/entity/ContainerOpenersCounter.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class ContainerOpenersCounter {
+     private static final int CHECK_TICK_DELAY = 5;
+@@ -25,7 +_,7 @@
+ 
+     public abstract boolean isOwnContainer(final Player player);
+ 
+-    public void incrementOpeners(LivingEntity entity, Level level, BlockPos pos, BlockState blockState, double maxInteractionRange) {
++    public synchronized void incrementOpeners(LivingEntity entity, Level level, BlockPos pos, BlockState blockState, double maxInteractionRange) {
+         int previous = this.openCount++;
+         if (previous == 0) {
+             this.onOpen(level, pos, blockState);
+@@ -37,7 +_,7 @@
+         this.maxInteractionRange = Math.max(maxInteractionRange, this.maxInteractionRange);
+     }
+ 
+-    public void decrementOpeners(LivingEntity entity, Level level, BlockPos pos, BlockState blockState) {
++    public synchronized void decrementOpeners(LivingEntity entity, Level level, BlockPos pos, BlockState blockState) {
+         int previous = this.openCount--;
+         if (this.openCount == 0) {
+             this.onClose(level, pos, blockState);
+@@ -48,10 +_,15 @@
+         this.openerCountChanged(level, pos, blockState, previous, this.openCount);
+     }
+ 
+-    public List<ContainerUser> getEntitiesWithContainerOpen(Level level, BlockPos pos) {
++    public synchronized List<ContainerUser> getEntitiesWithContainerOpen(Level level, BlockPos pos) {
+         double range = this.maxInteractionRange + 4.0;
+         AABB searchBox = new AABB(pos).inflate(range);
+-        return level.getEntities((Entity)null, searchBox, entity -> this.hasContainerOpen(entity, pos))
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, searchBox);
++        if (regionBox == null) {
++            return List.of();
++        }
++
++        return level.getEntities((Entity)null, regionBox, entity -> this.hasContainerOpen(entity, pos))
+             .stream()
+             .map(entity -> (ContainerUser)entity)
+             .collect(Collectors.toList());
+@@ -63,7 +_,7 @@
+             : false;
+     }
+ 
+-    public void recheckOpeners(Level level, BlockPos pos, BlockState blockState) {
++    public synchronized void recheckOpeners(Level level, BlockPos pos, BlockState blockState) {
+         List<ContainerUser> containerUsers = this.getEntitiesWithContainerOpen(level, pos);
+         this.maxInteractionRange = 0.0;
+ 
+@@ -93,7 +_,7 @@
+         }
+     }
+ 
+-    public int getOpenerCount() {
++    public synchronized int getOpenerCount() {
+         return this.openCount;
+     }
+ 

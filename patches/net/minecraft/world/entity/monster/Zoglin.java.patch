@@ -1,0 +1,41 @@
+--- a/net/minecraft/world/entity/monster/Zoglin.java
++++ b/net/minecraft/world/entity/monster/Zoglin.java
+@@ -50,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Zoglin extends Monster implements HoglinBase {
+@@ -143,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        if (level.getRandom().nextFloat() < 0.2F) {
++        if (this.getRandom().nextFloat() < 0.2F) {
+             this.setBaby(true);
+         }
+ 
+@@ -190,7 +_,8 @@
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+         boolean wasHurt = super.hurtServer(level, source, damage);
+-        if (wasHurt && source.getEntity() instanceof LivingEntity attacker) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        if (wasHurt && sourceEntity instanceof LivingEntity attacker) {
+             if (this.canAttack(attacker) && !BehaviorUtils.isOtherTargetMuchFurtherAwayThanCurrentAttackTarget(this, attacker, 4.0)) {
+                 this.setAttackTarget(attacker);
+             }
+@@ -202,6 +_,11 @@
+     }
+ 
+     private void setAttackTarget(LivingEntity target) {
++        target = BehaviorUtils.regionSafeEntity(this, target);
++        if (target == null) {
++            return;
++        }
++
+         this.brain.eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+         this.brain.setMemoryWithExpiry(MemoryModuleType.ATTACK_TARGET, target, 200L);
+     }

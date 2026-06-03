@@ -1,0 +1,50 @@
+--- a/net/minecraft/world/entity/ai/behavior/WorkAtPoi.java
++++ b/net/minecraft/world/entity/ai/behavior/WorkAtPoi.java
+@@ -18,19 +_,24 @@
+         super(ImmutableMap.of(MemoryModuleType.JOB_SITE, MemoryStatus.VALUE_PRESENT, MemoryModuleType.LOOK_TARGET, MemoryStatus.REGISTERED));
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+         if (level.getGameTime() - this.lastCheck < 300L) {
+             return false;
+-        } else if (level.getRandom().nextInt(2) != 0) {
++        } else if (body.getRandom().nextInt(2) != 0) {
+             return false;
+         } else {
+             this.lastCheck = level.getGameTime();
+-            GlobalPos target = body.getBrain().getMemory(MemoryModuleType.JOB_SITE).get();
++            Optional<GlobalPos> jobSite = body.getBrain().getMemory(MemoryModuleType.JOB_SITE);
++            if (jobSite.isEmpty()) {
++                return false;
++            }
++
++            GlobalPos target = jobSite.orElseThrow();
+             return target.dimension() == level.dimension() && target.pos().closerToCenterThan(body.position(), 1.73);
+         }
+     }
+ 
+-    protected void start(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         Brain<Villager> brain = body.getBrain();
+         brain.setMemory(MemoryModuleType.LAST_WORKED_AT_POI, timestamp);
+         brain.getMemory(MemoryModuleType.JOB_SITE).ifPresent(globalPos -> brain.setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(globalPos.pos())));
+@@ -41,15 +_,15 @@
+         }
+     }
+ 
+-    protected void useWorkstation(ServerLevel level, Villager body) {
++    protected synchronized void useWorkstation(ServerLevel level, Villager body) {
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         Optional<GlobalPos> jobSiteMemory = body.getBrain().getMemory(MemoryModuleType.JOB_SITE);
+         if (jobSiteMemory.isEmpty()) {
+             return false;
+         } else {
+-            GlobalPos target = jobSiteMemory.get();
++            GlobalPos target = jobSiteMemory.orElseThrow();
+             return target.dimension() == level.dimension() && target.pos().closerToCenterThan(body.position(), 1.73);
+         }
+     }

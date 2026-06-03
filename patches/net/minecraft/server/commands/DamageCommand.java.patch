@@ -1,0 +1,144 @@
+--- a/net/minecraft/server/commands/DamageCommand.java
++++ b/net/minecraft/server/commands/DamageCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.FloatArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import net.minecraft.commands.CommandBuildContext;
+@@ -26,72 +_,27 @@
+                     Commands.argument("target", EntityArgument.entity())
+                         .then(
+                             Commands.argument("amount", FloatArgumentType.floatArg(0.0F))
+-                                .executes(
+-                                    c -> damage(
+-                                        c.getSource(),
+-                                        EntityArgument.getEntity(c, "target"),
+-                                        FloatArgumentType.getFloat(c, "amount"),
+-                                        c.getSource().getLevel().damageSources().generic()
+-                                    )
+-                                )
++                                .executes(c -> damage(c, DamageMode.GENERIC))
+                                 .then(
+                                     Commands.argument("damageType", ResourceArgument.resource(context, Registries.DAMAGE_TYPE))
+-                                        .executes(
+-                                            c -> damage(
+-                                                c.getSource(),
+-                                                EntityArgument.getEntity(c, "target"),
+-                                                FloatArgumentType.getFloat(c, "amount"),
+-                                                new DamageSource(ResourceArgument.getResource(c, "damageType", Registries.DAMAGE_TYPE))
+-                                            )
+-                                        )
++                                        .executes(c -> damage(c, DamageMode.TYPE))
+                                         .then(
+                                             Commands.literal("at")
+                                                 .then(
+                                                     Commands.argument("location", Vec3Argument.vec3())
+-                                                        .executes(
+-                                                            c -> damage(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getEntity(c, "target"),
+-                                                                FloatArgumentType.getFloat(c, "amount"),
+-                                                                new DamageSource(
+-                                                                    ResourceArgument.getResource(c, "damageType", Registries.DAMAGE_TYPE),
+-                                                                    Vec3Argument.getVec3(c, "location")
+-                                                                )
+-                                                            )
+-                                                        )
++                                                        .executes(c -> damage(c, DamageMode.AT))
+                                                 )
+                                         )
+                                         .then(
+                                             Commands.literal("by")
+                                                 .then(
+                                                     Commands.argument("entity", EntityArgument.entity())
+-                                                        .executes(
+-                                                            c -> damage(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getEntity(c, "target"),
+-                                                                FloatArgumentType.getFloat(c, "amount"),
+-                                                                new DamageSource(
+-                                                                    ResourceArgument.getResource(c, "damageType", Registries.DAMAGE_TYPE),
+-                                                                    EntityArgument.getEntity(c, "entity")
+-                                                                )
+-                                                            )
+-                                                        )
++                                                        .executes(c -> damage(c, DamageMode.BY))
+                                                         .then(
+                                                             Commands.literal("from")
+                                                                 .then(
+                                                                     Commands.argument("cause", EntityArgument.entity())
+-                                                                        .executes(
+-                                                                            c -> damage(
+-                                                                                c.getSource(),
+-                                                                                EntityArgument.getEntity(c, "target"),
+-                                                                                FloatArgumentType.getFloat(c, "amount"),
+-                                                                                new DamageSource(
+-                                                                                    ResourceArgument.getResource(c, "damageType", Registries.DAMAGE_TYPE),
+-                                                                                    EntityArgument.getEntity(c, "entity"),
+-                                                                                    EntityArgument.getEntity(c, "cause")
+-                                                                                )
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> damage(c, DamageMode.FROM))
+                                                                 )
+                                                         )
+                                                 )
+@@ -102,12 +_,53 @@
+         );
+     }
+ 
++    private static int damage(CommandContext<CommandSourceStack> context, DamageCommand.DamageMode mode) throws CommandSyntaxException {
++        CommandSourceStack stack = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(stack, () -> damage(context, mode))) {
++            return 0;
++        }
++
++        DamageSource source = switch (mode) {
++            case GENERIC -> stack.getLevel().damageSources().generic();
++            case TYPE -> new DamageSource(ResourceArgument.getResource(context, "damageType", Registries.DAMAGE_TYPE));
++            case AT -> new DamageSource(
++                ResourceArgument.getResource(context, "damageType", Registries.DAMAGE_TYPE),
++                Vec3Argument.getVec3(context, "location")
++            );
++            case BY -> new DamageSource(
++                ResourceArgument.getResource(context, "damageType", Registries.DAMAGE_TYPE),
++                EntityArgument.getEntity(context, "entity")
++            );
++            case FROM -> new DamageSource(
++                ResourceArgument.getResource(context, "damageType", Registries.DAMAGE_TYPE),
++                EntityArgument.getEntity(context, "entity"),
++                EntityArgument.getEntity(context, "cause")
++            );
++        };
++        return damage(stack, EntityArgument.getEntity(context, "target"), FloatArgumentType.getFloat(context, "amount"), source);
++    }
++
+     private static int damage(CommandSourceStack stack, Entity target, float amount, DamageSource source) throws CommandSyntaxException {
+-        if (target.hurtServer(stack.getLevel(), source, amount)) {
+-            stack.sendSuccess(() -> Component.translatable("commands.damage.success", amount, target.getDisplayName()), true);
++        DamageResult result = RegionizedCommandHelper.callOnEntityRegion(stack, target, () -> {
++            boolean hurt = target.hurtServer(stack.getLevel(), source, amount);
++            return new DamageResult(hurt, target.getDisplayName());
++        });
++        if (result.hurt()) {
++            stack.sendSuccess(() -> Component.translatable("commands.damage.success", amount, result.targetName()), true);
+             return 1;
+         } else {
+             throw ERROR_INVULNERABLE.create();
+         }
++    }
++
++    private record DamageResult(boolean hurt, Component targetName) {
++    }
++
++    private enum DamageMode {
++        GENERIC,
++        TYPE,
++        AT,
++        BY,
++        FROM
+     }
+ }

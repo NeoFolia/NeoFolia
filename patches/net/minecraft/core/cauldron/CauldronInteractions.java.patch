@@ -1,0 +1,113 @@
+--- a/net/minecraft/core/cauldron/CauldronInteractions.java
++++ b/net/minecraft/core/cauldron/CauldronInteractions.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.material.FluidState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class CauldronInteractions {
+     private static final ExtraCodecs.LateBoundIdMapper<String, CauldronInteraction.Dispatcher> ID_MAPPER = new ExtraCodecs.LateBoundIdMapper<>();
+@@ -38,12 +_,20 @@
+     public static final CauldronInteraction.Dispatcher LAVA = newDispatcher("lava");
+     public static final CauldronInteraction.Dispatcher POWDER_SNOW = newDispatcher("powder_snow");
+ 
++    /// @deprecated Neo: Use [net.neoforged.neoforge.event.RegisterCauldronInteractionEvent.Dispatcher] instead
++    @Deprecated
+     private static CauldronInteraction.Dispatcher newDispatcher(String name) {
+         CauldronInteraction.Dispatcher result = new CauldronInteraction.Dispatcher();
+         ID_MAPPER.put(name, result);
+         return result;
+     }
+ 
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public static void registerCustomInteractions() {
++        net.neoforged.fml.ModLoader.postEvent(new net.neoforged.neoforge.event.RegisterCauldronInteractionEvent.Dispatcher(ID_MAPPER));
++        net.neoforged.fml.ModLoader.postEvent(new net.neoforged.neoforge.event.RegisterCauldronInteractionEvent.Interaction(ID_MAPPER));
++    }
++
+     public static void bootStrap() {
+         addDefaultInteractions(EMPTY);
+         EMPTY.put(Items.POTION, (var0, level, pos, player, hand, itemInHand) -> {
+@@ -52,8 +_,8 @@
+                 if (!level.isClientSide()) {
+                     Item usedItem = itemInHand.getItem();
+                     player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, new ItemStack(Items.GLASS_BOTTLE)));
+-                    player.awardStat(Stats.USE_CAULDRON);
+-                    player.awardStat(Stats.ITEM_USED.get(usedItem));
++                    RegionizedWorldGuard.awardStat(player, Stats.USE_CAULDRON);
++                    RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(usedItem));
+                     level.setBlockAndUpdate(pos, Blocks.WATER_CAULDRON.defaultBlockState());
+                     level.playSound(null, pos, SoundEvents.BOTTLE_EMPTY, SoundSource.BLOCKS, 1.0F, 1.0F);
+                     level.gameEvent(null, GameEvent.FLUID_PLACE, pos);
+@@ -83,8 +_,8 @@
+             if (!level.isClientSide()) {
+                 Item usedItem = itemInHand.getItem();
+                 player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, PotionContents.createItemStack(Items.POTION, Potions.WATER)));
+-                player.awardStat(Stats.USE_CAULDRON);
+-                player.awardStat(Stats.ITEM_USED.get(usedItem));
++                RegionizedWorldGuard.awardStat(player, Stats.USE_CAULDRON);
++                RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(usedItem));
+                 LayeredCauldronBlock.lowerFillLevel(state, level, pos);
+                 level.playSound(null, pos, SoundEvents.BOTTLE_FILL, SoundSource.BLOCKS, 1.0F, 1.0F);
+                 level.gameEvent(null, GameEvent.FLUID_PICKUP, pos);
+@@ -100,8 +_,8 @@
+                 if (potion != null && potion.is(Potions.WATER)) {
+                     if (!level.isClientSide()) {
+                         player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, new ItemStack(Items.GLASS_BOTTLE)));
+-                        player.awardStat(Stats.USE_CAULDRON);
+-                        player.awardStat(Stats.ITEM_USED.get(itemInHand.getItem()));
++                        RegionizedWorldGuard.awardStat(player, Stats.USE_CAULDRON);
++                        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(itemInHand.getItem()));
+                         level.setBlockAndUpdate(pos, state.cycle(LayeredCauldronBlock.LEVEL));
+                         level.playSound(null, pos, SoundEvents.BOTTLE_EMPTY, SoundSource.BLOCKS, 1.0F, 1.0F);
+                         level.gameEvent(null, GameEvent.FLUID_PLACE, pos);
+@@ -193,8 +_,8 @@
+             if (!level.isClientSide()) {
+                 Item itemUsed = itemInHand.getItem();
+                 player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, newItem));
+-                player.awardStat(Stats.USE_CAULDRON);
+-                player.awardStat(Stats.ITEM_USED.get(itemUsed));
++                RegionizedWorldGuard.awardStat(player, Stats.USE_CAULDRON);
++                RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(itemUsed));
+                 level.setBlockAndUpdate(pos, Blocks.CAULDRON.defaultBlockState());
+                 level.playSound(null, pos, soundEvent, SoundSource.BLOCKS, 1.0F, 1.0F);
+                 level.gameEvent(null, GameEvent.FLUID_PICKUP, pos);
+@@ -210,8 +_,8 @@
+         if (!level.isClientSide()) {
+             Item itemUsed = itemInHand.getItem();
+             player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, new ItemStack(Items.BUCKET)));
+-            player.awardStat(Stats.FILL_CAULDRON);
+-            player.awardStat(Stats.ITEM_USED.get(itemUsed));
++            RegionizedWorldGuard.awardStat(player, Stats.FILL_CAULDRON);
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(itemUsed));
+             level.setBlockAndUpdate(pos, newState);
+             level.playSound(null, pos, soundEvent, SoundSource.BLOCKS, 1.0F, 1.0F);
+             level.gameEvent(null, GameEvent.FLUID_PLACE, pos);
+@@ -260,7 +_,7 @@
+             if (!level.isClientSide()) {
+                 ItemStack cleanedShulkerBox = itemInHand.transmuteCopy(Blocks.SHULKER_BOX, 1);
+                 player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, cleanedShulkerBox, false));
+-                player.awardStat(Stats.CLEAN_SHULKER_BOX);
++                RegionizedWorldGuard.awardStat(player, Stats.CLEAN_SHULKER_BOX);
+                 LayeredCauldronBlock.lowerFillLevel(state, level, pos);
+             }
+ 
+@@ -277,7 +_,7 @@
+                 ItemStack cleanedBanner = itemInHand.copyWithCount(1);
+                 cleanedBanner.set(DataComponents.BANNER_PATTERNS, patterns.removeLast());
+                 player.setItemInHand(hand, ItemUtils.createFilledResult(itemInHand, player, cleanedBanner, false));
+-                player.awardStat(Stats.CLEAN_BANNER);
++                RegionizedWorldGuard.awardStat(player, Stats.CLEAN_BANNER);
+                 LayeredCauldronBlock.lowerFillLevel(state, level, pos);
+             }
+ 
+@@ -291,7 +_,7 @@
+         } else {
+             if (!level.isClientSide()) {
+                 itemInHand.remove(DataComponents.DYED_COLOR);
+-                player.awardStat(Stats.CLEAN_ARMOR);
++                RegionizedWorldGuard.awardStat(player, Stats.CLEAN_ARMOR);
+                 LayeredCauldronBlock.lowerFillLevel(state, level, pos);
+             }
+ 

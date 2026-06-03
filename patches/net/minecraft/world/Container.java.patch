@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/Container.java
++++ b/net/minecraft/world/Container.java
+@@ -15,6 +_,8 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.entity.BlockEntity;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface Container extends Clearable, Iterable<ItemStack>, SlotProvider, net.neoforged.neoforge.common.extensions.ContainerExtension {
+@@ -96,6 +_,8 @@
+         Level level = blockEntity.getLevel();
+         BlockPos worldPosition = blockEntity.getBlockPos();
+         if (level == null) {
++            return false;
++        } else if (RegionizedTickContext.isRegionThread() && !RegionizedWorldGuard.isRegionThreadFor(level, worldPosition)) {
+             return false;
+         } else {
+             return level.getBlockEntity(worldPosition) != blockEntity ? false : player.isWithinBlockInteractionRange(worldPosition, distanceBuffer);

@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/OwnableEntity.java
++++ b/net/minecraft/world/entity/OwnableEntity.java
+@@ -3,6 +_,7 @@
+ import it.unimi.dsi.fastutil.objects.ObjectArraySet;
+ import java.util.Set;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface OwnableEntity {
+@@ -11,7 +_,7 @@
+     Level level();
+ 
+     default @Nullable LivingEntity getOwner() {
+-        return EntityReference.getLivingEntity(this.getOwnerReference(), this.level());
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), EntityReference.getLivingEntity(this.getOwnerReference(), this.level()));
+     }
+ 
+     default @Nullable LivingEntity getRootOwner() {

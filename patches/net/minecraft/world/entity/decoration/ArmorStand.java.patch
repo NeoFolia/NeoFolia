@@ -1,0 +1,71 @@
+--- a/net/minecraft/world/entity/decoration/ArmorStand.java
++++ b/net/minecraft/world/entity/decoration/ArmorStand.java
+@@ -47,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ArmorStand extends LivingEntity {
+@@ -175,7 +_,12 @@
+ 
+     @Override
+     protected void pushEntities() {
+-        for (Entity entity : this.level().getEntities(this, this.getBoundingBox(), RIDABLE_MINECARTS)) {
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox());
++        if (regionBox == null) {
++            return;
++        }
++
++        for (Entity entity : this.level().getEntities(this, regionBox, RIDABLE_MINECARTS)) {
+             if (this.distanceToSqr(entity) <= 0.2) {
+                 entity.push(this);
+             }
+@@ -264,9 +_,10 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+         if (this.isRemoved()) {
+             return false;
+-        } else if (!level.getGameRules().get(GameRules.MOB_GRIEFING) && source.getEntity() instanceof Mob) {
++        } else if (!level.getGameRules().get(GameRules.MOB_GRIEFING) && sourceEntity instanceof Mob) {
+             return false;
+         } else if (source.is(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
+             this.kill(level);
+@@ -293,7 +_,7 @@
+             boolean shouldKill = source.is(DamageTypeTags.ALWAYS_KILLS_ARMOR_STANDS);
+             if (!allowIncrementalBreaking && !shouldKill) {
+                 return false;
+-            } else if (source.getEntity() instanceof Player player && !player.getAbilities().mayBuild) {
++            } else if (sourceEntity instanceof Player player && !player.getAbilities().mayBuild) {
+                 return false;
+             } else if (source.isCreativePlayer()) {
+                 this.playBrokenSound();
+@@ -304,7 +_,7 @@
+                 long time = level.getGameTime();
+                 if (time - this.lastHit > 5L && !shouldKill) {
+                     level.broadcastEntityEvent(this, (byte)32);
+-                    this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
++                    this.gameEvent(GameEvent.ENTITY_DAMAGE, sourceEntity);
+                     this.lastHit = time;
+                 } else {
+                     this.brokenByPlayer(level, source);
+@@ -358,6 +_,7 @@
+     }
+ 
+     private void causeDamage(ServerLevel level, DamageSource source, float dmg) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+         float health = this.getHealth();
+         health -= dmg;
+         if (health <= 0.5F) {
+@@ -365,7 +_,7 @@
+             this.kill(level);
+         } else {
+             this.setHealth(health);
+-            this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
++            this.gameEvent(GameEvent.ENTITY_DAMAGE, sourceEntity);
+         }
+     }
+ 

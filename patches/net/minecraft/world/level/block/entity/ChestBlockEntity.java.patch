@@ -1,0 +1,190 @@
+--- a/net/minecraft/world/level/block/entity/ChestBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ChestBlockEntity.java
+@@ -6,8 +_,10 @@
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.NonNullList;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundSource;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.CompoundContainer;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.ContainerHelper;
+@@ -25,6 +_,7 @@
+ import net.minecraft.world.level.block.state.properties.ChestType;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class ChestBlockEntity extends RandomizableContainerBlockEntity implements LidBlockEntity {
+     private static final int EVENT_SET_OPEN_COUNT = 1;
+@@ -76,7 +_,7 @@
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return 27;
+     }
+ 
+@@ -86,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.items = NonNullList.withSize(this.getContainerSize(), ItemStack.EMPTY);
+         if (!this.tryLoadLootTable(input)) {
+@@ -95,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         if (!this.trySaveLootTable(output)) {
+             ContainerHelper.saveAllItems(output, this.items);
+@@ -103,7 +_,7 @@
+     }
+ 
+     public static void lidAnimateTick(Level level, BlockPos pos, BlockState state, ChestBlockEntity entity) {
+-        entity.chestLidController.tickLid();
++        entity.tickLid();
+     }
+ 
+     private static void playSound(Level level, BlockPos worldPosition, BlockState blockState, SoundEvent event) {
+@@ -118,12 +_,16 @@
+                 z += direction.getStepZ() * 0.5;
+             }
+ 
+-            level.playSound(null, x, y, z, event, SoundSource.BLOCKS, 0.5F, level.getRandom().nextFloat() * 0.1F + 0.9F);
++            level.playSound(null, x, y, z, event, SoundSource.BLOCKS, 0.5F, chestRandom(level).nextFloat() * 0.1F + 0.9F);
+         }
+     }
+ 
++    private static RandomSource chestRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
++    }
++
+     @Override
+-    public boolean triggerEvent(int b0, int b1) {
++    public synchronized boolean triggerEvent(int b0, int b1) {
+         if (b0 == 1) {
+             this.chestLidController.shouldBeOpen(b1 > 0);
+             return true;
+@@ -133,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void startOpen(ContainerUser containerUser) {
++    public synchronized void startOpen(ContainerUser containerUser) {
+         if (!this.remove && !containerUser.getLivingEntity().isSpectator()) {
+             this.openersCounter
+                 .incrementOpeners(
+@@ -143,29 +_,29 @@
+     }
+ 
+     @Override
+-    public void stopOpen(ContainerUser containerUser) {
++    public synchronized void stopOpen(ContainerUser containerUser) {
+         if (!this.remove && !containerUser.getLivingEntity().isSpectator()) {
+             this.openersCounter.decrementOpeners(containerUser.getLivingEntity(), this.getLevel(), this.getBlockPos(), this.getBlockState());
+         }
+     }
+ 
+     @Override
+-    public List<ContainerUser> getEntitiesWithContainerOpen() {
++    public synchronized List<ContainerUser> getEntitiesWithContainerOpen() {
+         return this.openersCounter.getEntitiesWithContainerOpen(this.getLevel(), this.getBlockPos());
+     }
+ 
+     @Override
+-    protected NonNullList<ItemStack> getItems() {
++    protected synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ 
+     @Override
+-    protected void setItems(NonNullList<ItemStack> items) {
++    protected synchronized void setItems(NonNullList<ItemStack> items) {
+         this.items = items;
+     }
+ 
+     @Override
+-    public float getOpenNess(float a) {
++    public synchronized float getOpenNess(float a) {
+         return this.chestLidController.getOpenness(a);
+     }
+ 
+@@ -182,9 +_,34 @@
+     }
+ 
+     public static void swapContents(ChestBlockEntity one, ChestBlockEntity two) {
+-        NonNullList<ItemStack> items = one.getItems();
+-        one.setItems(two.getItems());
+-        two.setItems(items);
++        if (one == two) {
++            return;
++        }
++        ChestBlockEntity first = one;
++        ChestBlockEntity second = two;
++        int oneHash = System.identityHashCode(one);
++        int twoHash = System.identityHashCode(two);
++        if (oneHash > twoHash) {
++            first = two;
++            second = one;
++        }
++        if (oneHash == twoHash) {
++            synchronized (ChestBlockEntity.class) {
++                swapContentsLocked(one, two);
++            }
++        } else {
++            synchronized (first) {
++                synchronized (second) {
++                    swapContentsLocked(one, two);
++                }
++            }
++        }
++    }
++
++    private static void swapContentsLocked(ChestBlockEntity one, ChestBlockEntity two) {
++        NonNullList<ItemStack> items = one.items;
++        one.items = two.items;
++        two.items = items;
+     }
+ 
+     @Override
+@@ -192,14 +_,29 @@
+         return ChestMenu.threeRows(containerId, inventory, this);
+     }
+ 
+-    public void recheckOpen() {
++    @Override
++    public synchronized void setBlockState(BlockState blockState) {
++        var oldState = getBlockState();
++        super.setBlockState(blockState);
++        // Neo: Chest state change might change the chest item handler -> invalidate
++        if ((oldState.getValue(ChestBlock.FACING) != blockState.getValue(ChestBlock.FACING))
++                || (oldState.getValue(ChestBlock.TYPE) != blockState.getValue(ChestBlock.TYPE))) {
++            this.invalidateCapabilities();
++        }
++    }
++
++    public synchronized void recheckOpen() {
+         if (!this.remove) {
+             this.openersCounter.recheckOpeners(this.getLevel(), this.getBlockPos(), this.getBlockState());
+         }
+     }
+ 
+-    protected void signalOpenCount(Level level, BlockPos pos, BlockState blockState, int previous, int current) {
++    protected synchronized void signalOpenCount(Level level, BlockPos pos, BlockState blockState, int previous, int current) {
+         Block block = blockState.getBlock();
+         level.blockEvent(pos, block, 1, current);
++    }
++
++    private synchronized void tickLid() {
++        this.chestLidController.tickLid();
+     }
+ }

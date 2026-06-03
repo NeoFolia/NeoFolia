@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/OminousItemSpawner.java
++++ b/net/minecraft/world/entity/OminousItemSpawner.java
+@@ -36,7 +_,7 @@
+ 
+     public static OminousItemSpawner create(Level level, ItemStack item) {
+         OminousItemSpawner itemSpawner = new OminousItemSpawner(EntityType.OMINOUS_ITEM_SPAWNER, level);
+-        itemSpawner.spawnItemAfterTicks = level.getRandom().nextIntBetweenInclusive(60, 120);
++        itemSpawner.spawnItemAfterTicks = itemSpawner.getRandom().nextIntBetweenInclusive(60, 120);
+         itemSpawner.setItem(item);
+         return itemSpawner;
+     }

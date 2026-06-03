@@ -1,0 +1,122 @@
+--- a/net/minecraft/world/entity/ai/behavior/LongJumpToRandomPos.java
++++ b/net/minecraft/world/entity/ai/behavior/LongJumpToRandomPos.java
+@@ -25,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.Path;
+ import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class LongJumpToRandomPos<E extends Mob> extends Behavior<E> {
+@@ -61,7 +_,10 @@
+     public static <E extends Mob> boolean defaultAcceptableLandingSpot(E body, BlockPos targetPos) {
+         Level level = body.level();
+         BlockPos below = targetPos.below();
+-        return level.getBlockState(below).isSolidRender() && body.getPathfindingMalus(WalkNodeEvaluator.getPathTypeStatic(body, targetPos)) == 0.0F;
++        return canReadBlock(level, below)
++            && canReadBlock(level, targetPos)
++            && level.getBlockState(below).isSolidRender()
++            && body.getPathfindingMalus(WalkNodeEvaluator.getPathTypeStatic(body, targetPos)) == 0.0F;
+     }
+ 
+     public LongJumpToRandomPos(
+@@ -91,30 +_,35 @@
+         this.acceptableLandingSpot = acceptableLandingSpot;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Mob body) {
+-        boolean canStart = body.onGround() && !body.isInWater() && !body.isInLava() && !level.getBlockState(body.blockPosition()).is(Blocks.HONEY_BLOCK);
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Mob body) {
++        BlockPos bodyPos = body.blockPosition();
++        boolean canStart = body.onGround()
++            && !body.isInWater()
++            && !body.isInLava()
++            && canReadBlock(level, bodyPos)
++            && !level.getBlockState(bodyPos).is(Blocks.HONEY_BLOCK);
+         if (!canStart) {
+-            body.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, this.timeBetweenLongJumps.sample(level.getRandom()) / 2);
++            body.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, this.timeBetweenLongJumps.sample(body.getRandom()) / 2);
+         }
+ 
+         return canStart;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
+         boolean isValid = this.initialPosition.isPresent()
+             && this.initialPosition.get().equals(body.position())
+             && this.findJumpTries > 0
+             && !body.isInWater()
+             && (this.chosenJump != null || !this.jumpCandidates.isEmpty());
+         if (!isValid && body.getBrain().getMemory(MemoryModuleType.LONG_JUMP_MID_JUMP).isEmpty()) {
+-            body.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, this.timeBetweenLongJumps.sample(level.getRandom()) / 2);
++            body.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, this.timeBetweenLongJumps.sample(body.getRandom()) / 2);
+             body.getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+         }
+ 
+         return isValid;
+     }
+ 
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+         this.chosenJump = null;
+         this.findJumpTries = 20;
+         this.initialPosition = Optional.of(body.position());
+@@ -135,7 +_,7 @@
+             .collect(Collectors.toCollection(Lists::newArrayList));
+     }
+ 
+-    protected void tick(ServerLevel level, E body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, E body, long timestamp) {
+         if (this.chosenJump != null) {
+             if (timestamp - this.prepareJumpStart >= 40L) {
+                 body.setYRot(body.yBodyRot);
+@@ -152,9 +_,9 @@
+         }
+     }
+ 
+-    protected void pickCandidate(ServerLevel level, E body, long timestamp) {
++    protected synchronized void pickCandidate(ServerLevel level, E body, long timestamp) {
+         while (!this.jumpCandidates.isEmpty()) {
+-            Optional<LongJumpToRandomPos.PossibleJump> optionalPosition = this.getJumpCandidate(level);
++            Optional<LongJumpToRandomPos.PossibleJump> optionalPosition = this.getJumpCandidate(level, body);
+             if (!optionalPosition.isEmpty()) {
+                 LongJumpToRandomPos.PossibleJump position = optionalPosition.get();
+                 BlockPos targetPos = position.targetPos();
+@@ -176,22 +_,22 @@
+         }
+     }
+ 
+-    protected Optional<LongJumpToRandomPos.PossibleJump> getJumpCandidate(ServerLevel level) {
++    protected synchronized Optional<LongJumpToRandomPos.PossibleJump> getJumpCandidate(ServerLevel level, E body) {
+         Optional<LongJumpToRandomPos.PossibleJump> randomItem = WeightedRandom.getRandomItem(
+-            level.getRandom(), this.jumpCandidates, LongJumpToRandomPos.PossibleJump::weight
++            body.getRandom(), this.jumpCandidates, LongJumpToRandomPos.PossibleJump::weight
+         );
+         randomItem.ifPresent(this.jumpCandidates::remove);
+         return randomItem;
+     }
+ 
+-    private boolean isAcceptableLandingPosition(ServerLevel level, E body, BlockPos targetPos) {
++    private synchronized boolean isAcceptableLandingPosition(ServerLevel level, E body, BlockPos targetPos) {
+         BlockPos bodyPos = body.blockPosition();
+         int mobX = bodyPos.getX();
+         int mobZ = bodyPos.getZ();
+         return mobX == targetPos.getX() && mobZ == targetPos.getZ() ? false : this.acceptableLandingSpot.test(body, targetPos);
+     }
+ 
+-    protected @Nullable Vec3 calculateOptimalJumpVector(Mob body, Vec3 targetPos) {
++    protected synchronized @Nullable Vec3 calculateOptimalJumpVector(Mob body, Vec3 targetPos) {
+         List<Integer> allowedAngles = Lists.newArrayList(ALLOWED_ANGLES);
+         Collections.shuffle(allowedAngles);
+         float maxJumpVelocity = (float)(body.getAttributeValue(Attributes.JUMP_STRENGTH) * this.maxJumpVelocityMultiplier);
+@@ -207,5 +_,9 @@
+     }
+ 
+     public record PossibleJump(BlockPos targetPos, int weight) {
++    }
++
++    protected static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

@@ -1,0 +1,105 @@
+--- a/net/minecraft/world/entity/ai/village/poi/PoiSection.java
++++ b/net/minecraft/world/entity/ai/village/poi/PoiSection.java
+@@ -42,15 +_,22 @@
+         records.forEach(this::add);
+     }
+ 
+-    public PoiSection.Packed pack() {
++    public synchronized PoiSection.Packed pack() {
+         return new PoiSection.Packed(this.isValid, this.records.values().stream().map(PoiRecord::pack).toList());
+     }
+ 
+-    public Stream<PoiRecord> getRecords(Predicate<Holder<PoiType>> predicate, PoiManager.Occupancy occupancy) {
+-        return this.byType.entrySet().stream().filter(e -> predicate.test(e.getKey())).flatMap(e -> e.getValue().stream()).filter(occupancy.getTest());
++    public synchronized Stream<PoiRecord> getRecords(Predicate<Holder<PoiType>> predicate, PoiManager.Occupancy occupancy) {
++        return this.byType
++            .entrySet()
++            .stream()
++            .filter(e -> predicate.test(e.getKey()))
++            .flatMap(e -> List.copyOf(e.getValue()).stream())
++            .filter(occupancy.getTest())
++            .toList()
++            .stream();
+     }
+ 
+-    public @Nullable PoiRecord add(BlockPos blockPos, Holder<PoiType> type) {
++    public synchronized @Nullable PoiRecord add(BlockPos blockPos, Holder<PoiType> type) {
+         PoiRecord record = new PoiRecord(blockPos, type, this.setDirty);
+         if (this.add(record)) {
+             LOGGER.debug("Added POI of type {} @ {}", type.getRegisteredName(), blockPos);
+@@ -61,7 +_,7 @@
+         }
+     }
+ 
+-    private boolean add(PoiRecord record) {
++    private synchronized boolean add(PoiRecord record) {
+         BlockPos blockPos = record.getPos();
+         Holder<PoiType> poiType = record.getPoiType();
+         short key = SectionPos.sectionRelativePos(blockPos);
+@@ -79,7 +_,7 @@
+         return true;
+     }
+ 
+-    public void remove(BlockPos pos) {
++    public synchronized void remove(BlockPos pos) {
+         PoiRecord poiRecord = this.records.remove(SectionPos.sectionRelativePos(pos));
+         if (poiRecord == null) {
+             LOGGER.error("POI data mismatch: never registered at {}", pos);
+@@ -92,11 +_,11 @@
+ 
+     @Deprecated
+     @VisibleForDebug
+-    public int getFreeTickets(BlockPos pos) {
++    public synchronized int getFreeTickets(BlockPos pos) {
+         return this.getPoiRecord(pos).map(PoiRecord::getFreeTickets).orElse(0);
+     }
+ 
+-    public boolean release(BlockPos pos) {
++    public synchronized boolean release(BlockPos pos) {
+         PoiRecord record = this.records.get(SectionPos.sectionRelativePos(pos));
+         if (record == null) {
+             throw (IllegalStateException)Util.pauseInIde(new IllegalStateException("POI never registered at " + pos));
+@@ -107,23 +_,23 @@
+         }
+     }
+ 
+-    public boolean exists(BlockPos pos, Predicate<Holder<PoiType>> predicate) {
++    public synchronized boolean exists(BlockPos pos, Predicate<Holder<PoiType>> predicate) {
+         return this.getType(pos).filter(predicate).isPresent();
+     }
+ 
+-    public Optional<Holder<PoiType>> getType(BlockPos pos) {
++    public synchronized Optional<Holder<PoiType>> getType(BlockPos pos) {
+         return this.getPoiRecord(pos).map(PoiRecord::getPoiType);
+     }
+ 
+-    private Optional<PoiRecord> getPoiRecord(BlockPos pos) {
++    private synchronized Optional<PoiRecord> getPoiRecord(BlockPos pos) {
+         return Optional.ofNullable(this.records.get(SectionPos.sectionRelativePos(pos)));
+     }
+ 
+-    public Optional<DebugPoiInfo> getDebugPoiInfo(BlockPos pos) {
++    public synchronized Optional<DebugPoiInfo> getDebugPoiInfo(BlockPos pos) {
+         return this.getPoiRecord(pos).map(DebugPoiInfo::new);
+     }
+ 
+-    public void refresh(Consumer<BiConsumer<BlockPos, Holder<PoiType>>> updater) {
++    public synchronized void refresh(Consumer<BiConsumer<BlockPos, Holder<PoiType>>> updater) {
+         if (!this.isValid) {
+             Short2ObjectMap<PoiRecord> oldRecords = new Short2ObjectOpenHashMap<>(this.records);
+             this.clear();
+@@ -137,12 +_,12 @@
+         }
+     }
+ 
+-    private void clear() {
++    private synchronized void clear() {
+         this.records.clear();
+         this.byType.clear();
+     }
+ 
+-    boolean isValid() {
++    synchronized boolean isValid() {
+         return this.isValid;
+     }
+ 

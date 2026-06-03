@@ -1,0 +1,141 @@
+--- a/net/minecraft/stats/ServerRecipeBook.java
++++ b/net/minecraft/stats/ServerRecipeBook.java
+@@ -22,6 +_,7 @@
+ import net.minecraft.world.item.crafting.RecipeHolder;
+ import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
+ import net.minecraft.world.item.crafting.display.RecipeDisplayId;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.slf4j.Logger;
+ 
+ public class ServerRecipeBook extends RecipeBook {
+@@ -37,24 +_,24 @@
+         this.displayResolver = displayResolver;
+     }
+ 
+-    public void add(ResourceKey<Recipe<?>> id) {
++    public synchronized void add(ResourceKey<Recipe<?>> id) {
+         this.known.add(id);
+     }
+ 
+-    public boolean contains(ResourceKey<Recipe<?>> id) {
++    public synchronized boolean contains(ResourceKey<Recipe<?>> id) {
+         return this.known.contains(id);
+     }
+ 
+-    public void remove(ResourceKey<Recipe<?>> id) {
++    public synchronized void remove(ResourceKey<Recipe<?>> id) {
+         this.known.remove(id);
+         this.highlight.remove(id);
+     }
+ 
+-    public void removeHighlight(ResourceKey<Recipe<?>> id) {
++    public synchronized void removeHighlight(ResourceKey<Recipe<?>> id) {
+         this.highlight.remove(id);
+     }
+ 
+-    private void addHighlight(ResourceKey<Recipe<?>> id) {
++    private synchronized void addHighlight(ResourceKey<Recipe<?>> id) {
+         this.highlight.add(id);
+     }
+ 
+@@ -63,19 +_,26 @@
+ 
+         for (RecipeHolder<?> recipe : recipes) {
+             ResourceKey<Recipe<?>> id = recipe.id();
+-            if (!this.known.contains(id) && !recipe.value().isSpecial()) {
+-                this.add(id);
+-                this.addHighlight(id);
++            boolean added;
++            synchronized (this) {
++                added = !this.known.contains(id) && !recipe.value().isSpecial();
++                if (added) {
++                    this.add(id);
++                    this.addHighlight(id);
++                }
++            }
++
++            if (added) {
+                 this.displayResolver
+                     .displaysForRecipe(
+                         id, display -> recipesToAdd.add(new ClientboundRecipeBookAddPacket.Entry(display, recipe.value().showNotification(), true))
+                     );
+-                CriteriaTriggers.RECIPE_UNLOCKED.trigger(player, recipe);
++                RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.RECIPE_UNLOCKED.trigger(player, recipe));
+             }
+         }
+ 
+         if (!recipesToAdd.isEmpty()) {
+-            player.connection.send(new ClientboundRecipeBookAddPacket(recipesToAdd, false));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundRecipeBookAddPacket(recipesToAdd, false));
+         }
+ 
+         return recipesToAdd.size();
+@@ -86,14 +_,21 @@
+ 
+         for (RecipeHolder<?> recipe : recipes) {
+             ResourceKey<Recipe<?>> id = recipe.id();
+-            if (this.known.contains(id)) {
+-                this.remove(id);
++            boolean removed;
++            synchronized (this) {
++                removed = this.known.contains(id);
++                if (removed) {
++                    this.remove(id);
++                }
++            }
++
++            if (removed) {
+                 this.displayResolver.displaysForRecipe(id, display -> recipesToRemove.add(display.id()));
+             }
+         }
+ 
+         if (!recipesToRemove.isEmpty()) {
+-            player.connection.send(new ClientboundRecipeBookRemovePacket(recipesToRemove));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundRecipeBookRemovePacket(recipesToRemove));
+         }
+ 
+         return recipesToRemove.size();
+@@ -112,25 +_,26 @@
+     }
+ 
+     public void sendInitialRecipeBook(ServerPlayer player) {
+-        player.connection.send(new ClientboundRecipeBookSettingsPacket(this.getBookSettings().copy()));
+-        List<ClientboundRecipeBookAddPacket.Entry> recipesToSend = new ArrayList<>(this.known.size());
++        ServerRecipeBook.Packed packed = this.pack();
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundRecipeBookSettingsPacket(packed.settings.copy()));
++        List<ClientboundRecipeBookAddPacket.Entry> recipesToSend = new ArrayList<>(packed.known.size());
+ 
+-        for (ResourceKey<Recipe<?>> id : this.known) {
+-            this.displayResolver.displaysForRecipe(id, r -> recipesToSend.add(new ClientboundRecipeBookAddPacket.Entry(r, false, this.highlight.contains(id))));
++        for (ResourceKey<Recipe<?>> id : packed.known) {
++            this.displayResolver.displaysForRecipe(id, r -> recipesToSend.add(new ClientboundRecipeBookAddPacket.Entry(r, false, packed.highlight.contains(id))));
+         }
+ 
+-        player.connection.send(new ClientboundRecipeBookAddPacket(recipesToSend, true));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundRecipeBookAddPacket(recipesToSend, true));
+     }
+ 
+-    public void copyOverData(ServerRecipeBook bookToCopy) {
++    public synchronized void copyOverData(ServerRecipeBook bookToCopy) {
+         this.apply(bookToCopy.pack());
+     }
+ 
+-    public ServerRecipeBook.Packed pack() {
++    public synchronized ServerRecipeBook.Packed pack() {
+         return new ServerRecipeBook.Packed(this.bookSettings.copy(), List.copyOf(this.known), List.copyOf(this.highlight));
+     }
+ 
+-    private void apply(ServerRecipeBook.Packed packed) {
++    private synchronized void apply(ServerRecipeBook.Packed packed) {
+         this.known.clear();
+         this.highlight.clear();
+         this.bookSettings.replaceFrom(packed.settings);
+@@ -138,7 +_,7 @@
+         this.highlight.addAll(packed.highlight);
+     }
+ 
+-    public void loadUntrusted(ServerRecipeBook.Packed packed, Predicate<ResourceKey<Recipe<?>>> validator) {
++    public synchronized void loadUntrusted(ServerRecipeBook.Packed packed, Predicate<ResourceKey<Recipe<?>>> validator) {
+         this.bookSettings.replaceFrom(packed.settings);
+         this.loadRecipes(packed.known, this.known::add, validator);
+         this.loadRecipes(packed.highlight, this.highlight::add, validator);

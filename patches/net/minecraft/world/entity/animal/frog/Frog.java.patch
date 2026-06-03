@@ -1,0 +1,50 @@
+--- a/net/minecraft/world/entity/animal/frog/Frog.java
++++ b/net/minecraft/world/entity/animal/frog/Frog.java
+@@ -65,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Frog extends Animal {
+@@ -240,7 +_,7 @@
+     public @Nullable AgeableMob getBreedOffspring(ServerLevel level, AgeableMob partner) {
+         Frog frog = EntityType.FROG.create(level, EntitySpawnReason.BREEDING);
+         if (frog != null) {
+-            FrogAi.initMemories(frog, level.getRandom());
++            FrogAi.initMemories(frog, frog.getRandom());
+         }
+ 
+         return frog;
+@@ -266,7 +_,7 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         VariantUtils.selectVariantToSpawn(SpawnContext.create(level, this.blockPosition()), Registries.FROG_VARIANT).ifPresent(this::setVariant);
+-        FrogAi.initMemories(this, level.getRandom());
++        FrogAi.initMemories(this, this.getRandom());
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+     }
+ 
+@@ -337,7 +_,8 @@
+     public static boolean checkFrogSpawnRules(
+         EntityType<? extends Animal> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return level.getBlockState(pos.below()).is(BlockTags.FROGS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.FROGS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
+     }
+ 
+     private class FrogLookControl extends LookControl {
+@@ -373,6 +_,11 @@
+         @Override
+         public PathType getPathType(PathfindingContext context, int x, int y, int z) {
+             this.belowPos.set(x, y - 1, z);
++            if (context.level() instanceof Level level
++                && !RegionizedWorldGuard.shouldLoadChunk(level, this.belowPos.getX() >> 4, this.belowPos.getZ() >> 4)) {
++                return PathType.BLOCKED;
++            }
++
+             BlockState belowState = context.getBlockState(this.belowPos);
+             return belowState.is(BlockTags.FROG_PREFER_JUMP_TO) ? PathType.OPEN : super.getPathType(context, x, y, z);
+         }

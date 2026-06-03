@@ -1,0 +1,72 @@
+--- a/net/minecraft/server/commands/StopSoundCommand.java
++++ b/net/minecraft/server/commands/StopSoundCommand.java
+@@ -2,6 +_,8 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+@@ -14,29 +_,30 @@
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.sounds.SoundSource;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class StopSoundCommand {
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+         RequiredArgumentBuilder<CommandSourceStack, EntitySelector> target = Commands.argument("targets", EntityArgument.players())
+-            .executes(c -> stopSound(c.getSource(), EntityArgument.getPlayers(c, "targets"), null, null))
++            .executes(c -> stopSound(c, null, null))
+             .then(
+                 Commands.literal("*")
+                     .then(
+                         Commands.argument("sound", IdentifierArgument.id())
+                             .suggests(SuggestionProviders.cast(SuggestionProviders.AVAILABLE_SOUNDS))
+-                            .executes(c -> stopSound(c.getSource(), EntityArgument.getPlayers(c, "targets"), null, IdentifierArgument.getId(c, "sound")))
++                            .executes(c -> stopSound(c, null, IdentifierArgument.getId(c, "sound")))
+                     )
+             );
+ 
+         for (SoundSource source : SoundSource.values()) {
+             target.then(
+                 Commands.literal(source.getName())
+-                    .executes(c -> stopSound(c.getSource(), EntityArgument.getPlayers(c, "targets"), source, null))
++                    .executes(c -> stopSound(c, source, null))
+                     .then(
+                         Commands.argument("sound", IdentifierArgument.id())
+                             .suggests(SuggestionProviders.cast(SuggestionProviders.AVAILABLE_SOUNDS))
+-                            .executes(c -> stopSound(c.getSource(), EntityArgument.getPlayers(c, "targets"), source, IdentifierArgument.getId(c, "sound")))
++                            .executes(c -> stopSound(c, source, IdentifierArgument.getId(c, "sound")))
+                     )
+             );
+         }
+@@ -44,11 +_,24 @@
+         dispatcher.register(Commands.literal("stopsound").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).then(target));
+     }
+ 
++    private static int stopSound(CommandContext<CommandSourceStack> context, @Nullable SoundSource soundSource, @Nullable Identifier sound)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> stopSound(context, soundSource, sound))) {
++            return 0;
++        }
++
++        return stopSound(source, EntityArgument.getPlayers(context, "targets"), soundSource, sound);
++    }
++
+     private static int stopSound(CommandSourceStack source, Collection<ServerPlayer> targets, @Nullable SoundSource soundSource, @Nullable Identifier sound) {
+         ClientboundStopSoundPacket packet = new ClientboundStopSoundPacket(sound, soundSource);
+ 
+         for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
++            RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                RegionizedWorldGuard.sendToPlayer(player, packet);
++                return null;
++            });
+         }
+ 
+         if (soundSource != null) {

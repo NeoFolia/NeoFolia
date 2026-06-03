@@ -1,0 +1,37 @@
+--- a/net/minecraft/world/entity/decoration/HangingEntity.java
++++ b/net/minecraft/world/entity/decoration/HangingEntity.java
+@@ -20,6 +_,7 @@
+ import net.minecraft.world.level.entity.EntityTypeTest;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.Validate;
+ 
+ public abstract class HangingEntity extends BlockAttachedEntity {
+@@ -83,12 +_,22 @@
+         if (this.hasLevelCollision(this.getPopBox())) {
+             return false;
+         } else {
+-            boolean isSupported = BlockPos.betweenClosedStream(this.calculateSupportBox()).allMatch(pos -> {
+-                BlockState state = this.level().getBlockState(pos);
+-                return state.isSolid() || DiodeBlock.isDiode(state);
+-            });
++            boolean isSupported = BlockPos.betweenClosedStream(this.calculateSupportBox()).allMatch(this::isSupportedByRegionSafeBlock);
+             return isSupported && this.canCoexist(false);
+         }
++    }
++
++    private boolean isSupportedByRegionSafeBlock(BlockPos pos) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4)) {
++            return false;
++        }
++
++        if (net.minecraft.world.level.block.Block.canSupportCenter(this.level(), pos, this.getDirection())) {
++            return true;
++        }
++
++        BlockState state = this.level().getBlockState(pos);
++        return state.isSolid() || DiodeBlock.isDiode(state);
+     }
+ 
+     protected AABB calculateSupportBox() {

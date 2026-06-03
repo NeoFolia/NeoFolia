@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/monster/piglin/RememberIfHoglinWasKilled.java
++++ b/net/minecraft/world/entity/monster/piglin/RememberIfHoglinWasKilled.java
+@@ -13,7 +_,7 @@
+                 .apply(i, (attackTarget, huntedRecently) -> (level, body, timestamp) -> {
+                     LivingEntity target = i.get(attackTarget);
+                     if (target.is(EntityType.HOGLIN) && target.isDeadOrDying()) {
+-                        huntedRecently.setWithExpiry(true, PiglinAi.TIME_BETWEEN_HUNTS.sample(body.level().getRandom()));
++                        huntedRecently.setWithExpiry(true, PiglinAi.TIME_BETWEEN_HUNTS.sample(body.getRandom()));
+                     }
+ 
+                     return true;

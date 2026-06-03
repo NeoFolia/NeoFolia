@@ -1,0 +1,52 @@
+--- a/net/minecraft/world/entity/animal/squid/Squid.java
++++ b/net/minecraft/world/entity/animal/squid/Squid.java
+@@ -31,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.material.FluidState;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Squid extends AgeableWaterCreature {
+@@ -176,7 +_,7 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+-        if (super.hurtServer(level, source, damage) && this.getLastHurtByMob() != null) {
++        if (super.hurtServer(level, source, damage) && RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.getLastHurtByMob()) != null) {
+             this.spawnInk();
+             return true;
+         } else {
+@@ -249,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity entity = Squid.this.getLastHurtByMob();
++            LivingEntity entity = RegionizedWorldGuard.restrictEntityToCurrentRegion(Squid.this.level(), Squid.this.getLastHurtByMob());
+             return Squid.this.isInWater() && entity != null ? Squid.this.distanceToSqr(entity) < 100.0 : false;
+         }
+ 
+@@ -266,15 +_,18 @@
+         @Override
+         public void tick() {
+             this.fleeTicks++;
+-            LivingEntity lastHurtByMob = Squid.this.getLastHurtByMob();
++            LivingEntity lastHurtByMob = RegionizedWorldGuard.restrictEntityToCurrentRegion(Squid.this.level(), Squid.this.getLastHurtByMob());
+             if (lastHurtByMob != null) {
+                 Vec3 fleeTo = new Vec3(
+                     Squid.this.getX() - lastHurtByMob.getX(), Squid.this.getY() - lastHurtByMob.getY(), Squid.this.getZ() - lastHurtByMob.getZ()
+                 );
+-                BlockState blockState = Squid.this.level()
+-                    .getBlockState(BlockPos.containing(Squid.this.getX() + fleeTo.x, Squid.this.getY() + fleeTo.y, Squid.this.getZ() + fleeTo.z));
+-                FluidState fluidState = Squid.this.level()
+-                    .getFluidState(BlockPos.containing(Squid.this.getX() + fleeTo.x, Squid.this.getY() + fleeTo.y, Squid.this.getZ() + fleeTo.z));
++                BlockPos fleePos = BlockPos.containing(Squid.this.getX() + fleeTo.x, Squid.this.getY() + fleeTo.y, Squid.this.getZ() + fleeTo.z);
++                if (!RegionizedWorldGuard.shouldLoadChunk(Squid.this.level(), fleePos.getX() >> 4, fleePos.getZ() >> 4)) {
++                    return;
++                }
++
++                BlockState blockState = Squid.this.level().getBlockState(fleePos);
++                FluidState fluidState = Squid.this.level().getFluidState(fleePos);
+                 if (fluidState.is(FluidTags.WATER) || blockState.isAir()) {
+                     double length = fleeTo.length();
+                     if (length > 0.0) {

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/goal/RandomSwimmingGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RandomSwimmingGoal.java
+@@ -11,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected @Nullable Vec3 getPosition() {
++    protected synchronized @Nullable Vec3 getPosition() {
+         return BehaviorUtils.getRandomSwimmablePos(this.mob, 10, 7);
+     }
+ }

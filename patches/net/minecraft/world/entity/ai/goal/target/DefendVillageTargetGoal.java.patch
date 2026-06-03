@@ -1,0 +1,46 @@
+--- a/net/minecraft/world/entity/ai/goal/target/DefendVillageTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/DefendVillageTargetGoal.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.entity.npc.villager.Villager;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class DefendVillageTargetGoal extends TargetGoal {
+@@ -24,11 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
++        this.potentialTarget = null;
+         AABB grow = this.golem.getBoundingBox().inflate(10.0, 8.0, 10.0);
+         ServerLevel level = getServerLevel(this.golem);
+-        List<? extends LivingEntity> villagers = level.getNearbyEntities(Villager.class, this.attackTargeting, this.golem, grow);
+-        List<Player> players = level.getNearbyPlayers(this.attackTargeting, this.golem, grow);
++        grow = RegionizedWorldGuard.restrictToCurrentRegion(level, grow);
++        List<? extends LivingEntity> villagers = grow == null ? List.of() : List.copyOf(level.getNearbyEntities(Villager.class, this.attackTargeting, this.golem, grow));
++        List<Player> players = grow == null ? List.of() : List.copyOf(level.getNearbyPlayers(this.attackTargeting, this.golem, grow));
+ 
+         for (LivingEntity livingEntity : villagers) {
+             Villager villager = (Villager)livingEntity;
+@@ -41,12 +_,16 @@
+             }
+         }
+ 
++        this.potentialTarget = this.regionSafeTarget(this.potentialTarget);
+         return this.potentialTarget == null ? false : !(this.potentialTarget instanceof Player playerx && (playerx.isSpectator() || playerx.isCreative()));
+     }
+ 
+     @Override
+-    public void start() {
+-        this.golem.setTarget(this.potentialTarget);
++    public synchronized void start() {
++        LivingEntity target = this.regionSafeTarget(this.potentialTarget);
++        if (target != null) {
++            this.golem.setTarget(target);
++        }
+         super.start();
+     }
+ }

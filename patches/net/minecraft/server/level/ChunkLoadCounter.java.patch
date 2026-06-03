@@ -1,0 +1,44 @@
+--- a/net/minecraft/server/level/ChunkLoadCounter.java
++++ b/net/minecraft/server/level/ChunkLoadCounter.java
+@@ -13,28 +_,34 @@
+     public void track(ServerLevel level, Runnable scheduler) {
+         ServerChunkCache chunkSource = level.getChunkSource();
+         LongSet alreadyLoadedChunks = new LongOpenHashSet();
++        List<ChunkHolder> newlyPendingChunks = new ArrayList<>();
+         chunkSource.runDistanceManagerUpdates();
+         chunkSource.chunkMap.allChunksWithAtLeastStatus(ChunkStatus.FULL).forEach(chunkHolder -> alreadyLoadedChunks.add(chunkHolder.getPos().pack()));
+         scheduler.run();
+         chunkSource.runDistanceManagerUpdates();
+         chunkSource.chunkMap.allChunksWithAtLeastStatus(ChunkStatus.FULL).forEach(chunkHolder -> {
+             if (!alreadyLoadedChunks.contains(chunkHolder.getPos().pack())) {
+-                this.pendingChunks.add(chunkHolder);
+-                this.totalChunks++;
++                newlyPendingChunks.add(chunkHolder);
+             }
+         });
+-    }
+-
+-    public int readyChunks() {
++        this.trackPendingChunks(newlyPendingChunks);
++    }
++
++    private synchronized void trackPendingChunks(List<ChunkHolder> chunks) {
++        this.pendingChunks.addAll(chunks);
++        this.totalChunks += chunks.size();
++    }
++
++    public synchronized int readyChunks() {
+         return this.totalChunks - this.pendingChunks();
+     }
+ 
+-    public int pendingChunks() {
++    public synchronized int pendingChunks() {
+         this.pendingChunks.removeIf(chunkHolder -> chunkHolder.getLatestStatus() == ChunkStatus.FULL);
+         return this.pendingChunks.size();
+     }
+ 
+-    public int totalChunks() {
++    public synchronized int totalChunks() {
+         return this.totalChunks;
+     }
+ }

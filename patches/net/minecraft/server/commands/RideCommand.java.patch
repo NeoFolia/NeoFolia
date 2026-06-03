@@ -1,0 +1,128 @@
+--- a/net/minecraft/server/commands/RideCommand.java
++++ b/net/minecraft/server/commands/RideCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
+@@ -9,8 +_,11 @@
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.EntityArgument;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntityType;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class RideCommand {
+     private static final DynamicCommandExceptionType ERROR_NOT_RIDING = new DynamicCommandExceptionType(
+@@ -42,40 +_,81 @@
+                             Commands.literal("mount")
+                                 .then(
+                                     Commands.argument("vehicle", EntityArgument.entity())
+-                                        .executes(c -> mount(c.getSource(), EntityArgument.getEntity(c, "target"), EntityArgument.getEntity(c, "vehicle")))
++                                        .executes(RideCommand::mount)
+                                 )
+                         )
+-                        .then(Commands.literal("dismount").executes(c -> dismount(c.getSource(), EntityArgument.getEntity(c, "target"))))
++                        .then(Commands.literal("dismount").executes(RideCommand::dismount))
+                 )
+         );
+     }
+ 
++    private static int mount(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> mount(context))) {
++            return 0;
++        }
++
++        return mount(source, EntityArgument.getEntity(context, "target"), EntityArgument.getEntity(context, "vehicle"));
++    }
++
+     private static int mount(CommandSourceStack source, Entity target, Entity vehicle) throws CommandSyntaxException {
+-        Entity currentVehicle = target.getVehicle();
+-        if (currentVehicle != null) {
+-            throw ERROR_ALREADY_RIDING.create(target.getDisplayName(), currentVehicle.getDisplayName());
+-        } else if (vehicle.is(EntityType.PLAYER)) {
+-            throw ERROR_MOUNTING_PLAYER.create();
+-        } else if (target.getSelfAndPassengers().anyMatch(e -> e == vehicle)) {
+-            throw ERROR_MOUNTING_LOOP.create();
+-        } else if (target.level() != vehicle.level()) {
++        if (target.level() != vehicle.level()) {
+             throw ERROR_WRONG_DIMENSION.create();
+-        } else if (!target.startRiding(vehicle, true, true)) {
+-            throw ERROR_MOUNT_FAILED.create(target.getDisplayName(), vehicle.getDisplayName());
+-        } else {
+-            source.sendSuccess(() -> Component.translatable("commands.ride.mount.success", target.getDisplayName(), vehicle.getDisplayName()), true);
+-            return 1;
+-        }
++        }
++
++        if (source.getServer().regionizedTaskDispatcher().isRunning()) {
++            RegionKey targetRegion = RegionizedWorldGuard.regionFor((ServerLevel)target.level(), target.blockPosition());
++            RegionKey vehicleRegion = RegionizedWorldGuard.regionFor((ServerLevel)vehicle.level(), vehicle.blockPosition());
++            if (!targetRegion.equals(vehicleRegion)) {
++                Component targetName = RegionizedCommandHelper.callOnEntityRegion(source, target, target::getDisplayName);
++                Component vehicleName = RegionizedCommandHelper.callOnEntityRegion(source, vehicle, vehicle::getDisplayName);
++                throw ERROR_MOUNT_FAILED.create(targetName, vehicleName);
++            }
++        }
++
++        MountResult result = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            Entity currentVehicle = target.getVehicle();
++            if (currentVehicle != null) {
++                throw ERROR_ALREADY_RIDING.create(target.getDisplayName(), currentVehicle.getDisplayName());
++            } else if (vehicle.is(EntityType.PLAYER)) {
++                throw ERROR_MOUNTING_PLAYER.create();
++            } else if (target.getSelfAndPassengers().anyMatch(e -> e == vehicle)) {
++                throw ERROR_MOUNTING_LOOP.create();
++            } else if (!target.startRiding(vehicle, true, true)) {
++                throw ERROR_MOUNT_FAILED.create(target.getDisplayName(), vehicle.getDisplayName());
++            } else {
++                return new MountResult(target.getDisplayName(), vehicle.getDisplayName());
++            }
++        });
++        source.sendSuccess(() -> Component.translatable("commands.ride.mount.success", result.targetName(), result.vehicleName()), true);
++        return 1;
++    }
++
++    private static int dismount(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> dismount(context))) {
++            return 0;
++        }
++
++        return dismount(source, EntityArgument.getEntity(context, "target"));
+     }
+ 
+     private static int dismount(CommandSourceStack source, Entity target) throws CommandSyntaxException {
+-        Entity vehicle = target.getVehicle();
+-        if (vehicle == null) {
+-            throw ERROR_NOT_RIDING.create(target.getDisplayName());
+-        } else {
+-            target.stopRiding();
+-            source.sendSuccess(() -> Component.translatable("commands.ride.dismount.success", target.getDisplayName(), vehicle.getDisplayName()), true);
+-            return 1;
+-        }
++        MountResult result = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            Entity vehicle = target.getVehicle();
++            if (vehicle == null) {
++                throw ERROR_NOT_RIDING.create(target.getDisplayName());
++            } else {
++                Component targetName = target.getDisplayName();
++                Component vehicleName = vehicle.getDisplayName();
++                target.stopRiding();
++                return new MountResult(targetName, vehicleName);
++            }
++        });
++        source.sendSuccess(() -> Component.translatable("commands.ride.dismount.success", result.targetName(), result.vehicleName()), true);
++        return 1;
++    }
++
++    private record MountResult(Component targetName, Component vehicleName) {
+     }
+ }

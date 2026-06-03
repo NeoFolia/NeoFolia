@@ -1,0 +1,86 @@
+--- a/net/minecraft/world/entity/ai/goal/AvoidEntityGoal.java
++++ b/net/minecraft/world/entity/ai/goal/AvoidEntityGoal.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.world.entity.ai.goal;
+ 
+ import java.util.EnumSet;
++import java.util.List;
+ import java.util.function.Predicate;
+ import net.minecraft.world.entity.EntitySelector;
+ import net.minecraft.world.entity.LivingEntity;
+@@ -9,7 +_,9 @@
+ import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+ import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+ import net.minecraft.world.level.pathfinder.Path;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class AvoidEntityGoal<T extends LivingEntity> extends Goal {
+@@ -64,16 +_,19 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(this.maxDist, 3.0, this.maxDist));
++        List<T> candidates = searchBox == null ? List.of() : List.copyOf(this.mob.level().getEntitiesOfClass(this.avoidClass, searchBox, entity -> true));
+         this.toAvoid = getServerLevel(this.mob)
+             .getNearestEntity(
+-                this.mob.level().getEntitiesOfClass(this.avoidClass, this.mob.getBoundingBox().inflate(this.maxDist, 3.0, this.maxDist), entity -> true),
++                candidates,
+                 this.avoidEntityTargeting,
+                 this.mob,
+                 this.mob.getX(),
+                 this.mob.getY(),
+                 this.mob.getZ()
+             );
++        this.toAvoid = this.regionSafeAvoid(this.toAvoid);
+         if (this.toAvoid == null) {
+             return false;
+         } else {
+@@ -90,26 +_,37 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return !this.pathNav.isDone();
+     }
+ 
+     @Override
+-    public void start() {
+-        this.pathNav.moveTo(this.path, this.walkSpeedModifier);
++    public synchronized void start() {
++        if (this.path != null) {
++            this.pathNav.moveTo(this.path, this.walkSpeedModifier);
++        }
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.toAvoid = null;
++        this.path = null;
+     }
+ 
+     @Override
+-    public void tick() {
+-        if (this.mob.distanceToSqr(this.toAvoid) < 49.0) {
++    public synchronized void tick() {
++        T target = this.regionSafeAvoid(this.toAvoid);
++        if (target == null) {
++            return;
++        }
++        if (this.mob.distanceToSqr(target) < 49.0) {
+             this.mob.getNavigation().setSpeedModifier(this.sprintSpeedModifier);
+         } else {
+             this.mob.getNavigation().setSpeedModifier(this.walkSpeedModifier);
+         }
++    }
++
++    protected synchronized @Nullable T regionSafeAvoid(@Nullable T target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

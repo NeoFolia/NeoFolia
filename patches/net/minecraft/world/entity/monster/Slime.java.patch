@@ -1,0 +1,117 @@
+--- a/net/minecraft/world/entity/monster/Slime.java
++++ b/net/minecraft/world/entity/monster/Slime.java
+@@ -47,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.scores.PlayerTeam;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Slime extends Mob implements Enemy {
+@@ -139,6 +_,8 @@
+             float size = this.getDimensions(this.getPose()).width() * 2.0F;
+             float radius = size / 2.0F;
+ 
++            // Forge: Don't spawn particles if it's handled by the implementation itself
++            if (!spawnCustomParticles())
+             for (int i = 0; i < size * 16.0F; i++) {
+                 float dir = this.random.nextFloat() * (float) (Math.PI * 2);
+                 float d = this.random.nextFloat() * 0.5F + 0.5F;
+@@ -203,13 +_,22 @@
+             int count = 2 + this.random.nextInt(3);
+             PlayerTeam team = this.getTeam();
+ 
++            var children = new java.util.ArrayList<Mob>(); // Neo: Children list for MobSplitEvent.
++
++            this.preventConversionSpawns = true;
+             for (int i = 0; i < count; i++) {
+                 float xd = (i % 2 - 0.5F) * xzSlimeSpawnOffset;
+                 float zd = (i / 2 - 0.5F) * xzSlimeSpawnOffset;
+-                this.convertTo(this.getType(), new ConversionParams(ConversionType.SPLIT_ON_DEATH, false, false, team), EntitySpawnReason.TRIGGERED, slime -> {
++                Slime child = this.convertTo(this.getType(), new ConversionParams(ConversionType.SPLIT_ON_DEATH, false, false, team), EntitySpawnReason.TRIGGERED, slime -> {
+                     slime.setSize(halfSize, true);
+                     slime.snapTo(this.getX() + xd, this.getY() + 0.5, this.getZ() + zd, this.random.nextFloat() * 360.0F, 0.0F);
+                 });
++                children.add(child); // Neo: Record the slime until after event firing.
++            }
++            this.preventConversionSpawns = false;
++
++            if (!net.neoforged.neoforge.event.EventHooks.onMobSplit(this, children).isCanceled()) {
++                children.forEach(this.level()::addFreshEntity);
+             }
+         }
+ 
+@@ -314,13 +_,14 @@
+         Vec3 movement = this.getDeltaMovement();
+         this.setDeltaMovement(movement.x, this.getJumpPower(), movement.z);
+         this.needsSync = true;
++        net.neoforged.neoforge.common.CommonHooks.onLivingJump(this);
+     }
+ 
+     @Override
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         int sizeScale = random.nextInt(3);
+         if (sizeScale < 2 && random.nextFloat() < 0.5F * difficulty.getSpecialMultiplier()) {
+             sizeScale++;
+@@ -340,11 +_,21 @@
+         return this.isTiny() ? SoundEvents.SLIME_JUMP_SMALL : SoundEvents.SLIME_JUMP;
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     @Override
+     public EntityDimensions getDefaultDimensions(Pose pose) {
+         return super.getDefaultDimensions(pose).scale(this.getSize());
+     }
+ 
++    /**
++     * Called when the slime spawns particles on landing, see onUpdate.
++     * Return true to prevent the spawning of the default particles.
++     */
++    protected boolean spawnCustomParticles() { return false; }
++
+     private static class SlimeAttackGoal extends Goal {
+         private final Slime slime;
+         private int growTiredTimer;
+@@ -356,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity target = this.slime.getTarget();
++            LivingEntity target = this.slime.regionSafeTarget(this.slime.getTarget());
+             if (target == null) {
+                 return false;
+             } else {
+@@ -372,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            LivingEntity target = this.slime.getTarget();
++            LivingEntity target = this.slime.regionSafeTarget(this.slime.getTarget());
+             if (target == null) {
+                 return false;
+             } else {
+@@ -387,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = this.slime.getTarget();
++            LivingEntity target = this.slime.regionSafeTarget(this.slime.getTarget());
+             if (target != null) {
+                 this.slime.lookAt(target, 10.0F, 10.0F);
+             }
+@@ -517,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            return this.slime.getTarget() == null
++            return this.slime.regionSafeTarget(this.slime.getTarget()) == null
+                 && (this.slime.onGround() || this.slime.isInWater() || this.slime.isInLava() || this.slime.hasEffect(MobEffects.LEVITATION))
+                 && this.slime.getMoveControl() instanceof Slime.SlimeMoveControl;
+         }

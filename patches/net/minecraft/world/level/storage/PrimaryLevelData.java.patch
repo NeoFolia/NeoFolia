@@ -1,0 +1,299 @@
+--- a/net/minecraft/world/level/storage/PrimaryLevelData.java
++++ b/net/minecraft/world/level/storage/PrimaryLevelData.java
+@@ -42,6 +_,7 @@
+     private final Set<String> knownServerBrands;
+     private boolean wasModded;
+     private final Set<String> removedFeatureFlags;
++    private boolean confirmedExperimentalWarning = false;
+ 
+     private PrimaryLevelData(
+         @Nullable UUID singlePlayerUUID,
+@@ -90,7 +_,7 @@
+     ) {
+         long gameTime = input.get("Time").asLong(0L);
+         LevelVersion levelVersion = LevelVersion.parse(input);
+-        return new PrimaryLevelData(
++        var result = new PrimaryLevelData(
+             input.get("singleplayer_uuid").flatMap(UUIDUtil.CODEC::parse).result().orElse(null),
+             input.get("WasModded").asBoolean(false),
+             input.get("spawn").read(LevelData.RespawnData.CODEC).result().orElse(LevelData.RespawnData.DEFAULT),
+@@ -98,15 +_,20 @@
+             levelVersion.levelDataVersion(),
+             input.get("initialized").asBoolean(true),
+             input.get("ServerBrands").asStream().flatMap(b -> b.asString().result().stream()).collect(Collectors.toCollection(Sets::newLinkedHashSet)),
+-            input.get("removed_features").asStream().flatMap(b -> b.asString().result().stream()).collect(Collectors.toSet()),
++            // Neo: Append removed modded feature flags
++            updateRemovedFeatureFlags(input.get("removed_features").asStream().flatMap(b -> b.asString().result().stream()), input.get("enabled_features").asStream().flatMap(features -> features.asString().result().stream())).collect(Collectors.toSet()),
+             settings,
+             specialWorldProperty,
+             worldGenSettingsLifecycle
+-        );
++        ).withConfirmedWarning(worldGenSettingsLifecycle != Lifecycle.stable() && input.get("confirmedExperimentalSettings").asBoolean(false));
++        // Neo:
++        result.setDayTimeFraction(input.get("neoDayTimeFraction").asFloat(0f));
++        result.setDayTimePerTick(input.get("neoDayTimePerTick").asFloat(-1f));
++        return result;
+     }
+ 
+     @Override
+-    public CompoundTag createTag(@Nullable UUID singlePlayerUUID) {
++    public synchronized CompoundTag createTag(@Nullable UUID singlePlayerUUID) {
+         if (singlePlayerUUID == null) {
+             singlePlayerUUID = this.singlePlayerUUID;
+         }
+@@ -116,7 +_,7 @@
+         return tag;
+     }
+ 
+-    private void setTagData(CompoundTag tag, @Nullable UUID singlePlayerUUID) {
++    private synchronized void setTagData(CompoundTag tag, @Nullable UUID singlePlayerUUID) {
+         tag.put("ServerBrands", stringCollectionToTag(this.knownServerBrands));
+         tag.putBoolean("WasModded", this.wasModded);
+         if (!this.removedFeatureFlags.isEmpty()) {
+@@ -139,6 +_,12 @@
+         }
+ 
+         tag.store(WorldDataConfiguration.MAP_CODEC, this.settings.dataConfiguration());
++
++        // Neo:
++        tag.putString("forgeLifecycle", net.neoforged.neoforge.common.CommonHooks.encodeLifecycle(this.settings.getLifecycle()));
++        tag.putBoolean("confirmedExperimentalSettings", this.confirmedExperimentalWarning);
++        tag.putFloat("neoDayTimeFraction", dayTimeFraction);
++        tag.putFloat("neoDayTimePerTick", dayTimePerTick);
+     }
+ 
+     public static void writeLastPlayed(CompoundTag tag) {
+@@ -174,156 +_,204 @@
+     }
+ 
+     @Override
+-    public LevelData.RespawnData getRespawnData() {
++    public synchronized LevelData.RespawnData getRespawnData() {
+         return this.respawnData;
+     }
+ 
+     @Override
+-    public long getGameTime() {
++    public synchronized long getGameTime() {
+         return this.gameTime;
+     }
+ 
+     @Override
+-    public @Nullable UUID getSinglePlayerUUID() {
++    public synchronized @Nullable UUID getSinglePlayerUUID() {
+         return this.singlePlayerUUID;
+     }
+ 
+     @Override
+-    public void setGameTime(long time) {
++    public synchronized void setGameTime(long time) {
+         this.gameTime = time;
+     }
+ 
+     @Override
+-    public void setSpawn(LevelData.RespawnData respawnData) {
++    public synchronized void setSpawn(LevelData.RespawnData respawnData) {
+         this.respawnData = respawnData;
+     }
+ 
+     @Override
+-    public String getLevelName() {
++    public synchronized String getLevelName() {
+         return this.settings.levelName();
+     }
+ 
+     @Override
+-    public int getVersion() {
++    public synchronized int getVersion() {
+         return this.version;
+     }
+ 
+     @Override
+-    public GameType getGameType() {
++    public synchronized GameType getGameType() {
+         return this.settings.gameType();
+     }
+ 
+     @Override
+-    public void setGameType(GameType gameType) {
++    public synchronized void setGameType(GameType gameType) {
+         this.settings = this.settings.withGameType(gameType);
+     }
+ 
+     @Override
+-    public boolean isHardcore() {
++    public synchronized boolean isHardcore() {
+         return this.settings.difficultySettings().hardcore();
+     }
+ 
+     @Override
+-    public boolean isAllowCommands() {
++    public synchronized boolean isAllowCommands() {
+         return this.settings.allowCommands();
+     }
+ 
+     @Override
+-    public boolean isInitialized() {
++    public synchronized boolean isInitialized() {
+         return this.initialized;
+     }
+ 
+     @Override
+-    public void setInitialized(boolean initialized) {
++    public synchronized void setInitialized(boolean initialized) {
+         this.initialized = initialized;
+     }
+ 
+     @Override
+-    public Difficulty getDifficulty() {
++    public synchronized Difficulty getDifficulty() {
+         return this.settings.difficultySettings().difficulty();
+     }
+ 
+     @Override
+-    public void setDifficulty(Difficulty difficulty) {
++    public synchronized void setDifficulty(Difficulty difficulty) {
+         this.settings = this.settings.withDifficulty(difficulty);
+     }
+ 
+     @Override
+-    public boolean isDifficultyLocked() {
++    public synchronized boolean isDifficultyLocked() {
+         return this.settings.difficultySettings().locked();
+     }
+ 
+     @Override
+-    public void setDifficultyLocked(boolean difficultyLocked) {
++    public synchronized void setDifficultyLocked(boolean difficultyLocked) {
+         this.settings = this.settings.withDifficultyLock(difficultyLocked);
+     }
+ 
+     @Override
+-    public void fillCrashReportCategory(CrashReportCategory category, LevelHeightAccessor levelHeightAccessor) {
++    public synchronized void fillCrashReportCategory(CrashReportCategory category, LevelHeightAccessor levelHeightAccessor) {
+         ServerLevelData.super.fillCrashReportCategory(category, levelHeightAccessor);
+         WorldData.super.fillCrashReportCategory(category);
+     }
+ 
+     @Override
+-    public boolean isFlatWorld() {
++    public synchronized boolean isFlatWorld() {
+         return this.specialWorldProperty == PrimaryLevelData.SpecialWorldProperty.FLAT;
+     }
+ 
+     @Override
+-    public boolean isDebugWorld() {
++    public synchronized boolean isDebugWorld() {
+         return this.specialWorldProperty == PrimaryLevelData.SpecialWorldProperty.DEBUG;
+     }
+ 
+     @Override
+-    public Lifecycle worldGenSettingsLifecycle() {
++    public synchronized Lifecycle worldGenSettingsLifecycle() {
+         return this.worldGenSettingsLifecycle;
+     }
+ 
+     @Override
+-    public WorldDataConfiguration getDataConfiguration() {
++    public synchronized WorldDataConfiguration getDataConfiguration() {
+         return this.settings.dataConfiguration();
+     }
+ 
+     @Override
+-    public void setDataConfiguration(WorldDataConfiguration dataConfiguration) {
++    public synchronized void setDataConfiguration(WorldDataConfiguration dataConfiguration) {
+         this.settings = this.settings.withDataConfiguration(dataConfiguration);
+     }
+ 
+     @Override
+-    public void setModdedInfo(String serverBrand, boolean isModded) {
++    public synchronized void setModdedInfo(String serverBrand, boolean isModded) {
+         this.knownServerBrands.add(serverBrand);
+         this.wasModded |= isModded;
+     }
+ 
+     @Override
+-    public boolean wasModded() {
++    public synchronized boolean wasModded() {
+         return this.wasModded;
+     }
+ 
+     @Override
+-    public Set<String> getKnownServerBrands() {
++    public synchronized Set<String> getKnownServerBrands() {
+         return ImmutableSet.copyOf(this.knownServerBrands);
+     }
+ 
+     @Override
+-    public Set<String> getRemovedFeatureFlags() {
++    public synchronized Set<String> getRemovedFeatureFlags() {
+         return Set.copyOf(this.removedFeatureFlags);
+     }
+ 
+     @Override
+-    public ServerLevelData overworldData() {
++    public synchronized ServerLevelData overworldData() {
+         return this;
+     }
+ 
+     @Override
+-    public LevelSettings getLevelSettings() {
++    public synchronized LevelSettings getLevelSettings() {
+         return this.settings.copy();
+     }
+ 
++    public synchronized boolean hasConfirmedExperimentalWarning() {
++        return this.confirmedExperimentalWarning;
++    }
++
++    public synchronized PrimaryLevelData withConfirmedWarning(boolean confirmedWarning) { // Builder-like to not patch ctor
++        this.confirmedExperimentalWarning = confirmedWarning;
++        return this;
++    }
++
+     @Deprecated
+     public static enum SpecialWorldProperty {
+         NONE,
+         FLAT,
+         DEBUG;
++    }
++
++    // Neo: Variable day time code
++
++    private float dayTimeFraction = 0.0f;
++    private float dayTimePerTick = -1.0f;
++
++    @Override
++    public synchronized float getDayTimeFraction() {
++        return dayTimeFraction;
++    }
++
++    @Override
++    public synchronized float getDayTimePerTick() {
++        return dayTimePerTick;
++    }
++
++    @Override
++    public synchronized void setDayTimeFraction(float dayTimeFraction) {
++        this.dayTimeFraction = dayTimeFraction;
++    }
++
++    @Override
++    public synchronized void setDayTimePerTick(float dayTimePerTick) {
++        this.dayTimePerTick = dayTimePerTick;
++    }
++
++    private static java.util.stream.Stream<String> updateRemovedFeatureFlags(java.util.stream.Stream<String> removedFeatures, java.util.stream.Stream<String> enabledFeatures) {
++        var unknownFeatureFlags = new HashSet<net.minecraft.resources.Identifier>();
++        // parses the incoming Stream<String> and spits out unknown flag names (Identifier)
++        // we do not care about the returned FeatureFlagSet, only the flags which do not exist
++        net.minecraft.world.flag.FeatureFlags.REGISTRY.fromNames(enabledFeatures.map(net.minecraft.resources.Identifier::parse).collect(Collectors.toSet()), unknownFeatureFlags::add);
++        // concat the received removed flags with our new additions
++        return java.util.stream.Stream.concat(removedFeatures, unknownFeatureFlags.stream()
++                // we only want modded flags, mojang has datafixers for vanilla flags
++                .filter(java.util.function.Predicate.not(name -> name.getNamespace().equals(net.minecraft.resources.Identifier.DEFAULT_NAMESPACE)))
++                .map(net.minecraft.resources.Identifier::toString))
++                // no duplicates should exist in this stream
++                .distinct();
+     }
+ }

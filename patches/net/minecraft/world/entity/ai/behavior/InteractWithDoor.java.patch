@@ -1,0 +1,164 @@
+--- a/net/minecraft/world/entity/ai/behavior/InteractWithDoor.java
++++ b/net/minecraft/world/entity/ai/behavior/InteractWithDoor.java
+@@ -20,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.pathfinder.Node;
+ import net.minecraft.world.level.pathfinder.Path;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.mutable.MutableInt;
+ import org.apache.commons.lang3.mutable.MutableObject;
+ import org.jspecify.annotations.Nullable;
+@@ -39,47 +_,57 @@
+                 .apply(
+                     i,
+                     (pathMemory, doorsMemory, nearestEntities) -> (level, body, timestamp) -> {
+-                        Path path = i.get(pathMemory);
+-                        Optional<Set<GlobalPos>> doors = i.tryGet(doorsMemory);
+-                        if (!path.notStarted() && !path.isDone()) {
+-                            if (Objects.equals(lastCheckedNode.get(), path.getNextNode())) {
+-                                remainingCooldown.setValue(20);
+-                            } else if (remainingCooldown.decrementAndGet() > 0) {
++                        synchronized (lastCheckedNode) {
++                            Path path = i.get(pathMemory);
++                            Optional<Set<GlobalPos>> doors = i.tryGet(doorsMemory);
++                            if (!path.notStarted() && !path.isDone()) {
++                                if (Objects.equals(lastCheckedNode.get(), path.getNextNode())) {
++                                    remainingCooldown.setValue(20);
++                                } else if (remainingCooldown.decrementAndGet() > 0) {
++                                    return false;
++                                }
++
++                                lastCheckedNode.setValue(path.getNextNode());
++                                Node fromNode = path.getPreviousNode();
++                                Node toNode = path.getNextNode();
++                                BlockPos fromPos = fromNode.asBlockPos();
++                                if (!canReadBlock(level, fromPos)) {
++                                    return false;
++                                }
++
++                                BlockState fromState = level.getBlockState(fromPos);
++                                if (fromState.is(BlockTags.MOB_INTERACTABLE_DOORS, s -> s.getBlock() instanceof DoorBlock)) {
++                                    DoorBlock fromBlock = (DoorBlock)fromState.getBlock();
++                                    if (!fromBlock.isOpen(fromState)) {
++                                        fromBlock.setOpen(body, level, fromState, fromPos, true);
++                                    }
++
++                                    doors = rememberDoorToClose(doorsMemory, doors, level, fromPos);
++                                }
++
++                                BlockPos toPos = toNode.asBlockPos();
++                                if (!canReadBlock(level, toPos)) {
++                                    return false;
++                                }
++
++                                BlockState toState = level.getBlockState(toPos);
++                                if (toState.is(BlockTags.MOB_INTERACTABLE_DOORS, s -> s.getBlock() instanceof DoorBlock)) {
++                                    DoorBlock door = (DoorBlock)toState.getBlock();
++                                    if (!door.isOpen(toState)) {
++                                        door.setOpen(body, level, toState, toPos, true);
++                                        doors = rememberDoorToClose(doorsMemory, doors, level, toPos);
++                                    }
++                                }
++
++                                doors.ifPresent(
++                                    doorSet -> closeDoorsThatIHaveOpenedOrPassedThrough(
++                                        level, body, fromNode, toNode, (Set<GlobalPos>)doorSet, i.tryGet(nearestEntities)
++                                    )
++                                );
++                                return true;
++                            } else {
+                                 return false;
+                             }
+-
+-                            lastCheckedNode.setValue(path.getNextNode());
+-                            Node fromNode = path.getPreviousNode();
+-                            Node toNode = path.getNextNode();
+-                            BlockPos fromPos = fromNode.asBlockPos();
+-                            BlockState fromState = level.getBlockState(fromPos);
+-                            if (fromState.is(BlockTags.MOB_INTERACTABLE_DOORS, s -> s.getBlock() instanceof DoorBlock)) {
+-                                DoorBlock fromBlock = (DoorBlock)fromState.getBlock();
+-                                if (!fromBlock.isOpen(fromState)) {
+-                                    fromBlock.setOpen(body, level, fromState, fromPos, true);
+-                                }
+-
+-                                doors = rememberDoorToClose(doorsMemory, doors, level, fromPos);
+-                            }
+-
+-                            BlockPos toPos = toNode.asBlockPos();
+-                            BlockState toState = level.getBlockState(toPos);
+-                            if (toState.is(BlockTags.MOB_INTERACTABLE_DOORS, s -> s.getBlock() instanceof DoorBlock)) {
+-                                DoorBlock door = (DoorBlock)toState.getBlock();
+-                                if (!door.isOpen(toState)) {
+-                                    door.setOpen(body, level, toState, toPos, true);
+-                                    doors = rememberDoorToClose(doorsMemory, doors, level, toPos);
+-                                }
+-                            }
+-
+-                            doors.ifPresent(
+-                                doorSet -> closeDoorsThatIHaveOpenedOrPassedThrough(
+-                                    level, body, fromNode, toNode, (Set<GlobalPos>)doorSet, i.tryGet(nearestEntities)
+-                                )
+-                            );
+-                            return true;
+-                        } else {
+-                            return false;
+                         }
+                     }
+                 )
+@@ -94,6 +_,7 @@
+         Set<GlobalPos> doors,
+         Optional<List<LivingEntity>> nearestEntities
+     ) {
++        synchronized (doors) {
+         Iterator<GlobalPos> iterator = doors.iterator();
+ 
+         while (iterator.hasNext()) {
+@@ -104,6 +_,11 @@
+                 if (isDoorTooFarAway(level, body, doorGlobalPos)) {
+                     iterator.remove();
+                 } else {
++                    if (!canReadBlock(level, doorPos)) {
++                        iterator.remove();
++                        continue;
++                    }
++
+                     BlockState state = level.getBlockState(doorPos);
+                     if (!state.is(BlockTags.MOB_INTERACTABLE_DOORS, s -> s.getBlock() instanceof DoorBlock)) {
+                         iterator.remove();
+@@ -121,12 +_,13 @@
+                 }
+             }
+         }
++        }
+     }
+ 
+     private static boolean areOtherMobsComingThroughDoor(LivingEntity body, BlockPos doorPos, Optional<List<LivingEntity>> nearestEntities) {
+         return nearestEntities.isEmpty()
+             ? false
+-            : nearestEntities.get()
++            : List.copyOf(nearestEntities.get())
+                 .stream()
+                 .filter(otherMob -> otherMob.getType() == body.getType())
+                 .filter(otherMob -> doorPos.closerToCenterThan(otherMob.position(), 2.0))
+@@ -156,13 +_,19 @@
+         return doorGlobalPos.dimension() != level.dimension() || !doorGlobalPos.pos().closerToCenterThan(body.position(), 3.0);
+     }
+ 
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private static Optional<Set<GlobalPos>> rememberDoorToClose(
+         MemoryAccessor<Mu, Set<GlobalPos>> doorsMemory, Optional<Set<GlobalPos>> doors, ServerLevel level, BlockPos doorPos
+     ) {
+         GlobalPos globalDoorPos = GlobalPos.of(level.dimension(), doorPos);
+         return Optional.of(doors.<Set<GlobalPos>>map(set -> {
+-            set.add(globalDoorPos);
+-            return set;
++            Set<GlobalPos> newSet = Sets.newHashSet(set);
++            newSet.add(globalDoorPos);
++            doorsMemory.set(newSet);
++            return newSet;
+         }).orElseGet(() -> {
+             Set<GlobalPos> set = Sets.newHashSet(globalDoorPos);
+             doorsMemory.set(set);

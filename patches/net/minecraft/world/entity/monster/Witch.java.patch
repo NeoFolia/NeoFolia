@@ -1,0 +1,46 @@
+--- a/net/minecraft/world/entity/monster/Witch.java
++++ b/net/minecraft/world/entity/monster/Witch.java
+@@ -41,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class Witch extends Raider implements RangedAttackMob {
+     private static final Identifier SPEED_MODIFIER_DRINKING_ID = Identifier.withDefaultNamespace("drinking");
+@@ -139,11 +_,14 @@
+                     potion = Potions.FIRE_RESISTANCE;
+                 } else if (this.random.nextFloat() < 0.05F && this.getHealth() < this.getMaxHealth()) {
+                     potion = Potions.HEALING;
+-                } else if (this.random.nextFloat() < 0.5F
+-                    && this.getTarget() != null
++                } else {
++                    LivingEntity target = this.regionSafeTarget(this.getTarget());
++                    if (this.random.nextFloat() < 0.5F
++                    && target != null
+                     && !this.hasEffect(MobEffects.SPEED)
+-                    && this.getTarget().distanceToSqr(this) > 121.0) {
+-                    potion = Potions.SWIFTNESS;
++                    && target.distanceToSqr(this) > 121.0) {
++                        potion = Potions.SWIFTNESS;
++                    }
+                 }
+ 
+                 if (potion != null) {
+@@ -206,11 +_,12 @@
+     @Override
+     protected float getDamageAfterMagicAbsorb(DamageSource damageSource, float damage) {
+         damage = super.getDamageAfterMagicAbsorb(damageSource, damage);
+-        if (damageSource.getEntity() == this) {
++        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), damageSource.getEntity()) == this) {
++            this.damageContainers.peek().setReduction(net.neoforged.neoforge.common.damagesource.DamageContainer.Reduction.INNATE_RESISTANCE, damage);
+             damage = 0.0F;
+-        }
+-
+-        if (damageSource.is(DamageTypeTags.WITCH_RESISTANT_TO)) {
++            // Neo: Join the two ifs; if the first one runs (reducing damage to 0), the second one (reducing damage by 15%) effectively does nothing
++        } else if (damageSource.is(DamageTypeTags.WITCH_RESISTANT_TO)) {
++            this.damageContainers.peek().setReduction(net.neoforged.neoforge.common.damagesource.DamageContainer.Reduction.INNATE_RESISTANCE, damage * 0.85F);
+             damage *= 0.15F;
+         }
+ 

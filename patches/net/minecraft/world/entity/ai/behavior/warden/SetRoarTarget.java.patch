@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/SetRoarTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/SetRoarTarget.java
+@@ -3,6 +_,7 @@
+ import java.util.Optional;
+ import java.util.function.Function;
+ import net.minecraft.world.entity.LivingEntity;
++import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
+ import net.minecraft.world.entity.ai.behavior.BehaviorControl;
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+@@ -17,8 +_,9 @@
+                     i.registered(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE)
+                 )
+                 .apply(i, (roarTarget, attackTarget, cantReachSince) -> (level, body, timestamp) -> {
+-                    Optional<? extends LivingEntity> target = targetFinderFunction.apply(body);
+-                    if (target.filter(body::canTargetEntity).isEmpty()) {
++                    Optional<? extends LivingEntity> target = targetFinderFunction.apply(body)
++                        .map(candidate -> BehaviorUtils.regionSafeEntity(body, candidate));
++                    if (target.isEmpty() || target.filter(body::canTargetEntity).isEmpty()) {
+                         return false;
+                     } else {
+                         roarTarget.set(target.get());

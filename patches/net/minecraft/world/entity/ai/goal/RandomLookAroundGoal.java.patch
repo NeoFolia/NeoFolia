@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/entity/ai/goal/RandomLookAroundGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RandomLookAroundGoal.java
+@@ -15,17 +_,17 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.mob.getRandom().nextFloat() < 0.02F;
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return this.lookTime >= 0;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         double rnd = (Math.PI * 2) * this.mob.getRandom().nextDouble();
+         this.relX = Math.cos(rnd);
+         this.relZ = Math.sin(rnd);
+@@ -33,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         this.lookTime--;
+         this.mob.getLookControl().setLookAt(this.mob.getX() + this.relX, this.mob.getEyeY(), this.mob.getZ() + this.relZ);
+     }

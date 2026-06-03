@@ -1,0 +1,94 @@
+--- a/net/minecraft/world/scores/Objective.java
++++ b/net/minecraft/world/scores/Objective.java
+@@ -42,35 +_,35 @@
+         this.numberFormat = numberFormat;
+     }
+ 
+-    public Objective.Packed pack() {
++    public synchronized Objective.Packed pack() {
+         return new Objective.Packed(this.name, this.criteria, this.displayName, this.renderType, this.displayAutoUpdate, Optional.ofNullable(this.numberFormat));
+     }
+ 
+-    public Scoreboard getScoreboard() {
++    public synchronized Scoreboard getScoreboard() {
+         return this.scoreboard;
+     }
+ 
+-    public String getName() {
++    public synchronized String getName() {
+         return this.name;
+     }
+ 
+-    public ObjectiveCriteria getCriteria() {
++    public synchronized ObjectiveCriteria getCriteria() {
+         return this.criteria;
+     }
+ 
+-    public Component getDisplayName() {
++    public synchronized Component getDisplayName() {
+         return this.displayName;
+     }
+ 
+-    public boolean displayAutoUpdate() {
++    public synchronized boolean displayAutoUpdate() {
+         return this.displayAutoUpdate;
+     }
+ 
+-    public @Nullable NumberFormat numberFormat() {
++    public synchronized @Nullable NumberFormat numberFormat() {
+         return this.numberFormat;
+     }
+ 
+-    public NumberFormat numberFormatOrDefault(NumberFormat _default) {
++    public synchronized NumberFormat numberFormatOrDefault(NumberFormat _default) {
+         return Objects.requireNonNullElse(this.numberFormat, _default);
+     }
+ 
+@@ -80,32 +_,40 @@
+         );
+     }
+ 
+-    public Component getFormattedDisplayName() {
++    public synchronized Component getFormattedDisplayName() {
+         return this.formattedDisplayName;
+     }
+ 
+     public void setDisplayName(Component name) {
+-        this.displayName = name;
+-        this.formattedDisplayName = this.createFormattedDisplayName();
++        synchronized (this) {
++            this.displayName = name;
++            this.formattedDisplayName = this.createFormattedDisplayName();
++        }
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 
+-    public ObjectiveCriteria.RenderType getRenderType() {
++    public synchronized ObjectiveCriteria.RenderType getRenderType() {
+         return this.renderType;
+     }
+ 
+     public void setRenderType(ObjectiveCriteria.RenderType renderType) {
+-        this.renderType = renderType;
++        synchronized (this) {
++            this.renderType = renderType;
++        }
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 
+     public void setDisplayAutoUpdate(boolean displayAutoUpdate) {
+-        this.displayAutoUpdate = displayAutoUpdate;
++        synchronized (this) {
++            this.displayAutoUpdate = displayAutoUpdate;
++        }
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 
+     public void setNumberFormat(@Nullable NumberFormat numberFormat) {
+-        this.numberFormat = numberFormat;
++        synchronized (this) {
++            this.numberFormat = numberFormat;
++        }
+         this.scoreboard.onObjectiveChanged(this);
+     }
+ 

@@ -1,0 +1,64 @@
+--- a/net/minecraft/world/inventory/BeaconMenu.java
++++ b/net/minecraft/world/inventory/BeaconMenu.java
+@@ -34,7 +_,7 @@
+         }
+ 
+         @Override
+-        public int getMaxStackSize() {
++        public synchronized int getMaxStackSize() {
+             return 1;
+         }
+     };
+@@ -58,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         if (!player.level().isClientSide()) {
+             ItemStack itemStack = this.paymentSlot.remove(this.paymentSlot.getMaxStackSize());
+@@ -74,13 +_,13 @@
+     }
+ 
+     @Override
+-    public void setData(int id, int value) {
++    public synchronized void setData(int id, int value) {
+         super.setData(id, value);
+         this.broadcastChanges();
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -92,10 +_,8 @@
+                 }
+ 
+                 slot.onQuickCraft(stack, clicked);
+-            } else if (!this.paymentSlot.hasItem() && this.paymentSlot.mayPlace(stack) && stack.getCount() == 1) {
+-                if (!this.moveItemStackTo(stack, 0, 1, false)) {
+-                    return ItemStack.EMPTY;
+-                }
++            } else if (this.moveItemStackTo(stack, 0, 1, false)) { //Forge Fix Shift Clicking in beacons with stacks larger then 1.
++                return ItemStack.EMPTY;
+             } else if (slotIndex >= 1 && slotIndex < 28) {
+                 if (!this.moveItemStackTo(stack, 28, 37, false)) {
+                     return ItemStack.EMPTY;
+@@ -163,12 +_,12 @@
+         }
+ 
+         @Override
+-        public boolean mayPlace(ItemStack itemStack) {
++        public synchronized boolean mayPlace(ItemStack itemStack) {
+             return itemStack.is(ItemTags.BEACON_PAYMENT_ITEMS);
+         }
+ 
+         @Override
+-        public int getMaxStackSize() {
++        public synchronized int getMaxStackSize() {
+             return 1;
+         }
+     }

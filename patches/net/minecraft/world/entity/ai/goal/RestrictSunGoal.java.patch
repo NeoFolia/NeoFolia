@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/entity/ai/goal/RestrictSunGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RestrictSunGoal.java
+@@ -13,19 +_,19 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.mob.level().isBrightOutside() && this.mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty() && GoalUtils.hasGroundPathNavigation(this.mob);
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         if (this.mob.getNavigation() instanceof GroundPathNavigation pathNavigation) {
+             pathNavigation.setAvoidSun(true);
+         }
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         if (GoalUtils.hasGroundPathNavigation(this.mob) && this.mob.getNavigation() instanceof GroundPathNavigation pathNavigation) {
+             pathNavigation.setAvoidSun(false);
+         }

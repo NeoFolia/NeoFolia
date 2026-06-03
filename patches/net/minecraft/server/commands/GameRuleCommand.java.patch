@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/GameRuleCommand.java
++++ b/net/minecraft/server/commands/GameRuleCommand.java
+@@ -34,6 +_,10 @@
+ 
+     private static <T> int setRule(CommandContext<CommandSourceStack> context, GameRule<T> gameRule) {
+         CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setRule(context, gameRule))) {
++            return 0;
++        }
++
+         T value = context.getArgument("value", gameRule.valueClass());
+         source.getLevel().getGameRules().set(gameRule, value, context.getSource().getServer());
+         source.sendSuccess(() -> Component.translatable("commands.gamerule.set", gameRule.id(), gameRule.serialize(value)), true);

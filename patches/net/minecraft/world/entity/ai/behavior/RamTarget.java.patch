@@ -1,0 +1,93 @@
+--- a/net/minecraft/world/entity/ai/behavior/RamTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/RamTarget.java
+@@ -23,7 +_,9 @@
+ import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+ import net.minecraft.world.entity.animal.goat.Goat;
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class RamTarget extends Behavior<Goat> {
+     public static final int TIME_OUT_DURATION = 200;
+@@ -54,24 +_,30 @@
+         this.ramDirection = Vec3.ZERO;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Goat body) {
+-        return body.getBrain().hasMemoryValue(MemoryModuleType.RAM_TARGET);
+-    }
+-
+-    protected boolean canStillUse(ServerLevel level, Goat body, long timestamp) {
+-        return body.getBrain().hasMemoryValue(MemoryModuleType.RAM_TARGET);
+-    }
+-
+-    protected void start(ServerLevel level, Goat body, long timestamp) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Goat body) {
++        return body.getBrain().hasMemoryValue(MemoryModuleType.RAM_TARGET);
++    }
++
++    protected synchronized boolean canStillUse(ServerLevel level, Goat body, long timestamp) {
++        return body.getBrain().hasMemoryValue(MemoryModuleType.RAM_TARGET);
++    }
++
++    protected synchronized void start(ServerLevel level, Goat body, long timestamp) {
+         BlockPos curPos = body.blockPosition();
+         Brain<?> brain = body.getBrain();
+-        Vec3 ramTargetPos = brain.getMemory(MemoryModuleType.RAM_TARGET).get();
++        Optional<Vec3> ramTarget = brain.getMemory(MemoryModuleType.RAM_TARGET);
++        if (ramTarget.isEmpty()) {
++            return;
++        }
++
++        Vec3 ramTargetPos = ramTarget.get();
+         this.ramDirection = new Vec3(curPos.getX() - ramTargetPos.x(), 0.0, curPos.getZ() - ramTargetPos.z()).normalize();
+         brain.setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(ramTargetPos, this.speed, 0));
+     }
+ 
+-    protected void tick(ServerLevel level, Goat body, long timestamp) {
+-        List<LivingEntity> nearbyEntities = level.getNearbyEntities(LivingEntity.class, this.ramTargeting, body, body.getBoundingBox());
++    protected synchronized void tick(ServerLevel level, Goat body, long timestamp) {
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, body.getBoundingBox());
++        List<LivingEntity> nearbyEntities = searchBox == null ? List.of() : List.copyOf(level.getNearbyEntities(LivingEntity.class, this.ramTargeting, body, searchBox));
+         Brain<?> brain = body.getBrain();
+         if (!nearbyEntities.isEmpty()) {
+             LivingEntity ramTarget = nearbyEntities.get(0);
+@@ -104,6 +_,7 @@
+             Optional<Vec3> ramTarget = brain.getMemory(MemoryModuleType.RAM_TARGET);
+             boolean lostOrReachedTarget = walkTarget.isEmpty()
+                 || ramTarget.isEmpty()
++                || !walkTarget.get().getTarget().isRegionSafeFor(body)
+                 || walkTarget.get().getTarget().currentPosition().closerThan(ramTarget.get(), 0.25);
+             if (lostOrReachedTarget) {
+                 this.finishRam(level, body);
+@@ -111,16 +_,24 @@
+         }
+     }
+ 
+-    private boolean hasRammedHornBreakingBlock(ServerLevel level, Goat body) {
++    private synchronized boolean hasRammedHornBreakingBlock(ServerLevel level, Goat body) {
+         Vec3 horizontalMovementNormalized = body.getDeltaMovement().multiply(1.0, 0.0, 1.0).normalize();
+         BlockPos facingBlockPosition = BlockPos.containing(body.position().add(horizontalMovementNormalized));
+-        return level.getBlockState(facingBlockPosition).is(BlockTags.SNAPS_GOAT_HORN)
+-            || level.getBlockState(facingBlockPosition.above()).is(BlockTags.SNAPS_GOAT_HORN);
++        BlockPos above = facingBlockPosition.above();
++        return canReadBlock(level, facingBlockPosition)
++            && canReadBlock(level, above)
++            && (level.getBlockState(facingBlockPosition).is(BlockTags.SNAPS_GOAT_HORN)
++                || level.getBlockState(above).is(BlockTags.SNAPS_GOAT_HORN));
+     }
+ 
+-    protected void finishRam(ServerLevel level, Goat body) {
++    protected synchronized void finishRam(ServerLevel level, Goat body) {
+         level.broadcastEntityEvent(body, (byte)59);
+-        body.getBrain().setMemory(MemoryModuleType.RAM_COOLDOWN_TICKS, this.getTimeBetweenRams.apply(body).sample(level.getRandom()));
++        body.getBrain().setMemory(MemoryModuleType.RAM_COOLDOWN_TICKS, this.getTimeBetweenRams.apply(body).sample(body.getRandom()));
+         body.getBrain().eraseMemory(MemoryModuleType.RAM_TARGET);
++        this.ramDirection = Vec3.ZERO;
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

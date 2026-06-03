@@ -1,0 +1,42 @@
+--- a/net/minecraft/world/entity/ai/behavior/InsideBrownianWalk.java
++++ b/net/minecraft/world/entity/ai/behavior/InsideBrownianWalk.java
+@@ -8,24 +_,25 @@
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class InsideBrownianWalk {
+-    public static BehaviorControl<PathfinderMob> create(float speedModifier) {
++    public static synchronized BehaviorControl<PathfinderMob> create(float speedModifier) {
+         return BehaviorBuilder.create(
+             i -> i.group(i.absent(MemoryModuleType.WALK_TARGET))
+                 .apply(
+                     i,
+                     walkTarget -> (level, body, timestamp) -> {
+-                        if (level.canSeeSky(body.blockPosition())) {
++                        BlockPos bodyPos = body.blockPosition();
++                        if (!canReadBlock(level, bodyPos) || level.canSeeSky(bodyPos)) {
+                             return false;
+                         } else {
+-                            BlockPos bodyPos = body.blockPosition();
+                             List<BlockPos> poses = BlockPos.betweenClosedStream(bodyPos.offset(-1, -1, -1), bodyPos.offset(1, 1, 1))
+                                 .map(BlockPos::immutable)
+                                 .collect(Util.toMutableList());
+                             Collections.shuffle(poses);
+                             poses.stream()
+-                                .filter(pos -> !level.canSeeSky(pos))
++                                .filter(pos -> canReadBlock(level, pos) && !level.canSeeSky(pos))
+                                 .filter(pos -> level.loadedAndEntityCanStandOn(pos, body))
+                                 .filter(pos -> level.noCollision(body))
+                                 .findFirst()
+@@ -35,5 +_,9 @@
+                     }
+                 )
+         );
++    }
++
++    private static boolean canReadBlock(net.minecraft.server.level.ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

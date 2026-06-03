@@ -1,0 +1,38 @@
+--- a/net/minecraft/advancements/criterion/SimpleCriterionTrigger.java
++++ b/net/minecraft/advancements/criterion/SimpleCriterionTrigger.java
+@@ -20,12 +_,12 @@
+     private final Map<PlayerAdvancements, Set<CriterionTrigger.Listener<T>>> players = Maps.newIdentityHashMap();
+ 
+     @Override
+-    public final void addPlayerListener(PlayerAdvancements player, CriterionTrigger.Listener<T> listener) {
++    public final synchronized void addPlayerListener(PlayerAdvancements player, CriterionTrigger.Listener<T> listener) {
+         this.players.computeIfAbsent(player, k -> Sets.newHashSet()).add(listener);
+     }
+ 
+     @Override
+-    public final void removePlayerListener(PlayerAdvancements player, CriterionTrigger.Listener<T> listener) {
++    public final synchronized void removePlayerListener(PlayerAdvancements player, CriterionTrigger.Listener<T> listener) {
+         Set<CriterionTrigger.Listener<T>> listeners = this.players.get(player);
+         if (listeners != null) {
+             listeners.remove(listener);
+@@ -36,13 +_,18 @@
+     }
+ 
+     @Override
+-    public final void removePlayerListeners(PlayerAdvancements player) {
++    public final synchronized void removePlayerListeners(PlayerAdvancements player) {
+         this.players.remove(player);
+     }
+ 
+     protected void trigger(ServerPlayer player, Predicate<T> matcher) {
+         PlayerAdvancements advancements = player.getAdvancements();
+-        Set<CriterionTrigger.Listener<T>> allListeners = this.players.get(advancements);
++        List<CriterionTrigger.Listener<T>> allListeners;
++        synchronized (this) {
++            Set<CriterionTrigger.Listener<T>> listeners = this.players.get(advancements);
++            allListeners = listeners != null ? List.copyOf(listeners) : List.of();
++        }
++
+         if (allListeners != null && !allListeners.isEmpty()) {
+             LootContext playerContext = EntityPredicate.createContext(player, player);
+             List<CriterionTrigger.Listener<T>> listeners = null;

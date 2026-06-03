@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/monster/Creeper.java
++++ b/net/minecraft/world/entity/monster/Creeper.java
+@@ -40,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Creeper extends Monster {
+@@ -80,7 +_,7 @@
+ 
+     @Override
+     public int getMaxFallDistance() {
+-        return this.getTarget() == null ? this.getComfortableFallDistance(0.0F) : this.getComfortableFallDistance(this.getHealth() - 1.0F);
++        return this.regionSafeTarget(this.getTarget()) == null ? this.getComfortableFallDistance(0.0F) : this.getComfortableFallDistance(this.getHealth() - 1.0F);
+     }
+ 
+     @Override
+@@ -264,5 +_,9 @@
+ 
+     public void ignite() {
+         this.entityData.set(DATA_IS_IGNITED, true);
++    }
++
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
+     }
+ }

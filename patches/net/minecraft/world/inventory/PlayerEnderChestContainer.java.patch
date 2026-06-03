@@ -1,0 +1,61 @@
+--- a/net/minecraft/world/inventory/PlayerEnderChestContainer.java
++++ b/net/minecraft/world/inventory/PlayerEnderChestContainer.java
+@@ -11,21 +_,21 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PlayerEnderChestContainer extends SimpleContainer {
+-    private @Nullable EnderChestBlockEntity activeChest;
++    private volatile @Nullable EnderChestBlockEntity activeChest;
+ 
+     public PlayerEnderChestContainer() {
+         super(27);
+     }
+ 
+-    public void setActiveChest(EnderChestBlockEntity activeChest) {
++    public synchronized void setActiveChest(EnderChestBlockEntity activeChest) {
+         this.activeChest = activeChest;
+     }
+ 
+-    public boolean isActiveChest(EnderChestBlockEntity chest) {
++    public synchronized boolean isActiveChest(EnderChestBlockEntity chest) {
+         return this.activeChest == chest;
+     }
+ 
+-    public void fromSlots(ValueInput.TypedInputList<ItemStackWithSlot> list) {
++    public synchronized void fromSlots(ValueInput.TypedInputList<ItemStackWithSlot> list) {
+         for (int i = 0; i < this.getContainerSize(); i++) {
+             this.setItem(i, ItemStack.EMPTY);
+         }
+@@ -37,7 +_,7 @@
+         }
+     }
+ 
+-    public void storeAsSlots(ValueOutput.TypedOutputList<ItemStackWithSlot> output) {
++    public synchronized void storeAsSlots(ValueOutput.TypedOutputList<ItemStackWithSlot> output) {
+         for (int i = 0; i < this.getContainerSize(); i++) {
+             ItemStack itemStack = this.getItem(i);
+             if (!itemStack.isEmpty()) {
+@@ -47,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean stillValid(Player player) {
++    public synchronized boolean stillValid(Player player) {
+         return this.activeChest != null && !this.activeChest.stillValid(player) ? false : super.stillValid(player);
+     }
+ 
+     @Override
+-    public void startOpen(ContainerUser containerUser) {
++    public synchronized void startOpen(ContainerUser containerUser) {
+         if (this.activeChest != null) {
+             this.activeChest.startOpen(containerUser);
+         }
+@@ -61,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void stopOpen(ContainerUser containerUser) {
++    public synchronized void stopOpen(ContainerUser containerUser) {
+         if (this.activeChest != null) {
+             this.activeChest.stopOpen(containerUser);
+         }

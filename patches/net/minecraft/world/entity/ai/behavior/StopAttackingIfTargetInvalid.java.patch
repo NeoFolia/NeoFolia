@@ -1,0 +1,51 @@
+--- a/net/minecraft/world/entity/ai/behavior/StopAttackingIfTargetInvalid.java
++++ b/net/minecraft/world/entity/ai/behavior/StopAttackingIfTargetInvalid.java
+@@ -10,19 +_,19 @@
+ public class StopAttackingIfTargetInvalid {
+     private static final int TIMEOUT_TO_GET_WITHIN_ATTACK_RANGE = 200;
+ 
+-    public static <E extends Mob> BehaviorControl<E> create(StopAttackingIfTargetInvalid.TargetErasedCallback<E> onTargetErased) {
++    public static synchronized <E extends Mob> BehaviorControl<E> create(StopAttackingIfTargetInvalid.TargetErasedCallback<E> onTargetErased) {
+         return create((level, entity) -> false, onTargetErased, true);
+     }
+ 
+-    public static <E extends Mob> BehaviorControl<E> create(StopAttackingIfTargetInvalid.StopAttackCondition stopAttackingWhen) {
++    public static synchronized <E extends Mob> BehaviorControl<E> create(StopAttackingIfTargetInvalid.StopAttackCondition stopAttackingWhen) {
+         return create(stopAttackingWhen, (level, body, target) -> {}, true);
+     }
+ 
+-    public static <E extends Mob> BehaviorControl<E> create() {
++    public static synchronized <E extends Mob> BehaviorControl<E> create() {
+         return create((level, entity) -> false, (level, body, target) -> {}, true);
+     }
+ 
+-    public static <E extends Mob> BehaviorControl<E> create(
++    public static synchronized <E extends Mob> BehaviorControl<E> create(
+         StopAttackingIfTargetInvalid.StopAttackCondition stopAttackingWhen,
+         StopAttackingIfTargetInvalid.TargetErasedCallback<E> onTargetErased,
+         boolean canGrowTiredOfTryingToReachTarget
+@@ -32,7 +_,12 @@
+                 .apply(
+                     i,
+                     (attackTarget, cantReachSince) -> (level, body, timestamp) -> {
+-                        LivingEntity target = i.get(attackTarget);
++                        LivingEntity target = BehaviorUtils.regionSafeEntity(body, i.get(attackTarget));
++                        if (target == null) {
++                            attackTarget.erase();
++                            return true;
++                        }
++
+                         if (body.canAttack(target)
+                             && (!canGrowTiredOfTryingToReachTarget || !isTiredOfTryingToReachTarget(body, i.tryGet(cantReachSince)))
+                             && target.isAlive()
+@@ -49,8 +_,8 @@
+         );
+     }
+ 
+-    private static boolean isTiredOfTryingToReachTarget(LivingEntity body, Optional<Long> cantReachSince) {
+-        return cantReachSince.isPresent() && body.level().getGameTime() - cantReachSince.get() > 200L;
++    private static synchronized boolean isTiredOfTryingToReachTarget(LivingEntity body, Optional<Long> cantReachSince) {
++        return cantReachSince.map(timestamp -> body.level().getGameTime() - timestamp > 200L).orElse(false);
+     }
+ 
+     @FunctionalInterface

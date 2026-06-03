@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/level/block/TripWireHookBlock.java
++++ b/net/minecraft/world/level/block/TripWireHookBlock.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class TripWireHookBlock extends Block {
+@@ -203,9 +_,13 @@
+             level.playSound(null, pos, SoundEvents.TRIPWIRE_ATTACH, SoundSource.BLOCKS, 0.4F, 0.7F);
+             level.gameEvent(null, GameEvent.BLOCK_ATTACH, pos);
+         } else if (!attached && wasAttached) {
+-            level.playSound(null, pos, SoundEvents.TRIPWIRE_DETACH, SoundSource.BLOCKS, 0.4F, 1.2F / (level.getRandom().nextFloat() * 0.2F + 0.9F));
++            level.playSound(null, pos, SoundEvents.TRIPWIRE_DETACH, SoundSource.BLOCKS, 0.4F, 1.2F / (tripWireRandom(level).nextFloat() * 0.2F + 0.9F));
+             level.gameEvent(null, GameEvent.BLOCK_DETACH, pos);
+         }
++    }
++
++    private static RandomSource tripWireRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     private static void notifyNeighbors(Block block, Level level, BlockPos pos, Direction direction) {

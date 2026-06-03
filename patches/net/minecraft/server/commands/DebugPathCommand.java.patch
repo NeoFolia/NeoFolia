@@ -1,0 +1,59 @@
+--- a/net/minecraft/server/commands/DebugPathCommand.java
++++ b/net/minecraft/server/commands/DebugPathCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import net.minecraft.commands.CommandSourceStack;
+@@ -23,25 +_,37 @@
+             Commands.literal("debugpath")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                 .then(
+-                    Commands.argument("to", BlockPosArgument.blockPos()).executes(c -> fillBlocks(c.getSource(), BlockPosArgument.getLoadedBlockPos(c, "to")))
++                    Commands.argument("to", BlockPosArgument.blockPos()).executes(DebugPathCommand::fillBlocks)
+                 )
+         );
+     }
+ 
++    private static int fillBlocks(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> fillBlocks(context))) {
++            return 0;
++        }
++
++        return fillBlocks(source, BlockPosArgument.getLoadedBlockPos(context, "to"));
++    }
++
+     private static int fillBlocks(CommandSourceStack source, BlockPos target) throws CommandSyntaxException {
+         if (!(source.getEntity() instanceof Mob mob)) {
+             throw ERROR_NOT_MOB.create();
+         } else {
+-            PathNavigation pathNavigation = new GroundPathNavigation(mob, source.getLevel());
+-            Path path = pathNavigation.createPath(target, 0);
+-            if (path == null) {
+-                throw ERROR_NO_PATH.create();
+-            } else if (!path.canReach()) {
+-                throw ERROR_NOT_COMPLETE.create();
+-            } else {
+-                source.sendSuccess(() -> Component.literal("Made path"), true);
+-                return 1;
+-            }
++            RegionizedCommandHelper.callOnEntityRegionThrowing(source, mob, () -> {
++                PathNavigation pathNavigation = new GroundPathNavigation(mob, source.getLevel());
++                Path path = pathNavigation.createPath(target, 0);
++                if (path == null) {
++                    throw ERROR_NO_PATH.create();
++                } else if (!path.canReach()) {
++                    throw ERROR_NOT_COMPLETE.create();
++                }
++
++                return null;
++            });
++            source.sendSuccess(() -> Component.literal("Made path"), true);
++            return 1;
+         }
+     }
+ }

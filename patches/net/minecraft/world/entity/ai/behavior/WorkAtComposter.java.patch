@@ -1,0 +1,83 @@
+--- a/net/minecraft/world/entity/ai/behavior/WorkAtComposter.java
++++ b/net/minecraft/world/entity/ai/behavior/WorkAtComposter.java
+@@ -15,15 +_,20 @@
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.ComposterBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class WorkAtComposter extends WorkAtPoi {
+     private static final List<Item> COMPOSTABLE_ITEMS = ImmutableList.of(Items.WHEAT_SEEDS, Items.BEETROOT_SEEDS);
+ 
+     @Override
+-    protected void useWorkstation(ServerLevel level, Villager body) {
++    protected synchronized void useWorkstation(ServerLevel level, Villager body) {
+         Optional<GlobalPos> jobSiteMemory = body.getBrain().getMemory(MemoryModuleType.JOB_SITE);
+-        if (!jobSiteMemory.isEmpty()) {
+-            GlobalPos jobSitePos = jobSiteMemory.get();
++        if (jobSiteMemory.isPresent()) {
++            GlobalPos jobSitePos = jobSiteMemory.orElseThrow();
++            if (jobSitePos.dimension() != level.dimension() || !canReadBlock(level, jobSitePos.pos())) {
++                return;
++            }
++
+             BlockState blockState = level.getBlockState(jobSitePos.pos());
+             if (blockState.is(Blocks.COMPOSTER)) {
+                 this.makeBread(level, body);
+@@ -32,7 +_,7 @@
+         }
+     }
+ 
+-    private void compostItems(ServerLevel level, Villager body, GlobalPos jobSitePos, BlockState blockState) {
++    private synchronized void compostItems(ServerLevel level, Villager body, GlobalPos jobSitePos, BlockState blockState) {
+         BlockPos pos = jobSitePos.pos();
+         if (blockState.getValue(ComposterBlock.LEVEL) == 8) {
+             blockState = ComposterBlock.extractProduce(body, blockState, level, pos);
+@@ -40,18 +_,18 @@
+ 
+         int totalItemsToUse = 20;
+         int minStackSize = 10;
+-        int[] itemsSeenSoFar = new int[COMPOSTABLE_ITEMS.size()];
++        it.unimi.dsi.fastutil.objects.Reference2IntMap<Item> amounts = new it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap<>(COMPOSTABLE_ITEMS.size() * 2); // Neo: let's assume that there's roughly twice more villager compostables than in vanilla
+         SimpleContainer inventory = body.getInventory();
+         int containerSize = inventory.getContainerSize();
+         BlockState tempState = blockState;
+ 
+         for (int i = containerSize - 1; i >= 0 && totalItemsToUse > 0; i--) {
+             ItemStack itemStack = inventory.getItem(i);
+-            int itemIndex = COMPOSTABLE_ITEMS.indexOf(itemStack.getItem());
+-            if (itemIndex != -1) {
++            var compostable = itemStack.getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.COMPOSTABLES);
++            if (compostable != null && compostable.canVillagerCompost()) {
+                 int stackSize = itemStack.getCount();
+-                int totalItemCount = itemsSeenSoFar[itemIndex] + stackSize;
+-                itemsSeenSoFar[itemIndex] = totalItemCount;
++                int totalItemCount = amounts.getInt(itemStack.getItem()) + stackSize;
++                amounts.put(itemStack.getItem(), totalItemCount);
+                 int itemsToUse = Math.min(Math.min(totalItemCount - 10, totalItemsToUse), stackSize);
+                 if (itemsToUse > 0) {
+                     totalItemsToUse -= itemsToUse;
+@@ -70,11 +_,11 @@
+         this.spawnComposterFillEffects(level, blockState, pos, tempState);
+     }
+ 
+-    private void spawnComposterFillEffects(ServerLevel level, BlockState blockState, BlockPos pos, BlockState newState) {
++    private synchronized void spawnComposterFillEffects(ServerLevel level, BlockState blockState, BlockPos pos, BlockState newState) {
+         level.levelEvent(1500, pos, newState != blockState ? 1 : 0);
+     }
+ 
+-    private void makeBread(ServerLevel level, Villager body) {
++    private synchronized void makeBread(ServerLevel level, Villager body) {
+         SimpleContainer inventory = body.getInventory();
+         if (inventory.countItem(Items.BREAD) <= 36) {
+             int howMuchWheatIHave = inventory.countItem(Items.WHEAT);
+@@ -90,5 +_,9 @@
+                 }
+             }
+         }
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

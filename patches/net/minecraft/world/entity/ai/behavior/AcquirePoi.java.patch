@@ -1,0 +1,132 @@
+--- a/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
++++ b/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
+@@ -63,50 +_,52 @@
+                         if (onlyIfAdult && body.isBaby()) {
+                             return false;
+                         } else {
+-                            RandomSource random = level.getRandom();
+-                            if (nextScheduledStart.longValue() == 0L) {
+-                                nextScheduledStart.setValue(level.getGameTime() + random.nextInt(20));
+-                                return false;
+-                            } else if (level.getGameTime() < nextScheduledStart.longValue()) {
+-                                return false;
+-                            } else {
+-                                nextScheduledStart.setValue(timestamp + 20L + random.nextInt(20));
+-                                PoiManager poiManager = level.getPoiManager();
+-                                batchCache.long2ObjectEntrySet().removeIf(entry -> !entry.getValue().isStillValid(timestamp));
+-                                Predicate<BlockPos> cacheTest = pos -> {
+-                                    AcquirePoi.JitteredLinearRetry retryMarker = batchCache.get(pos.asLong());
+-                                    if (retryMarker == null) {
+-                                        return true;
+-                                    } else if (!retryMarker.shouldRetry(timestamp)) {
+-                                        return false;
+-                                    } else {
+-                                        retryMarker.markAttempt(timestamp);
+-                                        return true;
+-                                    }
+-                                };
+-                                Set<Pair<Holder<PoiType>, BlockPos>> poiPositions = poiManager.findAllClosestFirstWithType(
+-                                        poiType, cacheTest, body.blockPosition(), 48, PoiManager.Occupancy.HAS_SPACE
+-                                    )
+-                                    .limit(5L)
+-                                    .filter(px -> validPoi.test(level, (BlockPos)px.getSecond()))
+-                                    .collect(Collectors.toSet());
+-                                Path path = findPathToPois(body, poiPositions);
+-                                if (path != null && path.canReach()) {
+-                                    BlockPos targetPos = path.getTarget();
+-                                    poiManager.getType(targetPos).ifPresent(type -> {
+-                                        poiManager.take(poiType, (t, poiPos) -> poiPos.equals(targetPos), targetPos, 1);
+-                                        toAcquire.set(GlobalPos.of(level.dimension(), targetPos));
+-                                        onPoiAcquisitionEvent.ifPresent(event -> level.broadcastEntityEvent(body, event));
+-                                        batchCache.clear();
+-                                        level.debugSynchronizers().updatePoi(targetPos);
+-                                    });
++                            synchronized (batchCache) {
++                                RandomSource random = body.getRandom();
++                                if (nextScheduledStart.longValue() == 0L) {
++                                    nextScheduledStart.setValue(level.getGameTime() + random.nextInt(20));
++                                    return false;
++                                } else if (level.getGameTime() < nextScheduledStart.longValue()) {
++                                    return false;
+                                 } else {
+-                                    for (Pair<Holder<PoiType>, BlockPos> p : poiPositions) {
+-                                        batchCache.computeIfAbsent(p.getSecond().asLong(), key -> new AcquirePoi.JitteredLinearRetry(random, timestamp));
++                                    nextScheduledStart.setValue(timestamp + 20L + random.nextInt(20));
++                                    PoiManager poiManager = level.getPoiManager();
++                                    batchCache.long2ObjectEntrySet().removeIf(entry -> !entry.getValue().isStillValid(timestamp));
++                                    Predicate<BlockPos> cacheTest = pos -> {
++                                        AcquirePoi.JitteredLinearRetry retryMarker = batchCache.get(pos.asLong());
++                                        if (retryMarker == null) {
++                                            return true;
++                                        } else if (!retryMarker.shouldRetry(timestamp)) {
++                                            return false;
++                                        } else {
++                                            retryMarker.markAttempt(timestamp);
++                                            return true;
++                                        }
++                                    };
++                                    Set<Pair<Holder<PoiType>, BlockPos>> poiPositions = poiManager.findAllClosestFirstWithType(
++                                            poiType, cacheTest, body.blockPosition(), 48, PoiManager.Occupancy.HAS_SPACE
++                                        )
++                                        .limit(5L)
++                                        .filter(px -> validPoi.test(level, (BlockPos)px.getSecond()))
++                                        .collect(Collectors.toSet());
++                                    Path path = findPathToPois(body, poiPositions);
++                                    if (path != null && path.canReach()) {
++                                        BlockPos targetPos = path.getTarget();
++                                        poiManager.getType(targetPos).ifPresent(type -> {
++                                            poiManager.take(poiType, (t, poiPos) -> poiPos.equals(targetPos), targetPos, 1);
++                                            toAcquire.set(GlobalPos.of(level.dimension(), targetPos));
++                                            onPoiAcquisitionEvent.ifPresent(event -> level.broadcastEntityEvent(body, event));
++                                            batchCache.clear();
++                                            level.debugSynchronizers().updatePoi(targetPos);
++                                        });
++                                    } else {
++                                        for (Pair<Holder<PoiType>, BlockPos> p : poiPositions) {
++                                            batchCache.computeIfAbsent(p.getSecond().asLong(), key -> new AcquirePoi.JitteredLinearRetry(random, timestamp));
++                                        }
+                                     }
++
++                                    return true;
+                                 }
+-
+-                                return true;
+                             }
+                         }
+                     }
+@@ -118,6 +_,7 @@
+     }
+ 
+     public static @Nullable Path findPathToPois(Mob body, Set<Pair<Holder<PoiType>, BlockPos>> pois) {
++        pois = Set.copyOf(pois);
+         if (pois.isEmpty()) {
+             return null;
+         } else {
+@@ -147,23 +_,23 @@
+             this.markAttempt(firstAttemptTimestamp);
+         }
+ 
+-        public void markAttempt(long timestamp) {
++        public synchronized void markAttempt(long timestamp) {
+             this.previousAttemptTimestamp = timestamp;
+             int suggestedDelay = this.currentDelay + this.random.nextInt(40) + 40;
+             this.currentDelay = Math.min(suggestedDelay, 400);
+             this.nextScheduledAttemptTimestamp = timestamp + this.currentDelay;
+         }
+ 
+-        public boolean isStillValid(long timestamp) {
++        public synchronized boolean isStillValid(long timestamp) {
+             return timestamp - this.previousAttemptTimestamp < 400L;
+         }
+ 
+-        public boolean shouldRetry(long timestamp) {
++        public synchronized boolean shouldRetry(long timestamp) {
+             return timestamp >= this.nextScheduledAttemptTimestamp;
+         }
+ 
+         @Override
+-        public String toString() {
++        public synchronized String toString() {
+             return "RetryMarker{, previousAttemptAt="
+                 + this.previousAttemptTimestamp
+                 + ", nextScheduledAttemptAt="

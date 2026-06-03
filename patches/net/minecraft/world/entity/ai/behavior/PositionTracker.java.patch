@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/PositionTracker.java
++++ b/net/minecraft/world/entity/ai/behavior/PositionTracker.java
+@@ -10,4 +_,8 @@
+     BlockPos currentBlockPosition();
+ 
+     boolean isVisibleBy(final LivingEntity body);
++
++    default boolean isRegionSafeFor(final LivingEntity body) {
++        return !(this instanceof EntityTracker entityTracker) || entityTracker.isRegionSafeFor(body);
++    }
+ }

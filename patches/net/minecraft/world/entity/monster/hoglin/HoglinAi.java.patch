@@ -1,0 +1,60 @@
+--- a/net/minecraft/world/entity/monster/hoglin/HoglinAi.java
++++ b/net/minecraft/world/entity/monster/hoglin/HoglinAi.java
+@@ -146,19 +_,31 @@
+ 
+     private static void retreatFromNearestTarget(Hoglin body, LivingEntity newAvoidTarget) {
+         Brain<Hoglin> brain = body.getBrain();
++        newAvoidTarget = BehaviorUtils.regionSafeEntity(body, newAvoidTarget);
++        if (newAvoidTarget == null) {
++            return;
++        }
++
+         LivingEntity nearest = BehaviorUtils.getNearestTarget(body, brain.getMemory(MemoryModuleType.AVOID_TARGET), newAvoidTarget);
+         nearest = BehaviorUtils.getNearestTarget(body, brain.getMemory(MemoryModuleType.ATTACK_TARGET), nearest);
+         setAvoidTarget(body, nearest);
+     }
+ 
+     private static void setAvoidTarget(Hoglin body, LivingEntity avoidTarget) {
++        avoidTarget = BehaviorUtils.regionSafeEntity(body, avoidTarget);
++        if (avoidTarget == null) {
++            return;
++        }
++
+         body.getBrain().eraseMemory(MemoryModuleType.ATTACK_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+-        body.getBrain().setMemoryWithExpiry(MemoryModuleType.AVOID_TARGET, avoidTarget, RETREAT_DURATION.sample(body.level().getRandom()));
++        body.getBrain().setMemoryWithExpiry(MemoryModuleType.AVOID_TARGET, avoidTarget, RETREAT_DURATION.sample(body.getRandom()));
+     }
+ 
+     private static Optional<? extends LivingEntity> findNearestValidAttackTarget(ServerLevel level, Hoglin body) {
+-        return !isPacified(body) && !isBreeding(body) ? body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_ATTACKABLE_PLAYER) : Optional.empty();
++        return !isPacified(body) && !isBreeding(body)
++            ? body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_ATTACKABLE_PLAYER).map(target -> BehaviorUtils.regionSafeEntity(body, target))
++            : Optional.empty();
+     }
+ 
+     static boolean isPosNearNearestRepellent(Hoglin body, BlockPos pos) {
+@@ -181,6 +_,11 @@
+     }
+ 
+     protected static void wasHurtBy(ServerLevel level, Hoglin body, LivingEntity attacker) {
++        attacker = BehaviorUtils.regionSafeEntity(body, attacker);
++        if (attacker == null) {
++            return;
++        }
++
+         Brain<Hoglin> brain = body.getBrain();
+         brain.eraseMemory(MemoryModuleType.PACIFIED);
+         brain.eraseMemory(MemoryModuleType.BREED_TARGET);
+@@ -205,6 +_,11 @@
+     }
+ 
+     private static void setAttackTarget(Hoglin body, LivingEntity target) {
++        target = BehaviorUtils.regionSafeEntity(body, target);
++        if (target == null) {
++            return;
++        }
++
+         Brain<Hoglin> brain = body.getBrain();
+         brain.eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+         brain.eraseMemory(MemoryModuleType.BREED_TARGET);

@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/LecternBlock.java
++++ b/net/minecraft/world/level/block/LecternBlock.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionHand;
+@@ -247,7 +_,7 @@
+         BlockEntity blockEntity = level.getBlockEntity(pos);
+         if (blockEntity instanceof LecternBlockEntity) {
+             player.openMenu((LecternBlockEntity)blockEntity);
+-            player.awardStat(Stats.INTERACT_WITH_LECTERN);
++            RegionizedWorldGuard.awardStat(player, Stats.INTERACT_WITH_LECTERN);
+         }
+     }
+ 

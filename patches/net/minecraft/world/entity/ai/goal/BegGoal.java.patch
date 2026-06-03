@@ -1,0 +1,75 @@
+--- a/net/minecraft/world/entity/ai/goal/BegGoal.java
++++ b/net/minecraft/world/entity/ai/goal/BegGoal.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BegGoal extends Goal {
+@@ -27,37 +_,44 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        this.player = this.level.getNearestPlayer(this.begTargeting, this.wolf);
++    public synchronized boolean canUse() {
++        this.player = this.regionSafePlayer(this.level.getNearestPlayer(this.begTargeting, this.wolf));
+         return this.player == null ? false : this.playerHoldingInteresting(this.player);
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        if (!this.player.isAlive()) {
++    public synchronized boolean canContinueToUse() {
++        Player player = this.regionSafePlayer(this.player);
++        if (player == null || !player.isAlive()) {
+             return false;
+         } else {
+-            return this.wolf.distanceToSqr(this.player) > this.lookDistance * this.lookDistance
++            return this.wolf.distanceToSqr(player) > this.lookDistance * this.lookDistance
+                 ? false
+-                : this.lookTime > 0 && this.playerHoldingInteresting(this.player);
++                : this.lookTime > 0 && this.playerHoldingInteresting(player);
+         }
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.wolf.setIsInterested(true);
+         this.lookTime = this.adjustedTickDelay(40 + this.wolf.getRandom().nextInt(40));
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.wolf.setIsInterested(false);
+         this.player = null;
++        this.lookTime = 0;
+     }
+ 
+     @Override
+-    public void tick() {
+-        this.wolf.getLookControl().setLookAt(this.player.getX(), this.player.getEyeY(), this.player.getZ(), 10.0F, this.wolf.getMaxHeadXRot());
++    public synchronized void tick() {
++        Player player = this.regionSafePlayer(this.player);
++        if (player == null) {
++            return;
++        }
++
++        this.wolf.getLookControl().setLookAt(player.getX(), player.getEyeY(), player.getZ(), 10.0F, this.wolf.getMaxHeadXRot());
+         this.lookTime--;
+     }
+ 
+@@ -70,5 +_,9 @@
+         }
+ 
+         return false;
++    }
++
++    private synchronized @Nullable Player regionSafePlayer(@Nullable Player player) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.wolf.level(), player);
+     }
+ }

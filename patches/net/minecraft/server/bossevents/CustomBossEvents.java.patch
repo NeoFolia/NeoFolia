@@ -1,0 +1,74 @@
+--- a/net/minecraft/server/bossevents/CustomBossEvents.java
++++ b/net/minecraft/server/bossevents/CustomBossEvents.java
+@@ -3,7 +_,9 @@
+ import com.google.common.collect.Maps;
+ import com.mojang.serialization.Codec;
+ import java.util.Collection;
++import java.util.List;
+ import java.util.Map;
++import java.util.Set;
+ import java.util.UUID;
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.resources.Identifier;
+@@ -22,45 +_,49 @@
+         CustomBossEvents r = new CustomBossEvents();
+         events.forEach((id, packed) -> r.events.put(id, CustomBossEvent.load(UUID.randomUUID(), id, packed, r::setDirty)));
+         return r;
+-    }, c -> Util.mapValues(c.events, CustomBossEvent::pack));
++    }, CustomBossEvents::packEvents);
+     public static final SavedDataType<CustomBossEvents> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("custom_boss_events"), CustomBossEvents::new, CODEC, DataFixTypes.SAVED_DATA_CUSTOM_BOSS_EVENTS
+     );
+     private final Map<Identifier, CustomBossEvent> events = Maps.newHashMap();
+ 
+-    public @Nullable CustomBossEvent get(Identifier id) {
++    public synchronized @Nullable CustomBossEvent get(Identifier id) {
+         return this.events.get(id);
+     }
+ 
+-    public CustomBossEvent create(RandomSource random, Identifier id, Component name) {
++    public synchronized CustomBossEvent create(RandomSource random, Identifier id, Component name) {
+         CustomBossEvent result = new CustomBossEvent(Mth.createInsecureUUID(random), id, name, this::setDirty);
+         this.events.put(id, result);
+         this.setDirty();
+         return result;
+     }
+ 
+-    public void remove(CustomBossEvent event) {
++    public synchronized void remove(CustomBossEvent event) {
+         if (this.events.remove(event.customId()) != null) {
+             this.setDirty();
+         }
+     }
+ 
+-    public Collection<Identifier> getIds() {
+-        return this.events.keySet();
+-    }
+-
+-    public Collection<CustomBossEvent> getEvents() {
+-        return this.events.values();
++    public synchronized Collection<Identifier> getIds() {
++        return Set.copyOf(this.events.keySet());
++    }
++
++    public synchronized Collection<CustomBossEvent> getEvents() {
++        return List.copyOf(this.events.values());
++    }
++
++    private synchronized Map<Identifier, CustomBossEvent.Packed> packEvents() {
++        return Util.mapValues(Map.copyOf(this.events), CustomBossEvent::pack);
+     }
+ 
+     public void onPlayerConnect(ServerPlayer player) {
+-        for (CustomBossEvent event : this.events.values()) {
++        for (CustomBossEvent event : this.getEvents()) {
+             event.onPlayerConnect(player);
+         }
+     }
+ 
+     public void onPlayerDisconnect(ServerPlayer player) {
+-        for (CustomBossEvent event : this.events.values()) {
++        for (CustomBossEvent event : this.getEvents()) {
+             event.onPlayerDisconnect(player);
+         }
+     }

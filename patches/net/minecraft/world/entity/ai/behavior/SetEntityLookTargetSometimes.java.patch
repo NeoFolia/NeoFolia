@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetEntityLookTargetSometimes.java
++++ b/net/minecraft/world/entity/ai/behavior/SetEntityLookTargetSometimes.java
+@@ -29,10 +_,10 @@
+                     i,
+                     (lookTarget, nearestEntities) -> (level, body, timestamp) -> {
+                         Optional<LivingEntity> target = i.<NearestVisibleLivingEntities>get(nearestEntities)
+-                            .findClosest(predicate.and(mob -> mob.distanceToSqr(body) <= maxDistSqr));
++                            .findClosest(predicate.and(mob -> BehaviorUtils.regionSafeEntity(body, mob) != null && mob.distanceToSqr(body) <= maxDistSqr));
+                         if (target.isEmpty()) {
+                             return false;
+-                        } else if (!ticker.tickDownAndCheck(level.getRandom())) {
++                        } else if (!ticker.tickDownAndCheck(body.getRandom())) {
+                             return false;
+                         } else {
+                             lookTarget.set(new EntityTracker(target.get(), true));
+@@ -55,7 +_,7 @@
+             }
+         }
+ 
+-        public boolean tickDownAndCheck(RandomSource random) {
++        public synchronized boolean tickDownAndCheck(RandomSource random) {
+             if (this.ticksUntilNextStart == 0) {
+                 this.ticksUntilNextStart = this.interval.sample(random) - 1;
+                 return false;

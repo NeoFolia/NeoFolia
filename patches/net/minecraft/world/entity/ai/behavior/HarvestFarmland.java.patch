@@ -1,0 +1,170 @@
+--- a/net/minecraft/world/entity/ai/behavior/HarvestFarmland.java
++++ b/net/minecraft/world/entity/ai/behavior/HarvestFarmland.java
+@@ -22,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class HarvestFarmland extends Behavior<Villager> {
+@@ -45,8 +_,8 @@
+         );
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+-        if (!level.getGameRules().get(GameRules.MOB_GRIEFING)) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++        if (!net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, body)) {
+             return false;
+         } else if (!body.getVillagerData().profession().is(VillagerProfession.FARMER)) {
+             return false;
+@@ -65,41 +_,51 @@
+                 }
+             }
+ 
+-            this.aboveFarmlandPos = this.getValidFarmland(level);
++            this.aboveFarmlandPos = this.getValidFarmland(body);
+             return this.aboveFarmlandPos != null;
+         }
+     }
+ 
+-    private @Nullable BlockPos getValidFarmland(ServerLevel level) {
++    private synchronized @Nullable BlockPos getValidFarmland(Villager body) {
+         return this.validFarmlandAroundVillager.isEmpty()
+             ? null
+-            : this.validFarmlandAroundVillager.get(level.getRandom().nextInt(this.validFarmlandAroundVillager.size()));
++            : this.validFarmlandAroundVillager.get(body.getRandom().nextInt(this.validFarmlandAroundVillager.size()));
+     }
+ 
+-    private boolean validPos(BlockPos blockPos, ServerLevel level) {
++    private synchronized boolean validPos(BlockPos blockPos, ServerLevel level) {
++        if (!canReadBlock(level, blockPos) || !canReadBlock(level, blockPos.below())) {
++            return false;
++        }
++
+         BlockState state = level.getBlockState(blockPos);
+         Block block = state.getBlock();
+         Block blockBelow = level.getBlockState(blockPos.below()).getBlock();
+-        return block instanceof CropBlock && ((CropBlock)block).isMaxAge(state) || state.isAir() && blockBelow instanceof FarmlandBlock;
++        return block instanceof CropBlock && ((CropBlock)block).isMaxAge(state) || state.isAir() && (blockBelow instanceof FarmlandBlock || blockBelow.builtInRegistryHolder().is(net.neoforged.neoforge.common.Tags.Blocks.VILLAGER_FARMLANDS));
+     }
+ 
+-    protected void start(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         if (timestamp > this.nextOkStartTime && this.aboveFarmlandPos != null) {
+             body.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(this.aboveFarmlandPos));
+             body.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(new BlockPosTracker(this.aboveFarmlandPos), 0.5F, 1));
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         body.getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+         this.timeWorkedSoFar = 0;
+         this.nextOkStartTime = timestamp + 40L;
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
+         if (this.aboveFarmlandPos == null || this.aboveFarmlandPos.closerToCenterThan(body.position(), 1.0)) {
+             if (this.aboveFarmlandPos != null && timestamp > this.nextOkStartTime) {
++                if (!canReadBlock(level, this.aboveFarmlandPos) || !canReadBlock(level, this.aboveFarmlandPos.below())) {
++                    this.validFarmlandAroundVillager.remove(this.aboveFarmlandPos);
++                    this.aboveFarmlandPos = this.getValidFarmland(body);
++                    return;
++                }
++
+                 BlockState blockState = level.getBlockState(this.aboveFarmlandPos);
+                 Block block = blockState.getBlock();
+                 Block blockBelow = level.getBlockState(this.aboveFarmlandPos.below()).getBlock();
+@@ -107,42 +_,49 @@
+                     level.destroyBlock(this.aboveFarmlandPos, true, body);
+                 }
+ 
+-                if (blockState.isAir() && blockBelow instanceof FarmlandBlock && body.hasFarmSeeds()) {
++                if (blockState.isAir() && (blockBelow instanceof FarmlandBlock || blockBelow.builtInRegistryHolder().is(net.neoforged.neoforge.common.Tags.Blocks.VILLAGER_FARMLANDS)) && body.hasFarmSeeds()) {
+                     SimpleContainer inventory = body.getInventory();
+ 
+-                    for (int i = 0; i < inventory.getContainerSize(); i++) {
+-                        ItemStack itemStack = inventory.getItem(i);
+-                        boolean ok = false;
+-                        if (!itemStack.isEmpty() && itemStack.is(ItemTags.VILLAGER_PLANTABLE_SEEDS) && itemStack.getItem() instanceof BlockItem blockItem) {
+-                            BlockState place = blockItem.getBlock().defaultBlockState();
+-                            level.setBlockAndUpdate(this.aboveFarmlandPos, place);
+-                            level.gameEvent(GameEvent.BLOCK_PLACE, this.aboveFarmlandPos, GameEvent.Context.of(body, place));
+-                            ok = true;
+-                        }
++                    synchronized (inventory) {
++                        for (int i = 0; i < inventory.getContainerSize(); i++) {
++                            ItemStack itemStack = inventory.getItem(i);
++                            boolean ok = false;
++                            if (!itemStack.isEmpty() && itemStack.is(ItemTags.VILLAGER_PLANTABLE_SEEDS) && itemStack.getItem() instanceof BlockItem blockItem) {
++                                BlockState place = blockItem.getBlock().defaultBlockState();
++                                level.setBlockAndUpdate(this.aboveFarmlandPos, place);
++                                level.gameEvent(GameEvent.BLOCK_PLACE, this.aboveFarmlandPos, GameEvent.Context.of(body, place));
++                                ok = true;
++                            } else if (itemStack.getItem() instanceof net.neoforged.neoforge.common.SpecialPlantable specialPlantable && specialPlantable.villagerCanPlantItem(body)) {
++                                if (specialPlantable.canPlacePlantAtPosition(itemStack, level, aboveFarmlandPos, net.minecraft.core.Direction.DOWN)) {
++                                    specialPlantable.spawnPlantAtPosition(itemStack, level, aboveFarmlandPos, net.minecraft.core.Direction.DOWN);
++                                    ok = true;
++                                }
++                            }
+ 
+-                        if (ok) {
+-                            level.playSound(
+-                                null,
+-                                this.aboveFarmlandPos.getX(),
+-                                this.aboveFarmlandPos.getY(),
+-                                this.aboveFarmlandPos.getZ(),
+-                                SoundEvents.CROP_PLANTED,
+-                                SoundSource.BLOCKS,
+-                                1.0F,
+-                                1.0F
+-                            );
+-                            itemStack.shrink(1);
+-                            if (itemStack.isEmpty()) {
+-                                inventory.setItem(i, ItemStack.EMPTY);
++                            if (ok) {
++                                level.playSound(
++                                    null,
++                                    this.aboveFarmlandPos.getX(),
++                                    this.aboveFarmlandPos.getY(),
++                                    this.aboveFarmlandPos.getZ(),
++                                    SoundEvents.CROP_PLANTED,
++                                    SoundSource.BLOCKS,
++                                    1.0F,
++                                    1.0F
++                                );
++                                itemStack.shrink(1);
++                                if (itemStack.isEmpty()) {
++                                    inventory.setItem(i, ItemStack.EMPTY);
++                                }
++                                break;
+                             }
+-                            break;
+                         }
+                     }
+                 }
+ 
+                 if (block instanceof CropBlock && !((CropBlock)block).isMaxAge(blockState)) {
+                     this.validFarmlandAroundVillager.remove(this.aboveFarmlandPos);
+-                    this.aboveFarmlandPos = this.getValidFarmland(level);
++                    this.aboveFarmlandPos = this.getValidFarmland(body);
+                     if (this.aboveFarmlandPos != null) {
+                         this.nextOkStartTime = timestamp + 20L;
+                         body.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(new BlockPosTracker(this.aboveFarmlandPos), 0.5F, 1));
+@@ -155,7 +_,11 @@
+         }
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return this.timeWorkedSoFar < 200;
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

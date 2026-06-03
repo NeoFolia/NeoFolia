@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/level/entity/ChunkEntities.java
++++ b/net/minecraft/world/level/entity/ChunkEntities.java
+@@ -10,7 +_,7 @@
+ 
+     public ChunkEntities(ChunkPos pos, List<T> entities) {
+         this.pos = pos;
+-        this.entities = entities;
++        this.entities = List.copyOf(entities);
+     }
+ 
+     public ChunkPos getPos() {
+@@ -18,7 +_,7 @@
+     }
+ 
+     public Stream<T> getEntities() {
+-        return this.entities.stream();
++        return List.copyOf(this.entities).stream();
+     }
+ 
+     public boolean isEmpty() {

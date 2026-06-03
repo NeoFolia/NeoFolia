@@ -1,0 +1,121 @@
+--- a/net/minecraft/commands/CommandSourceStack.java
++++ b/net/minecraft/commands/CommandSourceStack.java
+@@ -46,6 +_,8 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CommandSourceStack implements SharedSuggestionProvider, ExecutionCommandSource<CommandSourceStack>, net.neoforged.neoforge.common.extensions.ICommandSourceStackExtension {
+@@ -387,19 +_,21 @@
+     }
+ 
+     public @Nullable Entity getEntity() {
+-        return this.entity;
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, this.entity);
+     }
+ 
+     public Entity getEntityOrException() throws CommandSyntaxException {
+-        if (this.entity == null) {
++        Entity entity = this.getEntity();
++        if (entity == null) {
+             throw ERROR_NOT_ENTITY.create();
+         } else {
+-            return this.entity;
++            return entity;
+         }
+     }
+ 
+     public ServerPlayer getPlayerOrException() throws CommandSyntaxException {
+-        if (this.entity instanceof ServerPlayer player) {
++        Entity entity = this.getEntity();
++        if (entity instanceof ServerPlayer player) {
+             return player;
+         } else {
+             throw ERROR_NOT_PLAYER.create();
+@@ -407,11 +_,12 @@
+     }
+ 
+     public @Nullable ServerPlayer getPlayer() {
+-        return this.entity instanceof ServerPlayer player ? player : null;
++        Entity entity = this.getEntity();
++        return entity instanceof ServerPlayer player ? player : null;
+     }
+ 
+     public boolean isPlayer() {
+-        return this.entity instanceof ServerPlayer;
++        return this.getEntity() instanceof ServerPlayer;
+     }
+ 
+     public Vec2 getRotation() {
+@@ -441,9 +_,9 @@
+ 
+     public void sendChatMessage(OutgoingChatMessage message, boolean filtered, ChatType.Bound chatType) {
+         if (!this.silent) {
+-            ServerPlayer player = this.getPlayer();
++            ServerPlayer player = this.getSourcePlayerForMessaging();
+             if (player != null) {
+-                player.sendChatMessage(message, filtered, chatType);
++                RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.sendChatMessage(message, filtered, chatType));
+             } else {
+                 this.source.sendSystemMessage(chatType.decorate(message.content()));
+             }
+@@ -452,9 +_,9 @@
+ 
+     public void sendSystemMessage(Component message) {
+         if (!this.silent) {
+-            ServerPlayer player = this.getPlayer();
++            ServerPlayer player = this.getSourcePlayerForMessaging();
+             if (player != null) {
+-                player.sendSystemMessage(message);
++                RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.sendSystemMessage(message));
+             } else {
+                 this.source.sendSystemMessage(message);
+             }
+@@ -467,7 +_,7 @@
+         if (shouldSendSystemMessage || shouldBroadcast) {
+             Component message = messageSupplier.get();
+             if (shouldSendSystemMessage) {
+-                this.source.sendSystemMessage(message);
++                this.sendSystemMessage(message);
+             }
+ 
+             if (shouldBroadcast) {
+@@ -477,12 +_,19 @@
+     }
+ 
+     private void broadcastToAdmins(Component message) {
++        if (RegionizedTickContext.isRegionThread()) {
++            if (!this.server.regionizedTaskDispatcher().tryExecuteGlobal(() -> this.broadcastToAdmins(message))) {
++                throw new IllegalStateException("Cannot broadcast command feedback from region worker while region dispatcher is not running");
++            }
++            return;
++        }
++
+         Component broadcast = Component.translatable("chat.type.admin", this.getDisplayName(), message).withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC);
+         GameRules gameRules = this.level.getGameRules();
+         if (gameRules.get(GameRules.SEND_COMMAND_FEEDBACK)) {
+-            for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
++            for (ServerPlayer player : this.server.getPlayerList().getAllPlayers()) {
+                 if (player.commandSource() != this.source && this.server.getPlayerList().isOp(player.nameAndId())) {
+-                    player.sendSystemMessage(broadcast);
++                    RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.sendSystemMessage(broadcast));
+                 }
+             }
+         }
+@@ -494,8 +_,12 @@
+ 
+     public void sendFailure(Component message) {
+         if (this.source.acceptsFailure() && !this.silent) {
+-            this.source.sendSystemMessage(Component.empty().append(message).withStyle(ChatFormatting.RED));
++            this.sendSystemMessage(Component.empty().append(message).withStyle(ChatFormatting.RED));
+         }
++    }
++
++    private @Nullable ServerPlayer getSourcePlayerForMessaging() {
++        return this.entity instanceof ServerPlayer player ? player : null;
+     }
+ 
+     @Override

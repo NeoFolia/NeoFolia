@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/level/ChunkTaskDispatcher.java
++++ b/net/minecraft/server/level/ChunkTaskDispatcher.java
+@@ -20,7 +_,7 @@
+     private final ChunkTaskPriorityQueue queue;
+     private final TaskScheduler<Runnable> executor;
+     private final PriorityConsecutiveExecutor dispatcher;
+-    protected boolean sleeping;
++    protected volatile boolean sleeping;
+ 
+     public ChunkTaskDispatcher(TaskScheduler<Runnable> executor, Executor dispatcherExecutor) {
+         this.queue = new ChunkTaskPriorityQueue(executor.name() + "_queue");

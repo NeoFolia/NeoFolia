@@ -1,0 +1,20 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListService.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListService.java
+@@ -4,6 +_,7 @@
+ import java.util.Optional;
+ import java.util.UUID;
+ import java.util.concurrent.CompletableFuture;
++import net.minecraft.network.chat.Component;
+ import net.minecraft.server.jsonrpc.methods.ClientInfo;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.players.NameAndId;
+@@ -40,5 +_,9 @@
+ 
+     @Nullable ServerPlayer getPlayerByName(String name);
+ 
++    String getIpAddress(ServerPlayer player);
++
+     void remove(ServerPlayer player, ClientInfo clientInfo);
++
++    void disconnect(ServerPlayer player, Component reason, ClientInfo clientInfo);
+ }

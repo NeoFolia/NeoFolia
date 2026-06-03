@@ -1,0 +1,104 @@
+--- a/net/minecraft/world/level/block/entity/DecoratedPotBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/DecoratedPotBlockEntity.java
+@@ -41,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         if (!this.decorations.equals(PotDecorations.EMPTY)) {
+             output.store("sherds", PotDecorations.CODEC, this.decorations);
+@@ -53,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.decorations = input.read("sherds", PotDecorations.CODEC).orElse(PotDecorations.EMPTY);
+         if (!this.tryLoadLootTable(input)) {
+@@ -76,7 +_,7 @@
+         return this.getBlockState().getValue(BlockStateProperties.HORIZONTAL_FACING);
+     }
+ 
+-    public PotDecorations getDecorations() {
++    public synchronized PotDecorations getDecorations() {
+         return this.decorations;
+     }
+ 
+@@ -89,34 +_,34 @@
+     }
+ 
+     @Override
+-    public @Nullable ResourceKey<LootTable> getLootTable() {
++    public synchronized @Nullable ResourceKey<LootTable> getLootTable() {
+         return this.lootTable;
+     }
+ 
+     @Override
+-    public void setLootTable(@Nullable ResourceKey<LootTable> lootTable) {
++    public synchronized void setLootTable(@Nullable ResourceKey<LootTable> lootTable) {
+         this.lootTable = lootTable;
+     }
+ 
+     @Override
+-    public long getLootTableSeed() {
++    public synchronized long getLootTableSeed() {
+         return this.lootTableSeed;
+     }
+ 
+     @Override
+-    public void setLootTableSeed(long lootTableSeed) {
++    public synchronized void setLootTableSeed(long lootTableSeed) {
+         this.lootTableSeed = lootTableSeed;
+     }
+ 
+     @Override
+-    protected void collectImplicitComponents(DataComponentMap.Builder components) {
++    protected synchronized void collectImplicitComponents(DataComponentMap.Builder components) {
+         super.collectImplicitComponents(components);
+         components.set(DataComponents.POT_DECORATIONS, this.decorations);
+         components.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(List.of(this.item)));
+     }
+ 
+     @Override
+-    protected void applyImplicitComponents(DataComponentGetter components) {
++    protected synchronized void applyImplicitComponents(DataComponentGetter components) {
+         super.applyImplicitComponents(components);
+         this.decorations = components.getOrDefault(DataComponents.POT_DECORATIONS, PotDecorations.EMPTY);
+         this.item = components.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyOne();
+@@ -130,13 +_,13 @@
+     }
+ 
+     @Override
+-    public ItemStack getTheItem() {
++    public synchronized ItemStack getTheItem() {
+         this.unpackLootTable(null);
+         return this.item;
+     }
+ 
+     @Override
+-    public ItemStack splitTheItem(int count) {
++    public synchronized ItemStack splitTheItem(int count) {
+         this.unpackLootTable(null);
+         ItemStack result = this.item.split(count);
+         if (this.item.isEmpty()) {
+@@ -147,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void setTheItem(ItemStack itemStack) {
++    public synchronized void setTheItem(ItemStack itemStack) {
+         this.unpackLootTable(null);
+         this.item = itemStack;
+     }
+@@ -164,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean triggerEvent(int event, int data) {
++    public synchronized boolean triggerEvent(int event, int data) {
+         if (this.level != null && event == 1 && data >= 0 && data < DecoratedPotBlockEntity.WobbleStyle.values().length) {
+             this.wobbleStartedAtTick = this.level.getGameTime();
+             this.lastWobbleStyle = DecoratedPotBlockEntity.WobbleStyle.values()[data];

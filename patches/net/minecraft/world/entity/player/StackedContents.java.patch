@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/player/StackedContents.java
++++ b/net/minecraft/world/entity/player/StackedContents.java
+@@ -31,19 +_,19 @@
+         this.amounts.addTo(item, count);
+     }
+ 
+-    public boolean tryPick(List<? extends StackedContents.IngredientInfo<T>> ingredients, int amount, StackedContents.@Nullable Output<T> output) {
++    public synchronized boolean tryPick(List<? extends StackedContents.IngredientInfo<T>> ingredients, int amount, StackedContents.@Nullable Output<T> output) {
+         return new StackedContents.RecipePicker(ingredients).tryPick(amount, output);
+     }
+ 
+-    public int tryPickAll(List<? extends StackedContents.IngredientInfo<T>> ingredients, int maxSize, StackedContents.@Nullable Output<T> output) {
++    public synchronized int tryPickAll(List<? extends StackedContents.IngredientInfo<T>> ingredients, int maxSize, StackedContents.@Nullable Output<T> output) {
+         return new StackedContents.RecipePicker(ingredients).tryPickAll(maxSize, output);
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.amounts.clear();
+     }
+ 
+-    public void account(T item, int count) {
++    public synchronized void account(T item, int count) {
+         this.put(item, count);
+     }
+ 
+@@ -70,7 +_,7 @@
+     }
+ 
+     @VisibleForTesting
+-    public int getResultUpperBound(List<? extends StackedContents.IngredientInfo<T>> ingredients) {
++    public synchronized int getResultUpperBound(List<? extends StackedContents.IngredientInfo<T>> ingredients) {
+         int min = Integer.MAX_VALUE;
+         ObjectIterable<Entry<T>> availableItems = Reference2IntMaps.fastIterable(this.amounts);
+ 
+@@ -144,7 +_,7 @@
+             }
+         }
+ 
+-        public boolean tryPick(int capacity, StackedContents.@Nullable Output<T> output) {
++        public synchronized boolean tryPick(int capacity, StackedContents.@Nullable Output<T> output) {
+             if (capacity <= 0) {
+                 return true;
+             } else {
+@@ -400,7 +_,7 @@
+             this.data.clear(offset, offset + count);
+         }
+ 
+-        public int tryPickAll(int maxSize, StackedContents.@Nullable Output<T> output) {
++        public synchronized int tryPickAll(int maxSize, StackedContents.@Nullable Output<T> output) {
+             int min = 0;
+             int max = Math.min(maxSize, StackedContents.this.getResultUpperBound(this.ingredients)) + 1;
+ 

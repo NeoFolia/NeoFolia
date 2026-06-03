@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/level/PathNavigationRegion.java
++++ b/net/minecraft/world/level/PathNavigationRegion.java
+@@ -21,6 +_,7 @@
+ import net.minecraft.world.level.material.Fluids;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PathNavigationRegion implements CollisionGetter {
+@@ -44,7 +_,9 @@
+ 
+         for (int xc = this.centerX; xc <= xc2; xc++) {
+             for (int zc = this.centerZ; zc <= zc2; zc++) {
+-                this.chunks[xc - this.centerX][zc - this.centerZ] = chunkSource.getChunkNow(xc, zc);
++                this.chunks[xc - this.centerX][zc - this.centerZ] = RegionizedWorldGuard.shouldLoadChunk(level, xc, zc)
++                    ? chunkSource.getChunkNow(xc, zc)
++                    : null;
+             }
+         }
+ 

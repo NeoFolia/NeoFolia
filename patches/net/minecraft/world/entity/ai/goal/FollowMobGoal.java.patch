@@ -1,0 +1,98 @@
+--- a/net/minecraft/world/entity/ai/goal/FollowMobGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowMobGoal.java
+@@ -9,6 +_,8 @@
+ import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
+ import net.minecraft.world.entity.ai.navigation.PathNavigation;
+ import net.minecraft.world.level.pathfinder.PathType;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FollowMobGoal extends Goal {
+@@ -36,12 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        List<Mob> mobs = this.mob.level().getEntitiesOfClass(Mob.class, this.mob.getBoundingBox().inflate(this.areaSize), this.followPredicate);
++    public synchronized boolean canUse() {
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(this.areaSize));
++        List<Mob> mobs = searchBox == null ? List.of() : List.copyOf(this.mob.level().getEntitiesOfClass(Mob.class, searchBox, this.followPredicate));
+         if (!mobs.isEmpty()) {
+             for (Mob mobInList : mobs) {
+                 if (!mobInList.isInvisible()) {
+-                    this.followingMob = mobInList;
++                    this.followingMob = this.regionSafeMob(mobInList);
+                     return true;
+                 }
+             }
+@@ -51,49 +_,55 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.followingMob != null && !this.navigation.isDone() && this.mob.distanceToSqr(this.followingMob) > this.stopDistance * this.stopDistance;
++    public synchronized boolean canContinueToUse() {
++        Mob target = this.regionSafeMob(this.followingMob);
++        return target != null && !this.navigation.isDone() && this.mob.distanceToSqr(target) > this.stopDistance * this.stopDistance;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.timeToRecalcPath = 0;
+         this.oldWaterCost = this.mob.getPathfindingMalus(PathType.WATER);
+         this.mob.setPathfindingMalus(PathType.WATER, 0.0F);
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.followingMob = null;
+         this.navigation.stop();
+         this.mob.setPathfindingMalus(PathType.WATER, this.oldWaterCost);
+     }
+ 
+     @Override
+-    public void tick() {
+-        if (this.followingMob != null && !this.mob.isLeashed()) {
+-            this.mob.getLookControl().setLookAt(this.followingMob, 10.0F, this.mob.getMaxHeadXRot());
++    public synchronized void tick() {
++        Mob target = this.regionSafeMob(this.followingMob);
++        if (target != null && !this.mob.isLeashed()) {
++            this.mob.getLookControl().setLookAt(target, 10.0F, this.mob.getMaxHeadXRot());
+             if (--this.timeToRecalcPath <= 0) {
+                 this.timeToRecalcPath = this.adjustedTickDelay(10);
+-                double xxd = this.mob.getX() - this.followingMob.getX();
+-                double yyd = this.mob.getY() - this.followingMob.getY();
+-                double zzd = this.mob.getZ() - this.followingMob.getZ();
++                double xxd = this.mob.getX() - target.getX();
++                double yyd = this.mob.getY() - target.getY();
++                double zzd = this.mob.getZ() - target.getZ();
+                 double distSqr = xxd * xxd + yyd * yyd + zzd * zzd;
+                 if (!(distSqr <= this.stopDistance * this.stopDistance)) {
+-                    this.navigation.moveTo(this.followingMob, this.speedModifier);
++                    this.navigation.moveTo(target, this.speedModifier);
+                 } else {
+                     this.navigation.stop();
+-                    LookControl lookControl = this.followingMob.getLookControl();
++                    LookControl lookControl = target.getLookControl();
+                     if (distSqr <= this.stopDistance
+                         || lookControl.getWantedX() == this.mob.getX()
+                             && lookControl.getWantedY() == this.mob.getY()
+                             && lookControl.getWantedZ() == this.mob.getZ()) {
+-                        double deltaX = this.followingMob.getX() - this.mob.getX();
+-                        double deltaZ = this.followingMob.getZ() - this.mob.getZ();
++                        double deltaX = target.getX() - this.mob.getX();
++                        double deltaZ = target.getZ() - this.mob.getZ();
+                         this.navigation.moveTo(this.mob.getX() - deltaX, this.mob.getY(), this.mob.getZ() - deltaZ, this.speedModifier);
+                     }
+                 }
+             }
+         }
++    }
++
++    private synchronized @Nullable Mob regionSafeMob(@Nullable Mob target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

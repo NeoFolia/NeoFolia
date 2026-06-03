@@ -1,0 +1,92 @@
+--- a/net/minecraft/world/entity/TamableAnimal.java
++++ b/net/minecraft/world/entity/TamableAnimal.java
+@@ -30,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.scores.PlayerTeam;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class TamableAnimal extends Animal implements OwnableEntity {
+@@ -138,6 +_,8 @@
+         this.usePlayerItem(player, hand, itemStack);
+         this.heal(foodProperties != null ? healingFactor * foodProperties.nutrition() : defaultHeal);
+         this.playEatingSound();
++        this.usePlayerItem(player, hand, itemStack);
++        this.gameEvent(net.minecraft.world.level.gameevent.GameEvent.EAT); // Neo: add EAT game event
+     }
+ 
+     public boolean isInSittingPose() {
+@@ -170,7 +_,14 @@
+         this.setTame(true, true);
+         this.setOwner(player);
+         if (player instanceof ServerPlayer serverPlayer) {
+-            CriteriaTriggers.TAME_ANIMAL.trigger(serverPlayer, this);
++            this.triggerTameAnimal(serverPlayer);
++        }
++    }
++
++    private void triggerTameAnimal(ServerPlayer player) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.TAME_ANIMAL.trigger(player, this));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Tame animal advancement", trigger)) {
++            trigger.run();
+         }
+     }
+ 
+@@ -222,13 +_,16 @@
+ 
+     @Override
+     public void die(DamageSource source) {
++        // FORGE: Super moved to top so that death message would be cancelled properly
++        net.minecraft.network.chat.Component deathMessage = this.getCombatTracker().getDeathMessage();
++        super.die(source);
++
++        if (this.dead)
+         if (this.level() instanceof ServerLevel serverLevel
+             && serverLevel.getGameRules().get(GameRules.SHOW_DEATH_MESSAGES)
+             && this.getOwner() instanceof ServerPlayer serverPlayer) {
+-            serverPlayer.sendSystemMessage(this.getCombatTracker().getDeathMessage());
++            RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> serverPlayer.sendSystemMessage(deathMessage));
+         }
+-
+-        super.die(source);
+     }
+ 
+     public boolean isOrderedToSit() {
+@@ -252,6 +_,12 @@
+     }
+ 
+     private void teleportToAroundBlockPos(BlockPos targetPos) {
++        if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(
++            this.level(), targetPos, "Tamable owner teleport", () -> this.teleportToAroundBlockPos(targetPos)
++        )) {
++            return;
++        }
++
+         for (int attempt = 0; attempt < 10; attempt++) {
+             int xd = this.random.nextIntBetweenInclusive(-3, 3);
+             int zd = this.random.nextIntBetweenInclusive(-3, 3);
+@@ -279,7 +_,12 @@
+         if (pathType != PathType.WALKABLE) {
+             return false;
+         } else {
+-            BlockState blockStateBelow = this.level().getBlockState(pos.below());
++            BlockPos below = pos.below();
++            if (!RegionizedWorldGuard.shouldLoadChunk(this.level(), below.getX() >> 4, below.getZ() >> 4)) {
++                return false;
++            }
++
++            BlockState blockStateBelow = this.level().getBlockState(below);
+             if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {
+                 return false;
+             } else {
+@@ -290,7 +_,8 @@
+     }
+ 
+     public final boolean unableToMoveToOwner() {
+-        return this.isOrderedToSit() || this.isPassenger() || this.mayBeLeashed() || this.getOwner() != null && this.getOwner().isSpectator();
++        LivingEntity owner = this.getOwner();
++        return this.isOrderedToSit() || this.isPassenger() || this.mayBeLeashed() || owner != null && owner.isSpectator();
+     }
+ 
+     protected boolean canFlyToOwner() {

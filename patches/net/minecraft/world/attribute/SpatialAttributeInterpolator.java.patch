@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/attribute/SpatialAttributeInterpolator.java
++++ b/net/minecraft/world/attribute/SpatialAttributeInterpolator.java
+@@ -8,16 +_,16 @@
+ public class SpatialAttributeInterpolator {
+     private final Reference2DoubleArrayMap<EnvironmentAttributeMap> weightsBySource = new Reference2DoubleArrayMap<>();
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.weightsBySource.clear();
+     }
+ 
+-    public SpatialAttributeInterpolator accumulate(double weight, EnvironmentAttributeMap attributes) {
++    public synchronized SpatialAttributeInterpolator accumulate(double weight, EnvironmentAttributeMap attributes) {
+         this.weightsBySource.mergeDouble(attributes, weight, Double::sum);
+         return this;
+     }
+ 
+-    public <Value> Value applyAttributeLayer(EnvironmentAttribute<Value> attribute, Value baseValue) {
++    public synchronized <Value> Value applyAttributeLayer(EnvironmentAttribute<Value> attribute, Value baseValue) {
+         if (this.weightsBySource.isEmpty()) {
+             return baseValue;
+         } else if (this.weightsBySource.size() == 1) {

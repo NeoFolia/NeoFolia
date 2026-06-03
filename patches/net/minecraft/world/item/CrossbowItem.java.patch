@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/item/CrossbowItem.java
++++ b/net/minecraft/world/item/CrossbowItem.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.joml.Quaternionf;
+ import org.joml.Vector3f;
+ import org.jspecify.annotations.Nullable;
+@@ -171,12 +_,16 @@
+         Level level, LivingEntity shooter, InteractionHand hand, ItemStack weapon, float power, float uncertainty, @Nullable LivingEntity targetOverride
+     ) {
+         if (level instanceof ServerLevel serverLevel) {
++            if (shooter instanceof Player player && net.neoforged.neoforge.event.EventHooks.onArrowLoose(weapon, shooter.level(), player, 1, true) < 0) return;
+             ChargedProjectiles charged = weapon.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY);
+             if (charged != null && !charged.isEmpty()) {
+                 this.shoot(serverLevel, shooter, hand, weapon, charged.itemCopies(), power, uncertainty, shooter instanceof Player, targetOverride);
+                 if (shooter instanceof ServerPlayer player) {
+-                    CriteriaTriggers.SHOT_CROSSBOW.trigger(player, weapon);
+-                    player.awardStat(Stats.ITEM_USED.get(weapon.getItem()));
++                    ItemStack weaponSnapshot = weapon.copy();
++                    RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++                        CriteriaTriggers.SHOT_CROSSBOW.trigger(player, weaponSnapshot);
++                        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(weaponSnapshot.getItem()));
++                    });
+                 }
+             }
+         }
+@@ -224,7 +_,7 @@
+                             sound.value(),
+                             entity.getSoundSource(),
+                             1.0F,
+-                            1.0F / (level.getRandom().nextFloat() * 0.5F + 1.0F) + 0.2F
++                            1.0F / (entity.getRandom().nextFloat() * 0.5F + 1.0F) + 0.2F
+                         )
+                     );
+             }

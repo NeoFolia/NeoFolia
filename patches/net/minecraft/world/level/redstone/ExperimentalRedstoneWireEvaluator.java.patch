@@ -1,0 +1,33 @@
+--- a/net/minecraft/world/level/redstone/ExperimentalRedstoneWireEvaluator.java
++++ b/net/minecraft/world/level/redstone/ExperimentalRedstoneWireEvaluator.java
+@@ -9,12 +_,14 @@
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.RedStoneWireBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.properties.EnumProperty;
+ import net.minecraft.world.level.block.state.properties.RedstoneSide;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ExperimentalRedstoneWireEvaluator extends RedstoneWireEvaluator {
+@@ -95,10 +_,14 @@
+         if (incomingOrigination != null) {
+             orientation = incomingOrigination;
+         } else {
+-            orientation = Orientation.random(level.getRandom());
++            orientation = Orientation.random(redstoneRandom(level));
+         }
+ 
+         return orientation.withUp(Direction.UP).withSideBias(Orientation.SideBias.LEFT);
++    }
++
++    private static RandomSource redstoneRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     private void calculateCurrentChanges(Level level, BlockPos initialPosition, Orientation initialOrientation) {

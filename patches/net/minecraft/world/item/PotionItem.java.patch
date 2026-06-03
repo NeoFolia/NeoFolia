@@ -1,0 +1,27 @@
+--- a/net/minecraft/world/item/PotionItem.java
++++ b/net/minecraft/world/item/PotionItem.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.tags.BlockTags;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.alchemy.PotionContents;
+@@ -44,13 +_,14 @@
+             player.setItemInHand(context.getHand(), ItemUtils.createFilledResult(itemStack, player, new ItemStack(Items.GLASS_BOTTLE)));
+             if (!level.isClientSide()) {
+                 ServerLevel serverLevel = (ServerLevel)level;
++                RandomSource random = player.getRandom();
+ 
+                 for (int i = 0; i < 5; i++) {
+                     serverLevel.sendParticles(
+                         ParticleTypes.SPLASH,
+-                        pos.getX() + level.getRandom().nextDouble(),
++                        pos.getX() + random.nextDouble(),
+                         pos.getY() + 1,
+-                        pos.getZ() + level.getRandom().nextDouble(),
++                        pos.getZ() + random.nextDouble(),
+                         1,
+                         0.0,
+                         0.0,

@@ -1,0 +1,76 @@
+--- a/net/minecraft/world/entity/item/FallingBlockEntity.java
++++ b/net/minecraft/world/entity/item/FallingBlockEntity.java
+@@ -48,8 +_,10 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.BlockHitResult;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -157,7 +_,9 @@
+             if (this.level() instanceof ServerLevel serverLevel && (this.isAlive() || this.forceTickAfterTeleportToDuplicate)) {
+                 BlockPos pos = this.blockPosition();
+                 boolean isConcrete = this.blockState.getBlock() instanceof ConcretePowderBlock;
+-                boolean isStuckInWater = isConcrete && this.level().getFluidState(pos).is(FluidTags.WATER);
++                boolean isStuckInWater = isConcrete
++                    && this.canReadBlock(pos)
++                    && this.blockState.canBeHydrated(this.level(), pos, this.level().getFluidState(pos), pos);
+                 double moveVec = this.getDeltaMovement().lengthSqr();
+                 if (isConcrete && moveVec > 1.0) {
+                     BlockHitResult clip = this.level()
+@@ -166,8 +_,11 @@
+                                 new Vec3(this.xo, this.yo, this.zo), this.position(), ClipContext.Block.COLLIDER, ClipContext.Fluid.SOURCE_ONLY, this
+                             )
+                         );
+-                    if (clip.getType() != HitResult.Type.MISS && this.level().getFluidState(clip.getBlockPos()).is(FluidTags.WATER)) {
+-                        pos = clip.getBlockPos();
++                    BlockPos clipPos = clip.getBlockPos();
++                    if (clip.getType() != HitResult.Type.MISS
++                        && this.canReadBlock(clipPos)
++                        && this.blockState.canBeHydrated(this.level(), pos, this.level().getFluidState(clipPos), clipPos)) {
++                        pos = clipPos;
+                         isStuckInWater = true;
+                     }
+                 }
+@@ -181,6 +_,10 @@
+                         this.discard();
+                     }
+                 } else {
++                    if (!this.canReadBlock(pos) || !this.canReadBlock(pos.below())) {
++                        return;
++                    }
++
+                     BlockState currentState = this.level().getBlockState(pos);
+                     this.setDeltaMovement(this.getDeltaMovement().multiply(0.7, -0.5, 0.7));
+                     if (!currentState.is(Blocks.MOVING_PISTON)) {
+@@ -244,7 +_,14 @@
+             }
+ 
+             this.setDeltaMovement(this.getDeltaMovement().scale(0.98));
++            if (isAlive() && block instanceof net.neoforged.neoforge.common.extensions.IFallableExtension feblock) {
++                feblock.fallingTick(level(), blockPosition(), this);
++            }
+         }
++    }
++
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     public void callOnBrokenAfterFall(Block block, BlockPos pos) {
+@@ -267,7 +_,10 @@
+                     ? fallable.getFallDamageSource(this)
+                     : this.damageSources().fallingBlock(this);
+                 float damage = Math.min(Mth.floor(fallDistanceInt * this.fallDamagePerDistance), this.fallDamageMax);
+-                this.level().getEntities(this, this.getBoundingBox(), entitySelector).forEach(entity -> entity.hurt(actualDamageSource, damage));
++                AABB damageBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox());
++                if (damageBox != null) {
++                    this.level().getEntities(this, damageBox, entitySelector).forEach(entity -> entity.hurt(actualDamageSource, damage));
++                }
+                 boolean isAnvil = this.blockState.is(BlockTags.ANVIL);
+                 if (isAnvil && damage > 0.0F && this.random.nextFloat() < 0.05F + fallDistanceInt * 0.05F) {
+                     BlockState newBlockState = AnvilBlock.damage(this.blockState);

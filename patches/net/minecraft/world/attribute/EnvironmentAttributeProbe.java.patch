@@ -1,0 +1,28 @@
+--- a/net/minecraft/world/attribute/EnvironmentAttributeProbe.java
++++ b/net/minecraft/world/attribute/EnvironmentAttributeProbe.java
+@@ -17,14 +_,14 @@
+     private @Nullable Vec3 position;
+     private final SpatialAttributeInterpolator biomeInterpolator = new SpatialAttributeInterpolator();
+ 
+-    public void reset() {
++    public synchronized void reset() {
+         this.level = null;
+         this.position = null;
+         this.biomeInterpolator.clear();
+         this.valueProbes.clear();
+     }
+ 
+-    public void tick(Level level, Vec3 position) {
++    public synchronized void tick(Level level, Vec3 position) {
+         this.level = level;
+         this.position = position;
+         this.valueProbes.values().removeIf(EnvironmentAttributeProbe.ValueProbe::tick);
+@@ -36,7 +_,7 @@
+         );
+     }
+ 
+-    public <Value> Value getValue(EnvironmentAttribute<Value> attribute, float partialTicks) {
++    public synchronized <Value> Value getValue(EnvironmentAttribute<Value> attribute, float partialTicks) {
+         EnvironmentAttributeProbe.ValueProbe<Value> valueProbe = (EnvironmentAttributeProbe.ValueProbe<Value>)this.valueProbes
+             .computeIfAbsent(attribute, this.valueProbeFactory);
+         return valueProbe.get(attribute, partialTicks);

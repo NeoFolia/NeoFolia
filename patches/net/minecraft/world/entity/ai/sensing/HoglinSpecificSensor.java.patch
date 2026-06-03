@@ -1,0 +1,31 @@
+--- a/net/minecraft/world/entity/ai/sensing/HoglinSpecificSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/HoglinSpecificSensor.java
+@@ -14,6 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.NearestVisibleLivingEntities;
+ import net.minecraft.world.entity.monster.hoglin.Hoglin;
+ import net.minecraft.world.entity.monster.piglin.Piglin;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class HoglinSpecificSensor extends Sensor<Hoglin> {
+     @Override
+@@ -51,12 +_,18 @@
+         }
+ 
+         brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT_PIGLIN, adultPiglin);
+-        brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT_HOGLINS, adultHoglins);
++        brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT_HOGLINS, List.copyOf(adultHoglins));
+         brain.setMemory(MemoryModuleType.VISIBLE_ADULT_PIGLIN_COUNT, adultPiglinCount);
+         brain.setMemory(MemoryModuleType.VISIBLE_ADULT_HOGLIN_COUNT, adultHoglins.size());
+     }
+ 
+     private Optional<BlockPos> findNearestRepellent(ServerLevel level, Hoglin body) {
+-        return BlockPos.findClosestMatch(body.blockPosition(), 8, 4, pos -> level.getBlockState(pos).is(BlockTags.HOGLIN_REPELLENTS));
++        return BlockPos.findClosestMatch(
++            body.blockPosition(),
++            8,
++            4,
++            pos -> RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4)
++                && level.getBlockState(pos).is(BlockTags.HOGLIN_REPELLENTS)
++        );
+     }
+ }

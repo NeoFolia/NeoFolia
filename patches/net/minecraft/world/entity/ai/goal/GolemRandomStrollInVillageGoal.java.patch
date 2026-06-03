@@ -1,0 +1,96 @@
+--- a/net/minecraft/world/entity/ai/goal/GolemRandomStrollInVillageGoal.java
++++ b/net/minecraft/world/entity/ai/goal/GolemRandomStrollInVillageGoal.java
+@@ -1,7 +_,6 @@
+ package net.minecraft.world.entity.ai.goal;
+ 
+ import java.util.List;
+-import java.util.stream.Collectors;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.server.level.ServerLevel;
+@@ -12,7 +_,9 @@
+ import net.minecraft.world.entity.ai.village.poi.PoiManager;
+ import net.minecraft.world.entity.ai.village.poi.PoiRecord;
+ import net.minecraft.world.entity.npc.villager.Villager;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class GolemRandomStrollInVillageGoal extends RandomStrollGoal {
+@@ -26,8 +_,8 @@
+     }
+ 
+     @Override
+-    protected @Nullable Vec3 getPosition() {
+-        RandomSource random = this.mob.level().getRandom();
++    protected synchronized @Nullable Vec3 getPosition() {
++        RandomSource random = this.mob.getRandom();
+         if (random.nextFloat() < 0.3F) {
+             return this.getPositionTowardsAnywhere();
+         } else {
+@@ -48,23 +_,26 @@
+         }
+     }
+ 
+-    private @Nullable Vec3 getPositionTowardsAnywhere() {
++    private synchronized @Nullable Vec3 getPositionTowardsAnywhere() {
+         return LandRandomPos.getPos(this.mob, 10, 7);
+     }
+ 
+-    private @Nullable Vec3 getPositionTowardsVillagerWhoWantsGolem() {
++    private synchronized @Nullable Vec3 getPositionTowardsVillagerWhoWantsGolem() {
+         ServerLevel level = (ServerLevel)this.mob.level();
+-        List<Villager> villagers = level.getEntities(EntityType.VILLAGER, this.mob.getBoundingBox().inflate(32.0), this::doesVillagerWantGolem);
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, this.mob.getBoundingBox().inflate(32.0));
++        List<Villager> villagers = searchBox == null
++            ? List.of()
++            : List.copyOf(level.getEntities(EntityType.VILLAGER, searchBox, this::doesVillagerWantGolem));
+         if (villagers.isEmpty()) {
+             return null;
+         } else {
+-            Villager villager = villagers.get(this.mob.level().getRandom().nextInt(villagers.size()));
++            Villager villager = villagers.get(this.mob.getRandom().nextInt(villagers.size()));
+             Vec3 targetPos = villager.position();
+             return LandRandomPos.getPosTowards(this.mob, 10, 7, targetPos);
+         }
+     }
+ 
+-    private @Nullable Vec3 getPositionTowardsPoi() {
++    private synchronized @Nullable Vec3 getPositionTowardsPoi() {
+         SectionPos targetSection = this.getRandomVillageSection();
+         if (targetSection == null) {
+             return null;
+@@ -74,24 +_,25 @@
+         }
+     }
+ 
+-    private @Nullable SectionPos getRandomVillageSection() {
++    private synchronized @Nullable SectionPos getRandomVillageSection() {
+         ServerLevel level = (ServerLevel)this.mob.level();
+         List<SectionPos> villageSections = SectionPos.cube(SectionPos.of(this.mob), 2)
+             .filter(sectionPos -> level.sectionsToVillage(sectionPos) == 0)
+-            .collect(Collectors.toList());
+-        return villageSections.isEmpty() ? null : villageSections.get(level.getRandom().nextInt(villageSections.size()));
++            .toList();
++        return villageSections.isEmpty() ? null : villageSections.get(this.mob.getRandom().nextInt(villageSections.size()));
+     }
+ 
+-    private @Nullable BlockPos getRandomPoiWithinSection(SectionPos sectionPos) {
++    private synchronized @Nullable BlockPos getRandomPoiWithinSection(SectionPos sectionPos) {
+         ServerLevel level = (ServerLevel)this.mob.level();
+         PoiManager poiManager = level.getPoiManager();
+         List<BlockPos> pois = poiManager.getInRange(poiType -> true, sectionPos.center(), 8, PoiManager.Occupancy.IS_OCCUPIED)
+             .map(PoiRecord::getPos)
+-            .collect(Collectors.toList());
+-        return pois.isEmpty() ? null : pois.get(level.getRandom().nextInt(pois.size()));
++            .map(BlockPos::immutable)
++            .toList();
++        return pois.isEmpty() ? null : pois.get(this.mob.getRandom().nextInt(pois.size()));
+     }
+ 
+-    private boolean doesVillagerWantGolem(Villager villager) {
++    private synchronized boolean doesVillagerWantGolem(Villager villager) {
+         return villager.wantsToSpawnGolem(this.mob.level().getGameTime());
+     }
+ }

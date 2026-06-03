@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/entity/ai/sensing/PiglinSpecificSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/PiglinSpecificSensor.java
+@@ -24,6 +_,7 @@
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.CampfireBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class PiglinSpecificSensor extends Sensor<LivingEntity> {
+     @Override
+@@ -102,8 +_,8 @@
+         brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_ZOMBIFIED, zombified);
+         brain.setMemory(MemoryModuleType.NEAREST_TARGETABLE_PLAYER_NOT_WEARING_GOLD, playerNotWearingGold);
+         brain.setMemory(MemoryModuleType.NEAREST_PLAYER_HOLDING_WANTED_ITEM, playerHoldingWantedItem);
+-        brain.setMemory(MemoryModuleType.NEARBY_ADULT_PIGLINS, adultPiglins);
+-        brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT_PIGLINS, visibleAdultPiglins);
++        brain.setMemory(MemoryModuleType.NEARBY_ADULT_PIGLINS, List.copyOf(adultPiglins));
++        brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT_PIGLINS, List.copyOf(visibleAdultPiglins));
+         brain.setMemory(MemoryModuleType.VISIBLE_ADULT_PIGLIN_COUNT, visibleAdultPiglins.size());
+         brain.setMemory(MemoryModuleType.VISIBLE_ADULT_HOGLIN_COUNT, visibleAdultHoglinCount);
+     }
+@@ -113,6 +_,10 @@
+     }
+ 
+     private static boolean isValidRepellent(ServerLevel level, BlockPos pos) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4)) {
++            return false;
++        }
++
+         BlockState blockState = level.getBlockState(pos);
+         boolean isRepellent = blockState.is(BlockTags.PIGLIN_REPELLENTS);
+         return isRepellent && blockState.is(Blocks.SOUL_CAMPFIRE) ? CampfireBlock.isLitCampfire(blockState) : isRepellent;

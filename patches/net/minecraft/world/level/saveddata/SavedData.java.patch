@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/level/saveddata/SavedData.java
++++ b/net/minecraft/world/level/saveddata/SavedData.java
+@@ -3,15 +_,15 @@
+ public abstract class SavedData {
+     private boolean dirty;
+ 
+-    public void setDirty() {
++    public synchronized void setDirty() {
+         this.setDirty(true);
+     }
+ 
+-    public void setDirty(boolean dirty) {
++    public synchronized void setDirty(boolean dirty) {
+         this.dirty = dirty;
+     }
+ 
+-    public boolean isDirty() {
++    public synchronized boolean isDirty() {
+         return this.dirty;
+     }
+ }

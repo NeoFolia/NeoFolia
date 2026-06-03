@@ -1,0 +1,79 @@
+--- a/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
++++ b/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
+@@ -54,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ZombieVillager extends Zombie implements VillagerDataHolder {
+@@ -156,7 +_,7 @@
+         if (!this.level().isClientSide() && this.isAlive() && this.isConverting()) {
+             int amount = this.getConversionProgress();
+             this.villagerConversionTime -= amount;
+-            if (this.villagerConversionTime <= 0) {
++            if (this.villagerConversionTime <= 0 && net.neoforged.neoforge.event.EventHooks.canLivingConvert(this, EntityType.VILLAGER, (timer) -> this.villagerConversionTime = timer)) {
+                 this.finishConversion((ServerLevel)this.level());
+             }
+         }
+@@ -259,10 +_,10 @@
+                 villager.finalizeSpawn(level, level.getCurrentDifficultyAt(villager.blockPosition()), EntitySpawnReason.CONVERSION, null);
+                 villager.refreshBrain(level);
+                 if (this.conversionStarter != null) {
+-                    Player player = level.getPlayerByUUID(this.conversionStarter);
+-                    if (player instanceof ServerPlayer) {
+-                        CriteriaTriggers.CURED_ZOMBIE_VILLAGER.trigger((ServerPlayer)player, this, villager);
+-                        level.onReputationEvent(ReputationEventType.ZOMBIE_VILLAGER_CURED, player, villager);
++                    ServerPlayer player = level.getServer().getPlayerList().getAnyRegionPlayer(this.conversionStarter);
++                    if (player != null) {
++                        this.triggerCuredZombieVillager(level, player, villager);
++                        villager.onReputationEventFrom(ReputationEventType.ZOMBIE_VILLAGER_CURED, this.conversionStarter);
+                     }
+                 }
+ 
+@@ -270,8 +_,19 @@
+                 if (!this.isSilent()) {
+                     level.levelEvent(null, 1027, this.blockPosition(), 0);
+                 }
++
++                net.neoforged.neoforge.event.EventHooks.onLivingConvert(this, villager);
+             }
+         );
++    }
++
++    private void triggerCuredZombieVillager(ServerLevel level, ServerPlayer player, Villager villager) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(
++            player, () -> CriteriaTriggers.CURED_ZOMBIE_VILLAGER.trigger(player, this, villager)
++        );
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(level, "Cured zombie villager advancement", trigger)) {
++            trigger.run();
++        }
+     }
+ 
+     @VisibleForTesting
+@@ -288,7 +_,12 @@
+             for (int xx = (int)this.getX() - 4; xx < (int)this.getX() + 4 && specialBlocksCount < 14; xx++) {
+                 for (int yy = (int)this.getY() - 4; yy < (int)this.getY() + 4 && specialBlocksCount < 14; yy++) {
+                     for (int zz = (int)this.getZ() - 4; zz < (int)this.getZ() + 4 && specialBlocksCount < 14; zz++) {
+-                        BlockState state = this.level().getBlockState(blockPos.set(xx, yy, zz));
++                        blockPos.set(xx, yy, zz);
++                        if (!canReadBlock(this.level(), blockPos)) {
++                            continue;
++                        }
++
++                        BlockState state = this.level().getBlockState(blockPos);
+                         if (state.is(Blocks.IRON_BARS) || state.getBlock() instanceof BedBlock) {
+                             if (this.random.nextFloat() < 0.3F) {
+                                 amount++;
+@@ -302,6 +_,10 @@
+         }
+ 
+         return amount;
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override

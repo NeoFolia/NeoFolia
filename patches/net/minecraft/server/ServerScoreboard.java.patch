@@ -1,0 +1,324 @@
+--- a/net/minecraft/server/ServerScoreboard.java
++++ b/net/minecraft/server/ServerScoreboard.java
+@@ -14,6 +_,7 @@
+ import net.minecraft.network.protocol.game.ClientboundSetScorePacket;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.scores.DisplaySlot;
+ import net.minecraft.world.scores.Objective;
+ import net.minecraft.world.scores.PlayerScoreEntry;
+@@ -22,6 +_,7 @@
+ import net.minecraft.world.scores.ScoreHolder;
+ import net.minecraft.world.scores.Scoreboard;
+ import net.minecraft.world.scores.ScoreboardSaveData;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ServerScoreboard extends Scoreboard {
+@@ -33,7 +_,7 @@
+         this.server = server;
+     }
+ 
+-    public void load(ScoreboardSaveData.Packed data) {
++    public synchronized void load(ScoreboardSaveData.Packed data) {
+         data.objectives().forEach(x$0 -> this.loadObjective(x$0));
+         data.scores().forEach(x$0 -> this.loadPlayerScore(x$0));
+         data.displaySlots().forEach((slot, name) -> {
+@@ -43,12 +_,16 @@
+         data.teams().forEach(x$0 -> this.loadPlayerTeam(x$0));
+     }
+ 
+-    private ScoreboardSaveData.Packed store() {
++    private synchronized ScoreboardSaveData.Packed store() {
+         return new ScoreboardSaveData.Packed(this.packObjectives(), this.packPlayerScores(), this.packDisplaySlots(), this.packPlayerTeams());
+     }
+ 
+     @Override
+-    protected void onScoreChanged(ScoreHolder owner, Objective objective, Score score) {
++    protected synchronized void onScoreChanged(ScoreHolder owner, Objective objective, Score score) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onScoreChanged(owner, objective, score))) {
++            return;
++        }
++
+         super.onScoreChanged(owner, objective, score);
+         if (this.trackedObjectives.contains(objective)) {
+             this.server
+@@ -68,20 +_,32 @@
+     }
+ 
+     @Override
+-    protected void onScoreLockChanged(ScoreHolder owner, Objective objective) {
++    protected synchronized void onScoreLockChanged(ScoreHolder owner, Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onScoreLockChanged(owner, objective))) {
++            return;
++        }
++
+         super.onScoreLockChanged(owner, objective);
+         this.setDirty();
+     }
+ 
+     @Override
+-    public void onPlayerRemoved(ScoreHolder player) {
++    public synchronized void onPlayerRemoved(ScoreHolder player) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onPlayerRemoved(player))) {
++            return;
++        }
++
+         super.onPlayerRemoved(player);
+         this.server.getPlayerList().broadcastAll(new ClientboundResetScorePacket(player.getScoreboardName(), null));
+         this.setDirty();
+     }
+ 
+     @Override
+-    public void onPlayerScoreRemoved(ScoreHolder player, Objective objective) {
++    public synchronized void onPlayerScoreRemoved(ScoreHolder player, Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onPlayerScoreRemoved(player, objective))) {
++            return;
++        }
++
+         super.onPlayerScoreRemoved(player, objective);
+         if (this.trackedObjectives.contains(objective)) {
+             this.server.getPlayerList().broadcastAll(new ClientboundResetScorePacket(player.getScoreboardName(), objective.getName()));
+@@ -91,7 +_,11 @@
+     }
+ 
+     @Override
+-    public void setDisplayObjective(DisplaySlot slot, @Nullable Objective objective) {
++    public synchronized void setDisplayObjective(DisplaySlot slot, @Nullable Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setDisplayObjective(slot, objective))) {
++            return;
++        }
++
+         Objective old = this.getDisplayObjective(slot);
+         super.setDisplayObjective(slot, objective);
+         if (old != objective && old != null) {
+@@ -114,7 +_,11 @@
+     }
+ 
+     @Override
+-    public boolean addPlayerToTeam(String player, PlayerTeam team) {
++    public synchronized boolean addPlayerToTeam(String player, PlayerTeam team) {
++        if (this.scheduleGlobalIfRegionized(() -> this.addPlayerToTeam(player, team))) {
++            return false;
++        }
++
+         if (super.addPlayerToTeam(player, team)) {
+             this.server
+                 .getPlayerList()
+@@ -128,7 +_,11 @@
+     }
+ 
+     @Override
+-    public void removePlayerFromTeam(String player, PlayerTeam team) {
++    public synchronized void removePlayerFromTeam(String player, PlayerTeam team) {
++        if (this.scheduleGlobalIfRegionized(() -> this.removePlayerFromTeam(player, team))) {
++            return;
++        }
++
+         super.removePlayerFromTeam(player, team);
+         this.server.getPlayerList().broadcastAll(ClientboundSetPlayerTeamPacket.createPlayerPacket(team, player, ClientboundSetPlayerTeamPacket.Action.REMOVE));
+         this.updatePlayerWaypoint(player);
+@@ -136,13 +_,21 @@
+     }
+ 
+     @Override
+-    public void onObjectiveAdded(Objective objective) {
++    public synchronized void onObjectiveAdded(Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onObjectiveAdded(objective))) {
++            return;
++        }
++
+         super.onObjectiveAdded(objective);
+         this.setDirty();
+     }
+ 
+     @Override
+-    public void onObjectiveChanged(Objective objective) {
++    public synchronized void onObjectiveChanged(Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onObjectiveChanged(objective))) {
++            return;
++        }
++
+         super.onObjectiveChanged(objective);
+         if (this.trackedObjectives.contains(objective)) {
+             this.server.getPlayerList().broadcastAll(new ClientboundSetObjectivePacket(objective, 2));
+@@ -152,7 +_,11 @@
+     }
+ 
+     @Override
+-    public void onObjectiveRemoved(Objective objective) {
++    public synchronized void onObjectiveRemoved(Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onObjectiveRemoved(objective))) {
++            return;
++        }
++
+         super.onObjectiveRemoved(objective);
+         if (this.trackedObjectives.contains(objective)) {
+             this.stopTrackingObjective(objective);
+@@ -162,14 +_,22 @@
+     }
+ 
+     @Override
+-    public void onTeamAdded(PlayerTeam team) {
++    public synchronized void onTeamAdded(PlayerTeam team) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onTeamAdded(team))) {
++            return;
++        }
++
+         super.onTeamAdded(team);
+         this.server.getPlayerList().broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
+         this.setDirty();
+     }
+ 
+     @Override
+-    public void onTeamChanged(PlayerTeam team) {
++    public synchronized void onTeamChanged(PlayerTeam team) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onTeamChanged(team))) {
++            return;
++        }
++
+         super.onTeamChanged(team);
+         this.server.getPlayerList().broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, false));
+         this.updateTeamWaypoints(team);
+@@ -177,25 +_,29 @@
+     }
+ 
+     @Override
+-    public void onTeamRemoved(PlayerTeam team) {
++    public synchronized void onTeamRemoved(PlayerTeam team) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onTeamRemoved(team))) {
++            return;
++        }
++
+         super.onTeamRemoved(team);
+         this.server.getPlayerList().broadcastAll(ClientboundSetPlayerTeamPacket.createRemovePacket(team));
+         this.updateTeamWaypoints(team);
+         this.setDirty();
+     }
+ 
+-    protected void setDirty() {
++    protected synchronized void setDirty() {
+         this.dirty = true;
+     }
+ 
+-    public void storeToSaveDataIfDirty(ScoreboardSaveData saveData) {
++    public synchronized void storeToSaveDataIfDirty(ScoreboardSaveData saveData) {
+         if (this.dirty) {
+             this.dirty = false;
+             saveData.setData(this.store());
+         }
+     }
+ 
+-    public List<Packet<?>> getStartTrackingPackets(Objective objective) {
++    public synchronized List<Packet<?>> getStartTrackingPackets(Objective objective) {
+         List<Packet<?>> packets = Lists.newArrayList();
+         packets.add(new ClientboundSetObjectivePacket(objective, 0));
+ 
+@@ -216,19 +_,21 @@
+         return packets;
+     }
+ 
+-    public void startTrackingObjective(Objective objective) {
++    public synchronized void startTrackingObjective(Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.startTrackingObjective(objective))) {
++            return;
++        }
++
+         List<Packet<?>> packets = this.getStartTrackingPackets(objective);
+ 
+-        for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+-            for (Packet<?> packet : packets) {
+-                player.connection.send(packet);
+-            }
++        for (Packet<?> packet : packets) {
++            this.server.getPlayerList().broadcastAll(packet);
+         }
+ 
+         this.trackedObjectives.add(objective);
+     }
+ 
+-    public List<Packet<?>> getStopTrackingPackets(Objective objective) {
++    public synchronized List<Packet<?>> getStopTrackingPackets(Objective objective) {
+         List<Packet<?>> packets = Lists.newArrayList();
+         packets.add(new ClientboundSetObjectivePacket(objective, 1));
+ 
+@@ -241,19 +_,30 @@
+         return packets;
+     }
+ 
+-    public void stopTrackingObjective(Objective objective) {
++    public synchronized void stopTrackingObjective(Objective objective) {
++        if (this.scheduleGlobalIfRegionized(() -> this.stopTrackingObjective(objective))) {
++            return;
++        }
++
+         List<Packet<?>> packets = this.getStopTrackingPackets(objective);
+ 
+-        for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+-            for (Packet<?> packet : packets) {
+-                player.connection.send(packet);
+-            }
++        for (Packet<?> packet : packets) {
++            this.server.getPlayerList().broadcastAll(packet);
+         }
+ 
+         this.trackedObjectives.remove(objective);
+     }
+ 
+-    public int getObjectiveDisplaySlotCount(Objective objective) {
++    @Override
++    public synchronized void entityRemoved(Entity entity) {
++        if (this.scheduleGlobalIfRegionized(() -> this.entityRemoved(entity))) {
++            return;
++        }
++
++        super.entityRemoved(entity);
++    }
++
++    public synchronized int getObjectiveDisplaySlotCount(Objective objective) {
+         int count = 0;
+ 
+         for (DisplaySlot slot : DisplaySlot.values()) {
+@@ -266,19 +_,39 @@
+     }
+ 
+     private void updatePlayerWaypoint(String player) {
+-        ServerPlayer serverPlayer = this.server.getPlayerList().getPlayerByName(player);
++        if (this.scheduleGlobalIfRegionized(() -> this.updatePlayerWaypoint(player))) {
++            return;
++        }
++
++        ServerPlayer serverPlayer = this.server.getPlayerList().getAllPlayerByName(player);
+         if (serverPlayer != null) {
+             serverPlayer.level().getWaypointManager().remakeConnections(serverPlayer);
+         }
+     }
+ 
+     private void updateTeamWaypoints(PlayerTeam team) {
++        if (this.scheduleGlobalIfRegionized(() -> this.updateTeamWaypoints(team))) {
++            return;
++        }
++
+         for (ServerLevel level : this.server.getAllLevels()) {
+             team.getPlayers()
+                 .stream()
+-                .map(name -> this.server.getPlayerList().getPlayerByName(name))
++                .map(name -> this.server.getPlayerList().getAllPlayerByName(name))
+                 .filter(Objects::nonNull)
+                 .forEach(player -> level.getWaypointManager().remakeConnections(player));
+         }
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate scoreboard state from region worker while region dispatcher is not running");
+     }
+ }

@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/ai/sensing/IsInWaterSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/IsInWaterSensor.java
+@@ -9,12 +_,12 @@
+ 
+ public class IsInWaterSensor extends Sensor<LivingEntity> {
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return ImmutableSet.of(MemoryModuleType.IS_IN_WATER);
+     }
+ 
+     @Override
+-    protected void doTick(ServerLevel level, LivingEntity body) {
++    protected synchronized void doTick(ServerLevel level, LivingEntity body) {
+         if (body.isInWater()) {
+             body.getBrain().setMemory(MemoryModuleType.IS_IN_WATER, Unit.INSTANCE);
+         } else {

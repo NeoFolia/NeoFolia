@@ -1,0 +1,150 @@
+--- a/net/minecraft/server/commands/GiveCommand.java
++++ b/net/minecraft/server/commands/GiveCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import net.minecraft.commands.CommandBuildContext;
+@@ -28,23 +_,27 @@
+                     Commands.argument("targets", EntityArgument.players())
+                         .then(
+                             Commands.argument("item", ItemArgument.item(context))
+-                                .executes(c -> giveItem(c.getSource(), ItemArgument.getItem(c, "item"), EntityArgument.getPlayers(c, "targets"), 1))
+-                                .then(
+-                                    Commands.argument("count", IntegerArgumentType.integer(1))
+-                                        .executes(
+-                                            c -> giveItem(
+-                                                c.getSource(),
+-                                                ItemArgument.getItem(c, "item"),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                IntegerArgumentType.getInteger(c, "count")
+-                                            )
+-                                        )
+-                                )
++                                .executes(c -> giveItem(c, false))
++                                .then(Commands.argument("count", IntegerArgumentType.integer(1)).executes(c -> giveItem(c, true)))
+                         )
+                 )
+         );
+     }
+ 
++    private static int giveItem(CommandContext<CommandSourceStack> context, boolean hasCount) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> giveItem(context, hasCount))) {
++            return 0;
++        }
++
++        return giveItem(
++            source,
++            ItemArgument.getItem(context, "item"),
++            EntityArgument.getPlayers(context, "targets"),
++            hasCount ? IntegerArgumentType.getInteger(context, "count") : 1
++        );
++    }
++
+     private static int giveItem(CommandSourceStack source, ItemInput input, Collection<ServerPlayer> players, int count) throws CommandSyntaxException {
+         ItemStack prototypeItemStack = input.createItemStack(1);
+         int maxStackSize = prototypeItemStack.getMaxStackSize();
+@@ -53,47 +_,19 @@
+             source.sendFailure(Component.translatable("commands.give.failed.toomanyitems", maxAllowedCount, prototypeItemStack.getDisplayName()));
+             return 0;
+         } else {
++            Component singlePlayerName = null;
+             for (ServerPlayer player : players) {
+-                int remaining = count;
+-
+-                while (remaining > 0) {
+-                    int size = Math.min(maxStackSize, remaining);
+-                    remaining -= size;
+-                    ItemStack copyToDrop = prototypeItemStack.copyWithCount(size);
+-                    boolean added = player.getInventory().add(copyToDrop);
+-                    if (added && copyToDrop.isEmpty()) {
+-                        ItemEntity drop = player.drop(prototypeItemStack.copy(), false);
+-                        if (drop != null) {
+-                            drop.makeFakeItem();
+-                        }
+-
+-                        player.level()
+-                            .playSound(
+-                                null,
+-                                player.getX(),
+-                                player.getY(),
+-                                player.getZ(),
+-                                SoundEvents.ITEM_PICKUP,
+-                                SoundSource.PLAYERS,
+-                                0.2F,
+-                                ((player.getRandom().nextFloat() - player.getRandom().nextFloat()) * 0.7F + 1.0F) * 2.0F
+-                            );
+-                        player.containerMenu.broadcastChanges();
+-                    } else {
+-                        ItemEntity drop = player.drop(copyToDrop, false);
+-                        if (drop != null) {
+-                            drop.setNoPickUpDelay();
+-                            drop.setTarget(player.getUUID());
+-                        }
+-                    }
+-                }
++                singlePlayerName = RegionizedCommandHelper.callOnPlayerRegion(
++                    source,
++                    player,
++                    () -> giveItemToPlayer(player, prototypeItemStack, maxStackSize, count)
++                );
+             }
+ 
+             if (players.size() == 1) {
++                Component finalSinglePlayerName = singlePlayerName;
+                 source.sendSuccess(
+-                    () -> Component.translatable(
+-                        "commands.give.success.single", count, prototypeItemStack.getDisplayName(), players.iterator().next().getDisplayName()
+-                    ),
++                    () -> Component.translatable("commands.give.success.single", count, prototypeItemStack.getDisplayName(), finalSinglePlayerName),
+                     true
+                 );
+             } else {
+@@ -104,5 +_,43 @@
+ 
+             return players.size();
+         }
++    }
++
++    private static Component giveItemToPlayer(ServerPlayer player, ItemStack prototypeItemStack, int maxStackSize, int count) {
++        int remaining = count;
++
++        while (remaining > 0) {
++            int size = Math.min(maxStackSize, remaining);
++            remaining -= size;
++            ItemStack copyToDrop = prototypeItemStack.copyWithCount(size);
++            boolean added = player.getInventory().add(copyToDrop);
++            if (added && copyToDrop.isEmpty()) {
++                ItemEntity drop = player.drop(prototypeItemStack.copy(), false);
++                if (drop != null) {
++                    drop.makeFakeItem();
++                }
++
++                player.level()
++                    .playSound(
++                        null,
++                        player.getX(),
++                        player.getY(),
++                        player.getZ(),
++                        SoundEvents.ITEM_PICKUP,
++                        SoundSource.PLAYERS,
++                        0.2F,
++                        ((player.getRandom().nextFloat() - player.getRandom().nextFloat()) * 0.7F + 1.0F) * 2.0F
++                    );
++                player.broadcastActiveContainerChanges();
++            } else {
++                ItemEntity drop = player.drop(copyToDrop, false);
++                if (drop != null) {
++                    drop.setNoPickUpDelay();
++                    drop.setTarget(player.getUUID());
++                }
++            }
++        }
++
++        return player.getDisplayName();
+     }
+ }

@@ -1,0 +1,42 @@
+--- a/net/minecraft/world/item/BoatItem.java
++++ b/net/minecraft/world/item/BoatItem.java
+@@ -17,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BoatItem extends Item {
+@@ -36,9 +_,8 @@
+         } else {
+             Vec3 viewVector = player.getViewVector(1.0F);
+             double range = 5.0;
+-            List<Entity> entities = level.getEntities(
+-                player, player.getBoundingBox().expandTowards(viewVector.scale(5.0)).inflate(1.0), EntitySelector.CAN_BE_PICKED
+-            );
++            AABB pickupBox = RegionizedWorldGuard.restrictToCurrentRegion(level, player.getBoundingBox().expandTowards(viewVector.scale(5.0)).inflate(1.0));
++            List<Entity> entities = pickupBox == null ? List.of() : level.getEntities(player, pickupBox, EntitySelector.CAN_BE_PICKED);
+             if (!entities.isEmpty()) {
+                 Vec3 from = player.getEyePosition();
+ 
+@@ -56,7 +_,9 @@
+                     return InteractionResult.FAIL;
+                 } else {
+                     boat.setYRot(player.getYRot());
+-                    if (!level.noCollision(boat, boat.getBoundingBox())) {
++                    AABB boatBox = boat.getBoundingBox();
++                    AABB regionBoatBox = RegionizedWorldGuard.restrictToCurrentRegion(level, boatBox);
++                    if (regionBoatBox == null || !regionBoatBox.equals(boatBox) || !level.noCollision(boat, boatBox)) {
+                         return InteractionResult.FAIL;
+                     } else {
+                         if (!level.isClientSide()) {
+@@ -65,7 +_,7 @@
+                             itemStack.consume(1, player);
+                         }
+ 
+-                        player.awardStat(Stats.ITEM_USED.get(this));
++                        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+                         return InteractionResult.SUCCESS;
+                     }
+                 }

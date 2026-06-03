@@ -1,0 +1,54 @@
+--- a/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/FlyingPathNavigation.java
+@@ -22,27 +_,27 @@
+     }
+ 
+     @Override
+-    protected boolean canMoveDirectly(Vec3 startPos, Vec3 stopPos) {
++    protected synchronized boolean canMoveDirectly(Vec3 startPos, Vec3 stopPos) {
+         return isClearForMovementBetween(this.mob, startPos, stopPos, true);
+     }
+ 
+     @Override
+-    protected boolean canUpdatePath() {
++    protected synchronized boolean canUpdatePath() {
+         return this.canFloat() && this.mob.isInLiquid() || !this.mob.isPassenger();
+     }
+ 
+     @Override
+-    protected Vec3 getTempMobPos() {
++    protected synchronized Vec3 getTempMobPos() {
+         return this.mob.position();
+     }
+ 
+     @Override
+-    public Path createPath(Entity target, int reachRange) {
++    public synchronized Path createPath(Entity target, int reachRange) {
+         return this.createPath(target.blockPosition(), reachRange);
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         this.tick++;
+         if (this.hasDelayedRecomputation) {
+             this.recomputePath();
+@@ -66,12 +_,16 @@
+     }
+ 
+     @Override
+-    public boolean isStableDestination(BlockPos pos) {
++    public synchronized boolean isStableDestination(BlockPos pos) {
++        if (!this.canReadBlock(pos)) {
++            return false;
++        }
++
+         return this.level.getBlockState(pos).entityCanStandOn(this.level, pos, this.mob);
+     }
+ 
+     @Override
+-    public boolean canNavigateGround() {
++    public synchronized boolean canNavigateGround() {
+         return false;
+     }
+ }

@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/entity/ai/goal/LookAtTradingPlayerGoal.java
++++ b/net/minecraft/world/entity/ai/goal/LookAtTradingPlayerGoal.java
+@@ -12,10 +_,10 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.villager.isTrading()) {
+-            this.lookAt = this.villager.getTradingPlayer();
+-            return true;
++            this.lookAt = this.regionSafeLookAt(this.villager.getTradingPlayer());
++            return this.lookAt != null;
+         } else {
+             return false;
+         }

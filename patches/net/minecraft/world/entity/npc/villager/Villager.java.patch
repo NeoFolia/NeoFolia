@@ -1,0 +1,249 @@
+--- a/net/minecraft/world/entity/npc/villager/Villager.java
++++ b/net/minecraft/world/entity/npc/villager/Villager.java
+@@ -9,8 +_,11 @@
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Optional;
++import java.util.UUID;
+ import java.util.function.BiPredicate;
++import java.util.function.Predicate;
+ import net.minecraft.SharedConstants;
++import net.minecraft.core.BlockPos;
+ import net.minecraft.core.GlobalPos;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.component.DataComponentGetter;
+@@ -25,6 +_,7 @@
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.stats.Stats;
+@@ -89,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.timeline.Timelines;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -115,7 +_,7 @@
+     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.99F).withEyeHeight(0.63F);
+     private int updateMerchantTimer;
+     private boolean increaseProfessionLevelOnUpdate;
+-    private @Nullable Player lastTradedPlayer;
++    private @Nullable UUID lastTradedPlayer;
+     private boolean chasing;
+     private int foodLevel = 0;
+     private final GossipContainer gossips = new GossipContainer();
+@@ -266,7 +_,7 @@
+         }
+ 
+         if (this.lastTradedPlayer != null) {
+-            level.onReputationEvent(ReputationEventType.TRADE, this.lastTradedPlayer, this);
++            this.onReputationEventFrom(ReputationEventType.TRADE, this.lastTradedPlayer);
+             level.broadcastEntityEvent(this, (byte)14);
+             this.lastTradedPlayer = null;
+         }
+@@ -298,7 +_,7 @@
+     @Override
+     public InteractionResult mobInteract(Player player, InteractionHand hand) {
+         ItemStack itemStack = player.getItemInHand(hand);
+-        if (itemStack.is(Items.VILLAGER_SPAWN_EGG) || !this.isAlive() || this.isTrading() || this.isSleeping()) {
++        if (itemStack.is(Items.VILLAGER_SPAWN_EGG) || !this.isAlive() || this.isTrading() || this.isSleeping() || player.isSecondaryUseActive()) {
+             return super.mobInteract(player, hand);
+         } else if (this.isBaby()) {
+             this.setUnhappy();
+@@ -311,7 +_,7 @@
+                         this.setUnhappy();
+                     }
+ 
+-                    player.awardStat(Stats.TALKED_TO_VILLAGER);
++                    RegionizedWorldGuard.awardStat(player, Stats.TALKED_TO_VILLAGER);
+                 }
+ 
+                 if (noOffers) {
+@@ -340,7 +_,7 @@
+ 
+     @Override
+     public void setTradingPlayer(@Nullable Player player) {
+-        boolean shouldStop = this.getTradingPlayer() != null && player == null;
++        boolean shouldStop = this.getRawTradingPlayer() != null && player == null;
+         super.setTradingPlayer(player);
+         if (shouldStop) {
+             this.stopTrading();
+@@ -385,16 +_,21 @@
+ 
+     private void resendOffersToTradingPlayer() {
+         MerchantOffers offers = this.getOffers();
+-        Player tradingPlayer = this.getTradingPlayer();
+-        if (tradingPlayer != null && !offers.isEmpty()) {
+-            tradingPlayer.sendMerchantOffers(
++        Player rawTradingPlayer = this.getRawTradingPlayer();
++        if (rawTradingPlayer instanceof ServerPlayer tradingPlayer && !offers.isEmpty()) {
++            MerchantOffers offersSnapshot = offers.copy();
++            int villagerLevel = this.getVillagerData().level();
++            int villagerXp = this.getVillagerXp();
++            boolean showProgressBar = this.showProgressBar();
++            boolean canRestock = this.canRestock();
++            RegionizedWorldGuard.executeOnPlayerRegion(tradingPlayer, () -> tradingPlayer.sendMerchantOffers(
+                 tradingPlayer.containerMenu.containerId,
+-                offers,
+-                this.getVillagerData().level(),
+-                this.getVillagerXp(),
+-                this.showProgressBar(),
+-                this.canRestock()
+-            );
++                offersSnapshot,
++                villagerLevel,
++                villagerXp,
++                showProgressBar,
++                canRestock
++            ));
+         }
+     }
+ 
+@@ -573,7 +_,8 @@
+     protected void rewardTradeXp(MerchantOffer offer) {
+         int popXp = 3 + this.random.nextInt(4);
+         this.villagerXp = this.villagerXp + offer.getXp();
+-        this.lastTradedPlayer = this.getTradingPlayer();
++        Player tradingPlayer = this.getRawTradingPlayer();
++        this.lastTradedPlayer = tradingPlayer == null ? null : tradingPlayer.getUUID();
+         if (this.shouldIncreaseLevel()) {
+             this.updateMerchantTimer = 40;
+             this.increaseProfessionLevelOnUpdate = true;
+@@ -587,6 +_,7 @@
+ 
+     @Override
+     public void setLastHurtByMob(@Nullable LivingEntity hurtBy) {
++        hurtBy = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), hurtBy);
+         if (hurtBy != null && this.level() instanceof ServerLevel) {
+             ((ServerLevel)this.level()).onReputationEvent(ReputationEventType.VILLAGER_HURT, hurtBy, this);
+             if (this.isAlive() && hurtBy instanceof Player) {
+@@ -600,7 +_,7 @@
+     @Override
+     public void die(DamageSource source) {
+         LOGGER.info("Villager {} died, message: '{}'", this, source.getLocalizedDeathMessage(this).getString());
+-        Entity murderer = source.getEntity();
++        Entity murderer = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+         if (murderer != null) {
+             this.tellWitnessesThatIWasMurdered(murderer);
+         }
+@@ -633,15 +_,48 @@
+             this.brain.getMemory(memoryType).ifPresent(memory -> {
+                 ServerLevel poiLevel = server.getLevel(memory.dimension());
+                 if (poiLevel != null) {
+-                    PoiManager poiManager = poiLevel.getPoiManager();
+-                    Optional<Holder<PoiType>> type = poiManager.getType(memory.pos());
+-                    BiPredicate<Villager, Holder<PoiType>> poiTypePredicate = POI_MEMORIES.get(memoryType);
+-                    if (type.isPresent() && poiTypePredicate.test(this, type.get())) {
+-                        poiManager.release(memory.pos());
+-                        poiLevel.debugSynchronizers().updatePoi(memory.pos());
+-                    }
++                    Predicate<Holder<PoiType>> poiTypePredicate = this.poiReleasePredicate(memoryType);
++                    if (poiTypePredicate == null) {
++                        return;
++                    }
++
++                    BlockPos pos = memory.pos();
++                    if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(
++                        poiLevel, pos, "Villager POI release", () -> releasePoiAt(poiLevel, pos, poiTypePredicate)
++                    )) {
++                        return;
++                    }
++
++                    releasePoiAt(poiLevel, pos, poiTypePredicate);
+                 }
+             });
++        }
++    }
++
++    private Predicate<Holder<PoiType>> poiReleasePredicate(MemoryModuleType<GlobalPos> memoryType) {
++        if (memoryType == MemoryModuleType.HOME) {
++            return poiType -> poiType.is(PoiTypes.HOME);
++        }
++        if (memoryType == MemoryModuleType.JOB_SITE) {
++            Holder<VillagerProfession> profession = this.getVillagerData().profession();
++            return poiType -> profession.value().heldJobSite().test(poiType);
++        }
++        if (memoryType == MemoryModuleType.POTENTIAL_JOB_SITE) {
++            return VillagerProfession.ALL_ACQUIRABLE_JOBS;
++        }
++        if (memoryType == MemoryModuleType.MEETING_POINT) {
++            return poiType -> poiType.is(PoiTypes.MEETING);
++        }
++
++        return null;
++    }
++
++    private static void releasePoiAt(ServerLevel poiLevel, BlockPos pos, Predicate<Holder<PoiType>> poiTypePredicate) {
++        PoiManager poiManager = poiLevel.getPoiManager();
++        Optional<Holder<PoiType>> type = poiManager.getType(pos);
++        if (type.isPresent() && poiTypePredicate.test(type.get())) {
++            poiManager.release(pos);
++            poiLevel.debugSynchronizers().updatePoi(pos);
+         }
+     }
+ 
+@@ -759,10 +_,11 @@
+ 
+     @Override
+     public void thunderHit(ServerLevel level, LightningBolt lightningBolt) {
+-        if (level.getDifficulty() != Difficulty.PEACEFUL) {
++        if (level.getDifficulty() != Difficulty.PEACEFUL && net.neoforged.neoforge.event.EventHooks.canLivingConvert(this, EntityType.WITCH, (timer) -> {})) {
+             LOGGER.info("Villager {} was struck by lightning {}.", this, lightningBolt);
+             Witch witch = this.convertTo(EntityType.WITCH, ConversionParams.single(this, false, false), w -> {
+                 w.finalizeSpawn(level, level.getCurrentDifficultyAt(w.blockPosition()), EntitySpawnReason.CONVERSION, null);
++                net.neoforged.neoforge.event.EventHooks.onLivingConvert(this, w);
+                 w.setPersistenceRequired();
+                 this.releaseAllPois();
+             });
+@@ -782,7 +_,10 @@
+     @Override
+     public boolean wantsToPickUp(ServerLevel level, ItemStack itemStack) {
+         Item item = itemStack.getItem();
+-        return (itemStack.is(ItemTags.VILLAGER_PICKS_UP) || this.getVillagerData().profession().value().requestedItems().contains(item))
++        // Neo: Allow Farmer Villagers to pick up SpecialPlantable items.
++        boolean isFarmerDesiredSeed = (itemStack.getItem() instanceof net.neoforged.neoforge.common.SpecialPlantable specialPlantable && specialPlantable.villagerCanPlantItem(this))
++                && this.getVillagerData().profession().value().secondaryPoi().stream().anyMatch(secondaryPoi -> secondaryPoi.defaultBlockState().is(net.neoforged.neoforge.common.Tags.Blocks.VILLAGER_FARMLANDS));
++        return (itemStack.is(ItemTags.VILLAGER_PICKS_UP) || this.getVillagerData().profession().value().requestedItems().contains(item) || isFarmerDesiredSeed)
+             && this.getInventory().canAddItem(itemStack);
+     }
+ 
+@@ -839,7 +_,8 @@
+     public void spawnGolemIfNeeded(ServerLevel level, long timestamp, int villagersNeededToAgree) {
+         if (this.wantsToSpawnGolem(timestamp)) {
+             AABB villagerSearchBox = this.getBoundingBox().inflate(10.0, 10.0, 10.0);
+-            List<Villager> nearbyVillagers = level.getEntitiesOfClass(Villager.class, villagerSearchBox);
++            villagerSearchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, villagerSearchBox);
++            List<Villager> nearbyVillagers = villagerSearchBox == null ? List.of() : level.getEntitiesOfClass(Villager.class, villagerSearchBox);
+             List<Villager> nearbyVillagersThatWantAGolem = nearbyVillagers.stream()
+                 .filter(villager -> villager.wantsToSpawnGolem(timestamp))
+                 .limit(5L)
+@@ -869,15 +_,19 @@
+ 
+     @Override
+     public void onReputationEventFrom(ReputationEventType type, Entity source) {
++        this.onReputationEventFrom(type, source.getUUID());
++    }
++
++    public void onReputationEventFrom(ReputationEventType type, UUID source) {
+         if (type == ReputationEventType.ZOMBIE_VILLAGER_CURED) {
+-            this.gossips.add(source.getUUID(), GossipType.MAJOR_POSITIVE, 20);
+-            this.gossips.add(source.getUUID(), GossipType.MINOR_POSITIVE, 25);
++            this.gossips.add(source, GossipType.MAJOR_POSITIVE, 20);
++            this.gossips.add(source, GossipType.MINOR_POSITIVE, 25);
+         } else if (type == ReputationEventType.TRADE) {
+-            this.gossips.add(source.getUUID(), GossipType.TRADING, 2);
++            this.gossips.add(source, GossipType.TRADING, 2);
+         } else if (type == ReputationEventType.VILLAGER_HURT) {
+-            this.gossips.add(source.getUUID(), GossipType.MINOR_NEGATIVE, 25);
++            this.gossips.add(source, GossipType.MINOR_NEGATIVE, 25);
+         } else if (type == ReputationEventType.VILLAGER_KILLED) {
+-            this.gossips.add(source.getUUID(), GossipType.MAJOR_NEGATIVE, 25);
++            this.gossips.add(source, GossipType.MAJOR_NEGATIVE, 25);
+         }
+     }
+ 

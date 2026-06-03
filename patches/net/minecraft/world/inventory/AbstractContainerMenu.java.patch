@@ -1,0 +1,384 @@
+--- a/net/minecraft/world/inventory/AbstractContainerMenu.java
++++ b/net/minecraft/world/inventory/AbstractContainerMenu.java
+@@ -70,13 +_,13 @@
+         this.containerId = containerId;
+     }
+ 
+-    protected void addInventoryHotbarSlots(Container inventory, int left, int top) {
++    protected synchronized void addInventoryHotbarSlots(Container inventory, int left, int top) {
+         for (int x = 0; x < 9; x++) {
+             this.addSlot(new Slot(inventory, x, left + x * 18, top));
+         }
+     }
+ 
+-    protected void addInventoryExtendedSlots(Container inventory, int left, int top) {
++    protected synchronized void addInventoryExtendedSlots(Container inventory, int left, int top) {
+         for (int y = 0; y < 3; y++) {
+             for (int x = 0; x < 9; x++) {
+                 this.addSlot(new Slot(inventory, x + (y + 1) * 9, left + x * 18, top + y * 18));
+@@ -84,7 +_,7 @@
+         }
+     }
+ 
+-    protected void addStandardInventorySlots(Container container, int left, int top) {
++    protected synchronized void addStandardInventorySlots(Container container, int left, int top) {
+         this.addInventoryExtendedSlots(container, left, top);
+         int hotbarSeparator = 4;
+         int topToHotbar = 58;
+@@ -95,7 +_,7 @@
+         return access.evaluate((level, pos) -> !level.getBlockState(pos).is(block) ? false : player.isWithinBlockInteractionRange(pos, 4.0), true);
+     }
+ 
+-    public MenuType<?> getType() {
++    public synchronized MenuType<?> getType() {
+         if (this.menuType == null) {
+             throw new UnsupportedOperationException("Unable to construct this menu by type");
+         } else {
+@@ -117,11 +_,11 @@
+         }
+     }
+ 
+-    public boolean isValidSlotIndex(int slotIndex) {
++    public synchronized boolean isValidSlotIndex(int slotIndex) {
+         return slotIndex == -1 || slotIndex == -999 || slotIndex < this.slots.size();
+     }
+ 
+-    protected Slot addSlot(Slot slot) {
++    protected synchronized Slot addSlot(Slot slot) {
+         slot.index = this.slots.size();
+         this.slots.add(slot);
+         this.lastSlots.add(ItemStack.EMPTY);
+@@ -129,33 +_,33 @@
+         return slot;
+     }
+ 
+-    protected DataSlot addDataSlot(DataSlot dataSlot) {
++    protected synchronized DataSlot addDataSlot(DataSlot dataSlot) {
+         this.dataSlots.add(dataSlot);
+         this.remoteDataSlots.add(0);
+         return dataSlot;
+     }
+ 
+-    protected void addDataSlots(ContainerData container) {
++    protected synchronized void addDataSlots(ContainerData container) {
+         for (int i = 0; i < container.getCount(); i++) {
+             this.addDataSlot(DataSlot.forContainer(container, i));
+         }
+     }
+ 
+-    public void addSlotListener(ContainerListener listener) {
++    public synchronized void addSlotListener(ContainerListener listener) {
+         if (!this.containerListeners.contains(listener)) {
+             this.containerListeners.add(listener);
+             this.broadcastChanges();
+         }
+     }
+ 
+-    public void setSynchronizer(ContainerSynchronizer synchronizer) {
++    public synchronized void setSynchronizer(ContainerSynchronizer synchronizer) {
+         this.synchronizer = synchronizer;
+         this.remoteCarried = synchronizer.createSlot();
+         this.remoteSlots.replaceAll(ignored -> synchronizer.createSlot());
+         this.sendAllDataToRemote();
+     }
+ 
+-    public void sendAllDataToRemote() {
++    public synchronized void sendAllDataToRemote() {
+         List<ItemStack> itemsToSend = new ArrayList<>(this.slots.size());
+         int i = 0;
+ 
+@@ -178,11 +_,11 @@
+         }
+     }
+ 
+-    public void removeSlotListener(ContainerListener listener) {
++    public synchronized void removeSlotListener(ContainerListener listener) {
+         this.containerListeners.remove(listener);
+     }
+ 
+-    public NonNullList<ItemStack> getItems() {
++    public synchronized NonNullList<ItemStack> getItems() {
+         NonNullList<ItemStack> itemStacks = NonNullList.create();
+ 
+         for (Slot slot : this.slots) {
+@@ -192,7 +_,7 @@
+         return itemStacks;
+     }
+ 
+-    public void broadcastChanges() {
++    public synchronized void broadcastChanges() {
+         for (int i = 0; i < this.slots.size(); i++) {
+             ItemStack current = this.slots.get(i).getItem();
+             Supplier<ItemStack> currentCopy = Suppliers.memoize(current::copy);
+@@ -213,7 +_,7 @@
+         }
+     }
+ 
+-    public void broadcastFullState() {
++    public synchronized void broadcastFullState() {
+         for (int i = 0; i < this.slots.size(); i++) {
+             ItemStack current = this.slots.get(i).getItem();
+             this.triggerSlotListeners(i, current, current::copy);
+@@ -229,13 +_,13 @@
+         this.sendAllDataToRemote();
+     }
+ 
+-    private void updateDataSlotListeners(int id, int currentValue) {
++    private synchronized void updateDataSlotListeners(int id, int currentValue) {
+         for (ContainerListener containerListener : this.containerListeners) {
+             containerListener.dataChanged(this, id, currentValue);
+         }
+     }
+ 
+-    private void triggerSlotListeners(int i, ItemStack current, Supplier<ItemStack> currentCopy) {
++    private synchronized void triggerSlotListeners(int i, ItemStack current, Supplier<ItemStack> currentCopy) {
+         ItemStack localExpected = this.lastSlots.get(i);
+         if (!ItemStack.matches(localExpected, current)) {
+             ItemStack newItem = currentCopy.get();
+@@ -247,7 +_,7 @@
+         }
+     }
+ 
+-    private void synchronizeSlotToRemote(int i, ItemStack current, Supplier<ItemStack> currentCopy) {
++    private synchronized void synchronizeSlotToRemote(int i, ItemStack current, Supplier<ItemStack> currentCopy) {
+         if (!this.suppressRemoteUpdates) {
+             RemoteSlot remoteExpected = this.remoteSlots.get(i);
+             if (!remoteExpected.matches(current)) {
+@@ -259,7 +_,7 @@
+         }
+     }
+ 
+-    private void synchronizeDataSlotToRemote(int i, int current) {
++    private synchronized void synchronizeDataSlotToRemote(int i, int current) {
+         if (!this.suppressRemoteUpdates) {
+             int remoteExpected = this.remoteDataSlots.getInt(i);
+             if (remoteExpected != current) {
+@@ -271,7 +_,7 @@
+         }
+     }
+ 
+-    private void synchronizeCarriedToRemote() {
++    private synchronized void synchronizeCarriedToRemote() {
+         if (!this.suppressRemoteUpdates) {
+             ItemStack carriedItem = this.getCarried();
+             if (!this.remoteCarried.matches(carriedItem)) {
+@@ -283,11 +_,11 @@
+         }
+     }
+ 
+-    public void setRemoteSlot(int slot, ItemStack itemStack) {
++    public synchronized void setRemoteSlot(int slot, ItemStack itemStack) {
+         this.remoteSlots.get(slot).force(itemStack);
+     }
+ 
+-    public void setRemoteSlotUnsafe(int slot, HashedStack itemStack) {
++    public synchronized void setRemoteSlotUnsafe(int slot, HashedStack itemStack) {
+         if (slot >= 0 && slot < this.remoteSlots.size()) {
+             this.remoteSlots.get(slot).receive(itemStack);
+         } else {
+@@ -295,28 +_,28 @@
+         }
+     }
+ 
+-    public void setRemoteCarried(HashedStack carriedItem) {
++    public synchronized void setRemoteCarried(HashedStack carriedItem) {
+         this.remoteCarried.receive(carriedItem);
+     }
+ 
+-    public boolean clickMenuButton(Player player, int buttonId) {
++    public synchronized boolean clickMenuButton(Player player, int buttonId) {
+         return false;
+     }
+ 
+-    public Slot getSlot(int index) {
++    public synchronized Slot getSlot(int index) {
+         return this.slots.get(index);
+     }
+ 
+     public abstract ItemStack quickMoveStack(final Player player, final int slotIndex);
+ 
+-    public void setSelectedBundleItemIndex(int slotIndex, int selectedItemIndex) {
++    public synchronized void setSelectedBundleItemIndex(int slotIndex, int selectedItemIndex) {
+         if (slotIndex >= 0 && slotIndex < this.slots.size()) {
+             ItemStack itemStack = this.slots.get(slotIndex).getItem();
+             BundleItem.toggleSelectedItem(itemStack, selectedItemIndex);
+         }
+     }
+ 
+-    public void clicked(int slotIndex, int buttonNum, ContainerInput containerInput, Player player) {
++    public synchronized void clicked(int slotIndex, int buttonNum, ContainerInput containerInput, Player player) {
+         try {
+             this.doClick(slotIndex, buttonNum, containerInput, player);
+         } catch (Exception var8) {
+@@ -332,7 +_,7 @@
+         }
+     }
+ 
+-    private void doClick(int slotIndex, int buttonNum, ContainerInput containerInput, Player player) {
++    private synchronized void doClick(int slotIndex, int buttonNum, ContainerInput containerInput, Player player) {
+         Inventory inventory = player.getInventory();
+         if (containerInput == ContainerInput.QUICK_CRAFT) {
+             int expectedStatus = this.quickcraftStatus;
+@@ -559,37 +_,43 @@
+         }
+     }
+ 
+-    private boolean tryItemClickBehaviourOverride(Player player, ClickAction clickAction, Slot slot, ItemStack clicked, ItemStack carried) {
++    private synchronized boolean tryItemClickBehaviourOverride(Player player, ClickAction clickAction, Slot slot, ItemStack clicked, ItemStack carried) {
++        // Neo: Fire the ItemStackedOnOtherEvent, and return true if it was cancelled (meaning the event was handled). Returning true will trigger the container to stop processing further logic.
++        // The first parameter to onItemStackedOn is the "carried" (under-mouse) item, which is the second ItemStack parameter to this method.
++        if (net.neoforged.neoforge.common.CommonHooks.onItemStackedOn(carried, clicked, slot, clickAction, player, createCarriedSlotAccess())) {
++            return true;
++        }
++
+         FeatureFlagSet enabledFeatures = player.level().enabledFeatures();
+         return carried.isItemEnabled(enabledFeatures) && carried.overrideStackedOnOther(slot, clickAction, player)
+             ? true
+             : clicked.isItemEnabled(enabledFeatures) && clicked.overrideOtherStackedOnMe(carried, slot, clickAction, player, this.createCarriedSlotAccess());
+     }
+ 
+-    private SlotAccess createCarriedSlotAccess() {
++    private synchronized SlotAccess createCarriedSlotAccess() {
+         return new SlotAccess() {
+             {
+                 Objects.requireNonNull(AbstractContainerMenu.this);
+             }
+ 
+             @Override
+-            public ItemStack get() {
++            public synchronized ItemStack get() {
+                 return AbstractContainerMenu.this.getCarried();
+             }
+ 
+             @Override
+-            public boolean set(ItemStack itemStack) {
++            public synchronized boolean set(ItemStack itemStack) {
+                 AbstractContainerMenu.this.setCarried(itemStack);
+                 return true;
+             }
+         };
+     }
+ 
+-    public boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
++    public synchronized boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
+         return true;
+     }
+ 
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         if (player instanceof ServerPlayer) {
+             ItemStack carried = this.getCarried();
+             if (!carried.isEmpty()) {
+@@ -609,22 +_,22 @@
+         }
+     }
+ 
+-    protected void clearContainer(Player player, Container container) {
++    protected synchronized void clearContainer(Player player, Container container) {
+         for (int i = 0; i < container.getContainerSize(); i++) {
+             dropOrPlaceInInventory(player, container.removeItemNoUpdate(i));
+         }
+     }
+ 
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         this.broadcastChanges();
+     }
+ 
+-    public void setItem(int slot, int stateId, ItemStack itemStack) {
++    public synchronized void setItem(int slot, int stateId, ItemStack itemStack) {
+         this.getSlot(slot).set(itemStack);
+         this.stateId = stateId;
+     }
+ 
+-    public void initializeContents(int stateId, List<ItemStack> items, ItemStack carried) {
++    public synchronized void initializeContents(int stateId, List<ItemStack> items, ItemStack carried) {
+         for (int i = 0; i < items.size(); i++) {
+             this.getSlot(i).set(items.get(i));
+         }
+@@ -633,13 +_,13 @@
+         this.stateId = stateId;
+     }
+ 
+-    public void setData(int id, int value) {
++    public synchronized void setData(int id, int value) {
+         this.dataSlots.get(id).set(value);
+     }
+ 
+     public abstract boolean stillValid(Player player);
+ 
+-    protected boolean moveItemStackTo(ItemStack itemStack, int startSlot, int endSlot, boolean backwards) {
++    protected synchronized boolean moveItemStackTo(ItemStack itemStack, int startSlot, int endSlot, boolean backwards) {
+         boolean anythingChanged = false;
+         int destSlot = startSlot;
+         if (backwards) {
+@@ -723,7 +_,7 @@
+         }
+     }
+ 
+-    protected void resetQuickCraft() {
++    protected synchronized void resetQuickCraft() {
+         this.quickcraftStatus = 0;
+         this.quickcraftSlots.clear();
+     }
+@@ -744,7 +_,7 @@
+         };
+     }
+ 
+-    public boolean canDragTo(Slot slot) {
++    public synchronized boolean canDragTo(Slot slot) {
+         return true;
+     }
+ 
+@@ -770,23 +_,23 @@
+         }
+     }
+ 
+-    public void setCarried(ItemStack carried) {
++    public synchronized void setCarried(ItemStack carried) {
+         this.carried = carried;
+     }
+ 
+-    public ItemStack getCarried() {
++    public synchronized ItemStack getCarried() {
+         return this.carried;
+     }
+ 
+-    public void suppressRemoteUpdates() {
++    public synchronized void suppressRemoteUpdates() {
+         this.suppressRemoteUpdates = true;
+     }
+ 
+-    public void resumeRemoteUpdates() {
++    public synchronized void resumeRemoteUpdates() {
+         this.suppressRemoteUpdates = false;
+     }
+ 
+-    public void transferState(AbstractContainerMenu otherContainer) {
++    public synchronized void transferState(AbstractContainerMenu otherContainer) {
+         Table<Container, Integer, Integer> otherSlots = HashBasedTable.create();
+ 
+         for (int slotIndex = 0; slotIndex < otherContainer.slots.size(); slotIndex++) {
+@@ -809,7 +_,7 @@
+         }
+     }
+ 
+-    public OptionalInt findSlot(Container inventory, int slotIndex) {
++    public synchronized OptionalInt findSlot(Container inventory, int slotIndex) {
+         for (int i = 0; i < this.slots.size(); i++) {
+             Slot slot = this.slots.get(i);
+             if (slot.container == inventory && slotIndex == slot.getContainerSlot()) {
+@@ -820,11 +_,11 @@
+         return OptionalInt.empty();
+     }
+ 
+-    public int getStateId() {
++    public synchronized int getStateId() {
+         return this.stateId;
+     }
+ 
+-    public int incrementStateId() {
++    public synchronized int incrementStateId() {
+         this.stateId = this.stateId + 1 & 32767;
+         return this.stateId;
+     }

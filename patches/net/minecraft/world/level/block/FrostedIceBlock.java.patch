@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/level/block/FrostedIceBlock.java
++++ b/net/minecraft/world/level/block/FrostedIceBlock.java
+@@ -17,6 +_,7 @@
+ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+ import net.minecraft.world.level.block.state.properties.IntegerProperty;
+ import net.minecraft.world.level.redstone.Orientation;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FrostedIceBlock extends IceBlock {
+@@ -38,7 +_,7 @@
+ 
+     @Override
+     public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
+-        level.scheduleTick(pos, this, Mth.nextInt(level.getRandom(), 60, 120));
++        level.scheduleTick(pos, this, Mth.nextInt(frostedIceRandom(level), 60, 120));
+     }
+ 
+     @Override
+@@ -97,6 +_,10 @@
+         }
+ 
+         return true;
++    }
++
++    private static RandomSource frostedIceRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     @Override

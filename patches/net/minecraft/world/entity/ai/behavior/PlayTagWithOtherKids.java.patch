@@ -1,0 +1,108 @@
+--- a/net/minecraft/world/entity/ai/behavior/PlayTagWithOtherKids.java
++++ b/net/minecraft/world/entity/ai/behavior/PlayTagWithOtherKids.java
+@@ -24,7 +_,7 @@
+     private static final int MAX_CHASERS_PER_TARGET = 5;
+     private static final int AVERAGE_WAIT_TIME_BETWEEN_RUNS = 10;
+ 
+-    public static BehaviorControl<PathfinderMob> create() {
++    public static synchronized BehaviorControl<PathfinderMob> create() {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.present(MemoryModuleType.VISIBLE_VILLAGER_BABIES),
+@@ -33,18 +_,24 @@
+                     i.registered(MemoryModuleType.INTERACTION_TARGET)
+                 )
+                 .apply(i, (babies, walkTarget, lookTarget, interactionTarget) -> (level, me, timestamp) -> {
+-                    if (level.getRandom().nextInt(10) != 0) {
++                    if (me.getRandom().nextInt(10) != 0) {
+                         return false;
+                     } else {
+-                        List<LivingEntity> friendsNearby = i.get(babies);
+-                        Optional<LivingEntity> otherKidChasingMe = friendsNearby.stream().filter(friend -> isFriendChasingMe(me, friend)).findAny();
+-                        if (!otherKidChasingMe.isPresent()) {
+-                            Optional<LivingEntity> otherKidBeingChased = findSomeoneBeingChased(friendsNearby);
++                        List<LivingEntity> friendsNearby = List.copyOf(i.get(babies));
++                        Optional<LivingEntity> otherKidChasingMe = friendsNearby.stream()
++                            .filter(friend -> BehaviorUtils.regionSafeEntity(me, friend) != null)
++                            .filter(friend -> isFriendChasingMe(me, friend))
++                            .findAny();
++                        if (otherKidChasingMe.isEmpty()) {
++                            Optional<LivingEntity> otherKidBeingChased = findSomeoneBeingChased(me, friendsNearby);
+                             if (otherKidBeingChased.isPresent()) {
+-                                chaseKid(interactionTarget, lookTarget, walkTarget, otherKidBeingChased.get());
++                                chaseKid(me, interactionTarget, lookTarget, walkTarget, otherKidBeingChased.orElseThrow());
+                                 return true;
+                             } else {
+-                                friendsNearby.stream().findAny().ifPresent(entity -> chaseKid(interactionTarget, lookTarget, walkTarget, entity));
++                                friendsNearby.stream()
++                                    .filter(entity -> BehaviorUtils.regionSafeEntity(me, entity) != null)
++                                    .findAny()
++                                    .ifPresent(entity -> chaseKid(me, interactionTarget, lookTarget, walkTarget, entity));
+                                 return true;
+                             }
+                         } else {
+@@ -63,44 +_,50 @@
+         );
+     }
+ 
+-    private static void chaseKid(
++    private static synchronized void chaseKid(
++        PathfinderMob me,
+         MemoryAccessor<?, LivingEntity> interactionTarget,
+         MemoryAccessor<?, PositionTracker> lookTarget,
+         MemoryAccessor<?, WalkTarget> walkTarget,
+         LivingEntity kidToChase
+     ) {
++        if (BehaviorUtils.regionSafeEntity(me, kidToChase) == null) {
++            return;
++        }
++
+         interactionTarget.set(kidToChase);
+         lookTarget.set(new EntityTracker(kidToChase, true));
+         walkTarget.set(new WalkTarget(new EntityTracker(kidToChase, false), 0.6F, 1));
+     }
+ 
+-    private static Optional<LivingEntity> findSomeoneBeingChased(List<LivingEntity> friendsNearby) {
++    private static synchronized Optional<LivingEntity> findSomeoneBeingChased(LivingEntity me, List<LivingEntity> friendsNearby) {
+         Map<LivingEntity, Integer> chasedKids = checkHowManyChasersEachFriendHas(friendsNearby);
+         return chasedKids.entrySet()
+             .stream()
+             .sorted(Comparator.comparingInt(Entry::getValue))
+             .filter(entry -> entry.getValue() > 0 && entry.getValue() <= 5)
+             .map(Entry::getKey)
++            .filter(kid -> BehaviorUtils.regionSafeEntity(me, kid) != null)
+             .findFirst();
+     }
+ 
+-    private static Map<LivingEntity, Integer> checkHowManyChasersEachFriendHas(List<LivingEntity> friendsNearby) {
++    private static synchronized Map<LivingEntity, Integer> checkHowManyChasersEachFriendHas(List<LivingEntity> friendsNearby) {
+         Map<LivingEntity, Integer> chasedKids = Maps.newHashMap();
+         friendsNearby.stream()
+             .filter(PlayTagWithOtherKids::isChasingSomeone)
+-            .forEach(chaser -> chasedKids.compute(whoAreYouChasing(chaser), (k, count) -> count == null ? 1 : count + 1));
++            .forEach(chaser -> whoAreYouChasing(chaser).ifPresent(target -> chasedKids.compute(target, (k, count) -> count == null ? 1 : count + 1)));
+         return chasedKids;
+     }
+ 
+-    private static LivingEntity whoAreYouChasing(LivingEntity friend) {
+-        return friend.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
+-    }
+-
+-    private static boolean isChasingSomeone(LivingEntity friend) {
+-        return friend.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).isPresent();
+-    }
+-
+-    private static boolean isFriendChasingMe(LivingEntity me, LivingEntity friend) {
+-        return friend.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).filter(mob -> mob == me).isPresent();
++    private static synchronized Optional<LivingEntity> whoAreYouChasing(LivingEntity friend) {
++        return friend.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).filter(target -> BehaviorUtils.regionSafeEntity(friend, target) != null);
++    }
++
++    private static synchronized boolean isChasingSomeone(LivingEntity friend) {
++        return whoAreYouChasing(friend).isPresent();
++    }
++
++    private static synchronized boolean isFriendChasingMe(LivingEntity me, LivingEntity friend) {
++        return whoAreYouChasing(friend).filter(mob -> mob == me).isPresent();
+     }
+ }

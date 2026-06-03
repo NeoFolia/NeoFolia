@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/level/block/entity/SignBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/SignBlockEntity.java
+@@ -201,7 +_,7 @@
+                     hasAnyClickCommand = true;
+                     break;
+                 case ClickEvent.Custom custom:
+-                    level.getServer().handleCustomClickAction(custom.id(), custom.payload());
++                    level.getServer().handleCustomClickAction(custom.id(), custom.payload(), (net.minecraft.server.level.ServerPlayer) player, player.getGameProfile());
+                     hasAnyClickCommand = true;
+                     break;
+                 case null:
+@@ -258,6 +_,10 @@
+ 
+     public boolean playerIsTooFarAwayToEdit(UUID player) {
+         Player editingPlayer = this.level.getPlayerByUUID(player);
++        if (editingPlayer == null && this.level instanceof ServerLevel serverLevel && serverLevel.getServer().getPlayerList().getAnyRegionPlayer(player) != null) {
++            return false;
++        }
++
+         return editingPlayer == null || !editingPlayer.isWithinBlockInteractionRange(this.getBlockPos(), 4.0);
+     }
+ 

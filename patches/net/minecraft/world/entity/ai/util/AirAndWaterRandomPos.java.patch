@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/entity/ai/util/AirAndWaterRandomPos.java
++++ b/net/minecraft/world/entity/ai/util/AirAndWaterRandomPos.java
+@@ -6,7 +_,7 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public class AirAndWaterRandomPos {
+-    public static @Nullable Vec3 getPos(
++    public static synchronized @Nullable Vec3 getPos(
+         PathfinderMob mob, int horizontalDist, int verticalDist, int flyingHeight, double xDir, double zDir, double maxXzRadiansDifference
+     ) {
+         boolean restrict = GoalUtils.mobRestricted(mob, horizontalDist);
+@@ -15,7 +_,7 @@
+         );
+     }
+ 
+-    public static @Nullable BlockPos generateRandomPos(
++    public static synchronized @Nullable BlockPos generateRandomPos(
+         PathfinderMob mob, int horizontalDist, int verticalDist, int flyingHeight, double xDir, double zDir, double maxXzRadiansDifference, boolean restrict
+     ) {
+         BlockPos direction = RandomPos.generateRandomDirectionWithinRadians(

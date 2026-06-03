@@ -1,0 +1,97 @@
+--- a/net/minecraft/network/syncher/SynchedEntityData.java
++++ b/net/minecraft/network/syncher/SynchedEntityData.java
+@@ -26,8 +_,10 @@
+         this.itemsById = itemsById;
+     }
+ 
+-    public static <T> EntityDataAccessor<T> defineId(Class<? extends SyncedDataHolder> clazz, EntityDataSerializer<T> type) {
+-        if (LOGGER.isDebugEnabled()) {
++    private static final StackWalker STACK_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
++    public static synchronized <T> EntityDataAccessor<T> defineId(Class<? extends SyncedDataHolder> clazz, EntityDataSerializer<T> type) {
++        net.neoforged.neoforge.common.CommonHooks.verifyEntityDataAccessorRegistration(STACK_WALKER.getCallerClass(), clazz);
++        if (false && LOGGER.isDebugEnabled()) { // Neo: disable this check as we are handling it in the above hook
+             try {
+                 Class<?> aClass = Class.forName(Thread.currentThread().getStackTrace()[2].getClassName());
+                 if (!aClass.equals(clazz)) {
+@@ -49,7 +_,7 @@
+         return (SynchedEntityData.DataItem<T>)this.itemsById[accessor.id()];
+     }
+ 
+-    public <T> T get(EntityDataAccessor<T> accessor) {
++    public synchronized <T> T get(EntityDataAccessor<T> accessor) {
+         return this.getItem(accessor).getValue();
+     }
+ 
+@@ -58,20 +_,27 @@
+     }
+ 
+     public <T> void set(EntityDataAccessor<T> accessor, T value, boolean forceDirty) {
+-        SynchedEntityData.DataItem<T> dataItem = this.getItem(accessor);
+-        if (forceDirty || ObjectUtils.notEqual(value, dataItem.getValue())) {
+-            dataItem.setValue(value);
++        boolean changed = false;
++        synchronized (this) {
++            SynchedEntityData.DataItem<T> dataItem = this.getItem(accessor);
++            if (forceDirty || ObjectUtils.notEqual(value, dataItem.getValue())) {
++                dataItem.setValue(value);
++                dataItem.setDirty(true);
++                this.isDirty = true;
++                changed = true;
++            }
++        }
++
++        if (changed) {
+             this.entity.onSyncedDataUpdated(accessor);
+-            dataItem.setDirty(true);
+-            this.isDirty = true;
+         }
+     }
+ 
+-    public boolean isDirty() {
++    public synchronized boolean isDirty() {
+         return this.isDirty;
+     }
+ 
+-    public @Nullable List<SynchedEntityData.DataValue<?>> packDirty() {
++    public synchronized @Nullable List<SynchedEntityData.DataValue<?>> packDirty() {
+         if (!this.isDirty) {
+             return null;
+         } else {
+@@ -89,7 +_,7 @@
+         }
+     }
+ 
+-    public @Nullable List<SynchedEntityData.DataValue<?>> getNonDefaultValues() {
++    public synchronized @Nullable List<SynchedEntityData.DataValue<?>> getNonDefaultValues() {
+         List<SynchedEntityData.DataValue<?>> result = null;
+ 
+         for (SynchedEntityData.DataItem<?> dataItem : this.itemsById) {
+@@ -106,13 +_,21 @@
+     }
+ 
+     public void assignValues(List<SynchedEntityData.DataValue<?>> items) {
+-        for (SynchedEntityData.DataValue<?> item : items) {
+-            SynchedEntityData.DataItem<?> dataItem = this.itemsById[item.id];
+-            this.assignValue(dataItem, item);
+-            this.entity.onSyncedDataUpdated(dataItem.getAccessor());
+-        }
+-
+-        this.entity.onSyncedDataUpdated(items);
++        List<SynchedEntityData.DataValue<?>> copiedItems = List.copyOf(items);
++        List<EntityDataAccessor<?>> updatedAccessors = new ArrayList<>(copiedItems.size());
++        synchronized (this) {
++            for (SynchedEntityData.DataValue<?> item : copiedItems) {
++                SynchedEntityData.DataItem<?> dataItem = this.itemsById[item.id];
++                this.assignValue(dataItem, item);
++                updatedAccessors.add(dataItem.getAccessor());
++            }
++        }
++
++        for (EntityDataAccessor<?> accessor : updatedAccessors) {
++            this.entity.onSyncedDataUpdated(accessor);
++        }
++
++        this.entity.onSyncedDataUpdated(copiedItems);
+     }
+ 
+     private <T> void assignValue(SynchedEntityData.DataItem<T> dataItem, SynchedEntityData.DataValue<?> item) {

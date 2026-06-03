@@ -1,0 +1,426 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerSettingsServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerSettingsServiceImpl.java
+@@ -1,11 +_,13 @@
+ package net.minecraft.server.jsonrpc.internalapi;
+ 
++import java.util.function.Supplier;
+ import net.minecraft.server.dedicated.DedicatedServer;
+ import net.minecraft.server.jsonrpc.JsonRpcLogger;
+ import net.minecraft.server.jsonrpc.methods.ClientInfo;
+ import net.minecraft.server.permissions.LevelBasedPermissionSet;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.level.GameType;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class MinecraftServerSettingsServiceImpl implements MinecraftServerSettingsService {
+     private final DedicatedServer server;
+@@ -18,11 +_,18 @@
+ 
+     @Override
+     public boolean isAutoSave() {
+-        return this.server.isAutoSave();
++        return this.callOnServerThread(this.server::isAutoSave);
+     }
+ 
+     @Override
+     public boolean setAutoSave(boolean enabled, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setAutoSave(enabled, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setAutoSave(enabled, clientInfo))) {
++            return this.isAutoSave();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update autosave from {} to {}", this.isAutoSave(), enabled);
+         this.server.setAutoSave(enabled);
+         return this.isAutoSave();
+@@ -30,11 +_,18 @@
+ 
+     @Override
+     public Difficulty getDifficulty() {
+-        return this.server.getWorldData().getDifficulty();
++        return this.callOnServerThread(() -> this.server.getWorldData().getDifficulty());
+     }
+ 
+     @Override
+     public Difficulty setDifficulty(Difficulty difficulty, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setDifficulty(difficulty, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setDifficulty(difficulty, clientInfo))) {
++            return this.getDifficulty();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update difficulty from '{}' to '{}'", this.getDifficulty(), difficulty);
+         this.server.setDifficulty(difficulty);
+         return this.getDifficulty();
+@@ -42,11 +_,18 @@
+ 
+     @Override
+     public boolean isEnforceWhitelist() {
+-        return this.server.isEnforceWhitelist();
++        return this.callOnServerThread(this.server::isEnforceWhitelist);
+     }
+ 
+     @Override
+     public boolean setEnforceWhitelist(boolean enforce, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setEnforceWhitelist(enforce, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setEnforceWhitelist(enforce, clientInfo))) {
++            return this.isEnforceWhitelist();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update enforce allowlist from {} to {}", this.isEnforceWhitelist(), enforce);
+         this.server.setEnforceWhitelist(enforce);
+         this.server.kickUnlistedPlayers();
+@@ -55,11 +_,18 @@
+ 
+     @Override
+     public boolean isUsingWhitelist() {
+-        return this.server.isUsingWhitelist();
++        return this.callOnServerThread(this.server::isUsingWhitelist);
+     }
+ 
+     @Override
+     public boolean setUsingWhitelist(boolean use, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setUsingWhitelist(use, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setUsingWhitelist(use, clientInfo))) {
++            return this.isUsingWhitelist();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update using allowlist from {} to {}", this.isUsingWhitelist(), use);
+         this.server.setUsingWhitelist(use);
+         this.server.kickUnlistedPlayers();
+@@ -68,11 +_,18 @@
+ 
+     @Override
+     public int getMaxPlayers() {
+-        return this.server.getMaxPlayers();
++        return this.callOnServerThread(this.server::getMaxPlayers);
+     }
+ 
+     @Override
+     public int setMaxPlayers(int maxPlayers, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setMaxPlayers(maxPlayers, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setMaxPlayers(maxPlayers, clientInfo))) {
++            return this.getMaxPlayers();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update max players from {} to {}", this.getMaxPlayers(), maxPlayers);
+         this.server.setMaxPlayers(maxPlayers);
+         return this.getMaxPlayers();
+@@ -80,11 +_,18 @@
+ 
+     @Override
+     public int getPauseWhenEmptySeconds() {
+-        return this.server.pauseWhenEmptySeconds();
++        return this.callOnServerThread(this.server::pauseWhenEmptySeconds);
+     }
+ 
+     @Override
+     public int setPauseWhenEmptySeconds(int emptySeconds, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setPauseWhenEmptySeconds(emptySeconds, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setPauseWhenEmptySeconds(emptySeconds, clientInfo))) {
++            return this.getPauseWhenEmptySeconds();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update pause when empty from {} seconds to {} seconds", this.getPauseWhenEmptySeconds(), emptySeconds);
+         this.server.setPauseWhenEmptySeconds(emptySeconds);
+         return this.getPauseWhenEmptySeconds();
+@@ -92,11 +_,18 @@
+ 
+     @Override
+     public int getPlayerIdleTimeout() {
+-        return this.server.playerIdleTimeout();
++        return this.callOnServerThread(this.server::playerIdleTimeout);
+     }
+ 
+     @Override
+     public int setPlayerIdleTimeout(int idleTime, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setPlayerIdleTimeout(idleTime, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setPlayerIdleTimeout(idleTime, clientInfo))) {
++            return this.getPlayerIdleTimeout();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update player idle timeout from {} minutes to {} minutes", this.getPlayerIdleTimeout(), idleTime);
+         this.server.setPlayerIdleTimeout(idleTime);
+         return this.getPlayerIdleTimeout();
+@@ -104,11 +_,18 @@
+ 
+     @Override
+     public boolean allowFlight() {
+-        return this.server.allowFlight();
++        return this.callOnServerThread(this.server::allowFlight);
+     }
+ 
+     @Override
+     public boolean setAllowFlight(boolean allow, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setAllowFlight(allow, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setAllowFlight(allow, clientInfo))) {
++            return this.allowFlight();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update allow flight from {} to {}", this.allowFlight(), allow);
+         this.server.setAllowFlight(allow);
+         return this.allowFlight();
+@@ -116,11 +_,18 @@
+ 
+     @Override
+     public int getSpawnProtectionRadius() {
+-        return this.server.spawnProtectionRadius();
++        return this.callOnServerThread(this.server::spawnProtectionRadius);
+     }
+ 
+     @Override
+     public int setSpawnProtectionRadius(int spawnProtection, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setSpawnProtectionRadius(spawnProtection, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setSpawnProtectionRadius(spawnProtection, clientInfo))) {
++            return this.getSpawnProtectionRadius();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update spawn protection radius from {} to {}", this.getSpawnProtectionRadius(), spawnProtection);
+         this.server.setSpawnProtectionRadius(spawnProtection);
+         return this.getSpawnProtectionRadius();
+@@ -128,11 +_,18 @@
+ 
+     @Override
+     public String getMotd() {
+-        return this.server.getMotd();
++        return this.callOnServerThread(this.server::getMotd);
+     }
+ 
+     @Override
+     public String setMotd(String motd, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setMotd(motd, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setMotd(motd, clientInfo))) {
++            return this.getMotd();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update MOTD from '{}' to '{}'", this.getMotd(), motd);
+         this.server.setMotd(motd);
+         return this.getMotd();
+@@ -140,11 +_,18 @@
+ 
+     @Override
+     public boolean forceGameMode() {
+-        return this.server.forceGameMode();
++        return this.callOnServerThread(this.server::forceGameMode);
+     }
+ 
+     @Override
+     public boolean setForceGameMode(boolean force, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setForceGameMode(force, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setForceGameMode(force, clientInfo))) {
++            return this.forceGameMode();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update force game mode from {} to {}", this.forceGameMode(), force);
+         this.server.setForceGameMode(force);
+         return this.forceGameMode();
+@@ -152,11 +_,18 @@
+ 
+     @Override
+     public GameType getGameMode() {
+-        return this.server.gameMode();
++        return this.callOnServerThread(this.server::gameMode);
+     }
+ 
+     @Override
+     public GameType setGameMode(GameType gameMode, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setGameMode(gameMode, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setGameMode(gameMode, clientInfo))) {
++            return this.getGameMode();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update game mode from '{}' to '{}'", this.getGameMode(), gameMode);
+         this.server.setGameMode(gameMode);
+         return this.getGameMode();
+@@ -164,11 +_,18 @@
+ 
+     @Override
+     public int getViewDistance() {
+-        return this.server.viewDistance();
++        return this.callOnServerThread(this.server::viewDistance);
+     }
+ 
+     @Override
+     public int setViewDistance(int viewDistance, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setViewDistance(viewDistance, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setViewDistance(viewDistance, clientInfo))) {
++            return this.getViewDistance();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update view distance from {} to {}", this.getViewDistance(), viewDistance);
+         this.server.setViewDistance(viewDistance);
+         return this.getViewDistance();
+@@ -176,11 +_,18 @@
+ 
+     @Override
+     public int getSimulationDistance() {
+-        return this.server.simulationDistance();
++        return this.callOnServerThread(this.server::simulationDistance);
+     }
+ 
+     @Override
+     public int setSimulationDistance(int simulationDistance, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setSimulationDistance(simulationDistance, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setSimulationDistance(simulationDistance, clientInfo))) {
++            return this.getSimulationDistance();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update simulation distance from {} to {}", this.getSimulationDistance(), simulationDistance);
+         this.server.setSimulationDistance(simulationDistance);
+         return this.getSimulationDistance();
+@@ -188,11 +_,18 @@
+ 
+     @Override
+     public boolean acceptsTransfers() {
+-        return this.server.acceptsTransfers();
++        return this.callOnServerThread(this.server::acceptsTransfers);
+     }
+ 
+     @Override
+     public boolean setAcceptsTransfers(boolean accept, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setAcceptsTransfers(accept, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setAcceptsTransfers(accept, clientInfo))) {
++            return this.acceptsTransfers();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update accepts transfers from {} to {}", this.acceptsTransfers(), accept);
+         this.server.setAcceptsTransfers(accept);
+         return this.acceptsTransfers();
+@@ -200,11 +_,18 @@
+ 
+     @Override
+     public int getStatusHeartbeatInterval() {
+-        return this.server.statusHeartbeatInterval();
++        return this.callOnServerThread(this.server::statusHeartbeatInterval);
+     }
+ 
+     @Override
+     public int setStatusHeartbeatInterval(int statusHeartbeatInterval, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setStatusHeartbeatInterval(statusHeartbeatInterval, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setStatusHeartbeatInterval(statusHeartbeatInterval, clientInfo))) {
++            return this.getStatusHeartbeatInterval();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update status heartbeat interval from {} to {}", this.getStatusHeartbeatInterval(), statusHeartbeatInterval);
+         this.server.setStatusHeartbeatInterval(statusHeartbeatInterval);
+         return this.getStatusHeartbeatInterval();
+@@ -212,11 +_,18 @@
+ 
+     @Override
+     public LevelBasedPermissionSet getOperatorUserPermissions() {
+-        return this.server.operatorUserPermissions();
++        return this.callOnServerThread(this.server::operatorUserPermissions);
+     }
+ 
+     @Override
+     public LevelBasedPermissionSet setOperatorUserPermissions(LevelBasedPermissionSet permissions, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setOperatorUserPermissions(permissions, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setOperatorUserPermissions(permissions, clientInfo))) {
++            return this.getOperatorUserPermissions();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update operator user permission level from {} to {}", this.getOperatorUserPermissions(), permissions.level());
+         this.server.setOperatorUserPermissions(permissions);
+         return this.getOperatorUserPermissions();
+@@ -224,11 +_,18 @@
+ 
+     @Override
+     public boolean hidesOnlinePlayers() {
+-        return this.server.hidesOnlinePlayers();
++        return this.callOnServerThread(this.server::hidesOnlinePlayers);
+     }
+ 
+     @Override
+     public boolean setHidesOnlinePlayers(boolean hide, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setHidesOnlinePlayers(hide, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setHidesOnlinePlayers(hide, clientInfo))) {
++            return this.hidesOnlinePlayers();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update hides online players from {} to {}", this.hidesOnlinePlayers(), hide);
+         this.server.setHidesOnlinePlayers(hide);
+         return this.hidesOnlinePlayers();
+@@ -236,11 +_,18 @@
+ 
+     @Override
+     public boolean repliesToStatus() {
+-        return this.server.repliesToStatus();
++        return this.callOnServerThread(this.server::repliesToStatus);
+     }
+ 
+     @Override
+     public boolean setRepliesToStatus(boolean enable, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setRepliesToStatus(enable, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setRepliesToStatus(enable, clientInfo))) {
++            return this.repliesToStatus();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update replies to status from {} to {}", this.repliesToStatus(), enable);
+         this.server.setRepliesToStatus(enable);
+         return this.repliesToStatus();
+@@ -248,13 +_,28 @@
+ 
+     @Override
+     public int getEntityBroadcastRangePercentage() {
+-        return this.server.entityBroadcastRangePercentage();
++        return this.callOnServerThread(this.server::entityBroadcastRangePercentage);
+     }
+ 
+     @Override
+     public int setEntityBroadcastRangePercentage(int percentage, ClientInfo clientInfo) {
++        if (this.isAsyncJsonRpcThread()) {
++            return this.callOnServerThread(() -> this.setEntityBroadcastRangePercentage(percentage, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.setEntityBroadcastRangePercentage(percentage, clientInfo))) {
++            return this.getEntityBroadcastRangePercentage();
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Update entity broadcast range percentage from {}% to {}%", this.getEntityBroadcastRangePercentage(), percentage);
+         this.server.setEntityBroadcastRangePercentage(percentage);
+         return this.getEntityBroadcastRangePercentage();
++    }
++
++    private boolean isAsyncJsonRpcThread() {
++        return !this.server.isSameThread() && !RegionizedTickContext.isRegionThread();
++    }
++
++    private <T> T callOnServerThread(Supplier<T> supplier) {
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, supplier);
+     }
+ }

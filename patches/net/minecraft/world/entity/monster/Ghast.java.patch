@@ -1,0 +1,142 @@
+--- a/net/minecraft/world/entity/monster/Ghast.java
++++ b/net/minecraft/world/entity/monster/Ghast.java
+@@ -18,6 +_,7 @@
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.damagesource.DamageSource;
++import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntitySpawnReason;
+ import net.minecraft.world.entity.EntityType;
+ import net.minecraft.world.entity.LivingEntity;
+@@ -39,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Ghast extends Mob implements Enemy {
+@@ -73,8 +_,10 @@
+         return this.explosionPower;
+     }
+ 
+-    private static boolean isReflectedFireball(DamageSource source) {
+-        return source.getDirectEntity() instanceof LargeFireball && source.getEntity() instanceof Player;
++    private boolean isReflectedFireball(DamageSource source) {
++        Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        return directEntity instanceof LargeFireball && sourceEntity instanceof Player;
+     }
+ 
+     @Override
+@@ -183,12 +_,12 @@
+     }
+ 
+     public static void faceMovementDirection(Mob ghast) {
+-        if (ghast.getTarget() == null) {
++        LivingEntity target = regionSafeTarget(ghast, ghast.getTarget());
++        if (target == null) {
+             Vec3 movement = ghast.getDeltaMovement();
+             ghast.setYRot(-((float)Mth.atan2(movement.x, movement.z)) * (180.0F / (float)Math.PI));
+             ghast.yBodyRot = ghast.getYRot();
+         } else {
+-            LivingEntity target = ghast.getTarget();
+             double maxDist = 64.0;
+             if (target.distanceToSqr(ghast) < 4096.0) {
+                 double xdd = target.getX() - ghast.getX();
+@@ -199,6 +_,10 @@
+         }
+     }
+ 
++    private static @Nullable LivingEntity regionSafeTarget(Mob ghast, @Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(ghast.level(), target);
++    }
++
+     public static class GhastLookGoal extends Goal {
+         private final Mob ghast;
+ 
+@@ -285,6 +_,10 @@
+         private boolean blockTraversalPossible(
+             BlockGetter level, @Nullable Vec3 start, @Nullable Vec3 end, BlockPos pos, boolean canPathThroughWater, boolean canPathThroughLava
+         ) {
++            if (!canReadBlock(level, pos)) {
++                return false;
++            }
++
+             BlockState state = level.getBlockState(pos);
+             if (state.isAir()) {
+                 return true;
+@@ -313,6 +_,11 @@
+                 }
+             }
+         }
++
++        private static boolean canReadBlock(BlockGetter level, BlockPos pos) {
++            return !(level instanceof Level levelInstance)
++                || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++        }
+     }
+ 
+     private static class GhastShootFireballGoal extends Goal {
+@@ -325,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            return this.ghast.getTarget() != null;
++            return Ghast.regionSafeTarget(this.ghast, this.ghast.getTarget()) != null;
+         }
+ 
+         @Override
+@@ -345,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = this.ghast.getTarget();
++            LivingEntity target = Ghast.regionSafeTarget(this.ghast, this.ghast.getTarget());
+             if (target != null) {
+                 double maxDist = 64.0;
+                 if (target.distanceToSqr(this.ghast) < 4096.0 && this.ghast.hasLineOfSight(target)) {
+@@ -438,9 +_,11 @@
+             }
+ 
+             BlockPos pos = BlockPos.containing(result);
+-            int heightY = level.getHeight(Heightmap.Types.MOTION_BLOCKING, pos.getX(), pos.getZ());
+-            if (heightY < pos.getY() && heightY > level.getMinY()) {
+-                result = new Vec3(result.x(), mob.getY() - Math.abs(mob.getY() - result.y()), result.z());
++            if (canReadBlock(level, pos)) {
++                int heightY = level.getHeight(Heightmap.Types.MOTION_BLOCKING, pos.getX(), pos.getZ());
++                if (heightY < pos.getY() && heightY > level.getMinY()) {
++                    result = new Vec3(result.x(), mob.getY() - Math.abs(mob.getY() - result.y()), result.z());
++                }
+             }
+ 
+             return result;
+@@ -451,12 +_,16 @@
+                 return true;
+             } else {
+                 BlockPos pos = BlockPos.containing(target);
+-                if (!level.getBlockState(pos).isAir()) {
++                if (!canReadBlock(level, pos) || !level.getBlockState(pos).isAir()) {
+                     return false;
+                 } else {
+                     for (Direction dir : Direction.values()) {
+                         for (int i = 1; i < distanceToBlocks; i++) {
+                             BlockPos offset = pos.relative(dir, i);
++                            if (!canReadBlock(level, offset)) {
++                                return false;
++                            }
++
+                             if (!level.getBlockState(offset).isAir()) {
+                                 return true;
+                             }
+@@ -466,6 +_,10 @@
+                     return false;
+                 }
+             }
++        }
++
++        private static boolean canReadBlock(Level level, BlockPos pos) {
++            return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+         }
+ 
+         private static Vec3 chooseRandomPosition(Vec3 center, RandomSource random) {

@@ -1,0 +1,87 @@
+--- a/net/minecraft/server/players/StoredUserList.java
++++ b/net/minecraft/server/players/StoredUserList.java
+@@ -40,7 +_,7 @@
+         return this.file;
+     }
+ 
+-    public boolean add(V infos) {
++    public synchronized boolean add(V infos) {
+         String keyForUser = this.getKeyForUser(infos.getUser());
+         V previous = this.map.get(keyForUser);
+         if (infos.equals(previous)) {
+@@ -58,12 +_,12 @@
+         }
+     }
+ 
+-    public @Nullable V get(K user) {
++    public synchronized @Nullable V get(K user) {
+         this.removeExpired();
+         return this.map.get(this.getKeyForUser(user));
+     }
+ 
+-    public boolean remove(K user) {
++    public synchronized boolean remove(K user) {
+         V removed = this.map.remove(this.getKeyForUser(user));
+         if (removed == null) {
+             return false;
+@@ -78,11 +_,11 @@
+         }
+     }
+ 
+-    public boolean remove(StoredUserEntry<K> infos) {
++    public synchronized boolean remove(StoredUserEntry<K> infos) {
+         return this.remove(Objects.requireNonNull(infos.getUser()));
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.map.clear();
+ 
+         try {
+@@ -92,11 +_,11 @@
+         }
+     }
+ 
+-    public String[] getUserList() {
++    public synchronized String[] getUserList() {
+         return this.map.keySet().toArray(new String[0]);
+     }
+ 
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         return this.map.isEmpty();
+     }
+ 
+@@ -104,7 +_,7 @@
+         return user.toString();
+     }
+ 
+-    protected boolean contains(K user) {
++    protected synchronized boolean contains(K user) {
+         return this.map.containsKey(this.getKeyForUser(user));
+     }
+ 
+@@ -124,11 +_,11 @@
+ 
+     protected abstract StoredUserEntry<K> createEntry(final JsonObject object);
+ 
+-    public Collection<V> getEntries() {
+-        return this.map.values();
++    public synchronized Collection<V> getEntries() {
++        return List.copyOf(this.map.values());
+     }
+ 
+-    public void save() throws IOException {
++    public synchronized void save() throws IOException {
+         JsonArray result = new JsonArray();
+         this.map.values().stream().map(entry -> Util.make(new JsonObject(), entry::serialize)).forEach(result::add);
+ 
+@@ -137,7 +_,7 @@
+         }
+     }
+ 
+-    public void load() throws IOException {
++    public synchronized void load() throws IOException {
+         if (this.file.exists()) {
+             try (BufferedReader reader = Files.newReader(this.file, StandardCharsets.UTF_8)) {
+                 this.map.clear();

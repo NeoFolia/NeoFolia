@@ -1,0 +1,18 @@
+--- a/net/minecraft/world/level/PotentialCalculator.java
++++ b/net/minecraft/world/level/PotentialCalculator.java
+@@ -7,13 +_,13 @@
+ public class PotentialCalculator {
+     private final List<PotentialCalculator.PointCharge> charges = Lists.newArrayList();
+ 
+-    public void addCharge(BlockPos pos, double charge) {
++    public synchronized void addCharge(BlockPos pos, double charge) {
+         if (charge != 0.0) {
+             this.charges.add(new PotentialCalculator.PointCharge(pos, charge));
+         }
+     }
+ 
+-    public double getPotentialEnergyChange(BlockPos pos, double charge) {
++    public synchronized double getPotentialEnergyChange(BlockPos pos, double charge) {
+         if (charge == 0.0) {
+             return 0.0;
+         } else {

@@ -1,0 +1,28 @@
+--- a/net/minecraft/world/level/chunk/ChunkGenerator.java
++++ b/net/minecraft/world/level/chunk/ChunkGenerator.java
+@@ -94,11 +_,16 @@
+     public ChunkGenerator(BiomeSource biomeSource, Function<Holder<Biome>, BiomeGenerationSettings> generationSettingsGetter) {
+         this.biomeSource = biomeSource;
+         this.generationSettingsGetter = generationSettingsGetter;
+-        this.featuresPerStep = Suppliers.memoize(
++        this.featuresPerStep = net.neoforged.neoforge.common.util.Lazy.of(
+             () -> FeatureSorter.buildFeaturesPerStep(List.copyOf(biomeSource.possibleBiomes()), b -> generationSettingsGetter.apply(b).features(), true)
+         );
+     }
+ 
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public void refreshFeaturesPerStep() {
++        ((net.neoforged.neoforge.common.util.Lazy<?>) this.featuresPerStep).invalidate();
++    }
++
+     public void validate() {
+         this.featuresPerStep.get();
+     }
+@@ -401,6 +_,7 @@
+                 }
+ 
+                 level.setCurrentlyGenerating(null);
++                level.getLevel().getChunkSource().recordChunkGenerated();
+                 if (SharedConstants.DEBUG_FEATURE_COUNT) {
+                     FeatureCountTracker.chunkDecorated(level.getLevel());
+                 }

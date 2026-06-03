@@ -1,0 +1,310 @@
+--- a/net/minecraft/world/level/border/WorldBorder.java
++++ b/net/minecraft/world/level/border/WorldBorder.java
+@@ -46,63 +_,63 @@
+         this.settings = settings;
+     }
+ 
+-    public boolean isWithinBounds(BlockPos pos) {
++    public synchronized boolean isWithinBounds(BlockPos pos) {
+         return this.isWithinBounds(pos.getX(), pos.getZ());
+     }
+ 
+-    public boolean isWithinBounds(Vec3 pos) {
++    public synchronized boolean isWithinBounds(Vec3 pos) {
+         return this.isWithinBounds(pos.x, pos.z);
+     }
+ 
+-    public boolean isWithinBounds(ChunkPos pos) {
++    public synchronized boolean isWithinBounds(ChunkPos pos) {
+         return this.isWithinBounds(pos.getMinBlockX(), pos.getMinBlockZ()) && this.isWithinBounds(pos.getMaxBlockX(), pos.getMaxBlockZ());
+     }
+ 
+-    public boolean isWithinBounds(AABB aabb) {
++    public synchronized boolean isWithinBounds(AABB aabb) {
+         return this.isWithinBounds(aabb.minX, aabb.minZ, aabb.maxX - 1.0E-5F, aabb.maxZ - 1.0E-5F);
+     }
+ 
+-    private boolean isWithinBounds(double minX, double minZ, double maxX, double maxZ) {
++    private synchronized boolean isWithinBounds(double minX, double minZ, double maxX, double maxZ) {
+         return this.isWithinBounds(minX, minZ) && this.isWithinBounds(maxX, maxZ);
+     }
+ 
+-    public boolean isWithinBounds(double x, double z) {
++    public synchronized boolean isWithinBounds(double x, double z) {
+         return this.isWithinBounds(x, z, 0.0);
+     }
+ 
+-    public boolean isWithinBounds(double x, double z, double margin) {
++    public synchronized boolean isWithinBounds(double x, double z, double margin) {
+         return x >= this.getMinX() - margin && x < this.getMaxX() + margin && z >= this.getMinZ() - margin && z < this.getMaxZ() + margin;
+     }
+ 
+-    public BlockPos clampToBounds(BlockPos position) {
++    public synchronized BlockPos clampToBounds(BlockPos position) {
+         return this.clampToBounds(position.getX(), position.getY(), position.getZ());
+     }
+ 
+-    public BlockPos clampToBounds(Vec3 position) {
++    public synchronized BlockPos clampToBounds(Vec3 position) {
+         return this.clampToBounds(position.x(), position.y(), position.z());
+     }
+ 
+-    public BlockPos clampToBounds(double x, double y, double z) {
++    public synchronized BlockPos clampToBounds(double x, double y, double z) {
+         return BlockPos.containing(this.clampVec3ToBound(x, y, z));
+     }
+ 
+-    public Vec3 clampVec3ToBound(Vec3 position) {
++    public synchronized Vec3 clampVec3ToBound(Vec3 position) {
+         return this.clampVec3ToBound(position.x, position.y, position.z);
+     }
+ 
+-    public Vec3 clampVec3ToBound(double x, double y, double z) {
++    public synchronized Vec3 clampVec3ToBound(double x, double y, double z) {
+         return new Vec3(Mth.clamp(x, this.getMinX(), this.getMaxX() - 1.0E-5F), y, Mth.clamp(z, this.getMinZ(), this.getMaxZ() - 1.0E-5F));
+     }
+ 
+-    public double getDistanceToBorder(Entity entity) {
++    public synchronized double getDistanceToBorder(Entity entity) {
+         return this.getDistanceToBorder(entity.getX(), entity.getZ());
+     }
+ 
+-    public VoxelShape getCollisionShape() {
++    public synchronized VoxelShape getCollisionShape() {
+         return this.extent.getCollisionShape();
+     }
+ 
+-    public double getDistanceToBorder(double x, double z) {
++    public synchronized double getDistanceToBorder(double x, double z) {
+         double fromNorth = z - this.getMinZ();
+         double fromSouth = this.getMaxZ() - z;
+         double fromWest = x - this.getMinX();
+@@ -112,56 +_,56 @@
+         return Math.min(min, fromSouth);
+     }
+ 
+-    public boolean isInsideCloseToBorder(Entity source, AABB boundingBox) {
++    public synchronized boolean isInsideCloseToBorder(Entity source, AABB boundingBox) {
+         double bbMax = Math.max(Mth.absMax(boundingBox.getXsize(), boundingBox.getZsize()), 1.0);
+         return this.getDistanceToBorder(source) < bbMax * 2.0 && this.isWithinBounds(source.getX(), source.getZ(), bbMax);
+     }
+ 
+-    public BorderStatus getStatus() {
++    public synchronized BorderStatus getStatus() {
+         return this.extent.getStatus();
+     }
+ 
+-    public double getMinX() {
++    public synchronized double getMinX() {
+         return this.getMinX(0.0F);
+     }
+ 
+-    public double getMinX(float deltaPartialTick) {
++    public synchronized double getMinX(float deltaPartialTick) {
+         return this.extent.getMinX(deltaPartialTick);
+     }
+ 
+-    public double getMinZ() {
++    public synchronized double getMinZ() {
+         return this.getMinZ(0.0F);
+     }
+ 
+-    public double getMinZ(float deltaPartialTick) {
++    public synchronized double getMinZ(float deltaPartialTick) {
+         return this.extent.getMinZ(deltaPartialTick);
+     }
+ 
+-    public double getMaxX() {
++    public synchronized double getMaxX() {
+         return this.getMaxX(0.0F);
+     }
+ 
+-    public double getMaxX(float deltaPartialTick) {
++    public synchronized double getMaxX(float deltaPartialTick) {
+         return this.extent.getMaxX(deltaPartialTick);
+     }
+ 
+-    public double getMaxZ() {
++    public synchronized double getMaxZ() {
+         return this.getMaxZ(0.0F);
+     }
+ 
+-    public double getMaxZ(float deltaPartialTick) {
++    public synchronized double getMaxZ(float deltaPartialTick) {
+         return this.extent.getMaxZ(deltaPartialTick);
+     }
+ 
+-    public double getCenterX() {
++    public synchronized double getCenterX() {
+         return this.centerX;
+     }
+ 
+-    public double getCenterZ() {
++    public synchronized double getCenterZ() {
+         return this.centerZ;
+     }
+ 
+-    public void setCenter(double x, double z) {
++    public synchronized void setCenter(double x, double z) {
+         this.centerX = x;
+         this.centerZ = z;
+         this.extent.onCenterChange();
+@@ -172,19 +_,19 @@
+         }
+     }
+ 
+-    public double getSize() {
++    public synchronized double getSize() {
+         return this.extent.getSize();
+     }
+ 
+-    public long getLerpTime() {
++    public synchronized long getLerpTime() {
+         return this.extent.getLerpTime();
+     }
+ 
+-    public double getLerpTarget() {
++    public synchronized double getLerpTarget() {
+         return this.extent.getLerpTarget();
+     }
+ 
+-    public void setSize(double size) {
++    public synchronized void setSize(double size) {
+         this.extent = new WorldBorder.StaticBorderExtent(size);
+         this.setDirty();
+ 
+@@ -193,7 +_,7 @@
+         }
+     }
+ 
+-    public void lerpSizeBetween(double from, double to, long ticks, long gameTime) {
++    public synchronized void lerpSizeBetween(double from, double to, long ticks, long gameTime) {
+         this.extent = (WorldBorder.BorderExtent)(from == to
+             ? new WorldBorder.StaticBorderExtent(to)
+             : new WorldBorder.MovingBorderExtent(from, to, ticks, gameTime));
+@@ -204,32 +_,32 @@
+         }
+     }
+ 
+-    protected List<BorderChangeListener> getListeners() {
++    protected synchronized List<BorderChangeListener> getListeners() {
+         return Lists.newArrayList(this.listeners);
+     }
+ 
+-    public void addListener(BorderChangeListener listener) {
++    public synchronized void addListener(BorderChangeListener listener) {
+         this.listeners.add(listener);
+     }
+ 
+-    public void removeListener(BorderChangeListener listener) {
++    public synchronized void removeListener(BorderChangeListener listener) {
+         this.listeners.remove(listener);
+     }
+ 
+-    public void setAbsoluteMaxSize(int absoluteMaxSize) {
++    public synchronized void setAbsoluteMaxSize(int absoluteMaxSize) {
+         this.absoluteMaxSize = absoluteMaxSize;
+         this.extent.onAbsoluteMaxSizeChange();
+     }
+ 
+-    public int getAbsoluteMaxSize() {
++    public synchronized int getAbsoluteMaxSize() {
+         return this.absoluteMaxSize;
+     }
+ 
+-    public double getSafeZone() {
++    public synchronized double getSafeZone() {
+         return this.safeZone;
+     }
+ 
+-    public void setSafeZone(double safeZone) {
++    public synchronized void setSafeZone(double safeZone) {
+         this.safeZone = safeZone;
+         this.setDirty();
+ 
+@@ -238,11 +_,11 @@
+         }
+     }
+ 
+-    public double getDamagePerBlock() {
++    public synchronized double getDamagePerBlock() {
+         return this.damagePerBlock;
+     }
+ 
+-    public void setDamagePerBlock(double damagePerBlock) {
++    public synchronized void setDamagePerBlock(double damagePerBlock) {
+         this.damagePerBlock = damagePerBlock;
+         this.setDirty();
+ 
+@@ -251,15 +_,15 @@
+         }
+     }
+ 
+-    public double getLerpSpeed() {
++    public synchronized double getLerpSpeed() {
+         return this.extent.getLerpSpeed();
+     }
+ 
+-    public int getWarningTime() {
++    public synchronized int getWarningTime() {
+         return this.warningTime;
+     }
+ 
+-    public void setWarningTime(int warningTime) {
++    public synchronized void setWarningTime(int warningTime) {
+         this.warningTime = warningTime;
+         this.setDirty();
+ 
+@@ -268,11 +_,11 @@
+         }
+     }
+ 
+-    public int getWarningBlocks() {
++    public synchronized int getWarningBlocks() {
+         return this.warningBlocks;
+     }
+ 
+-    public void setWarningBlocks(int warningBlocks) {
++    public synchronized void setWarningBlocks(int warningBlocks) {
+         this.warningBlocks = warningBlocks;
+         this.setDirty();
+ 
+@@ -281,11 +_,11 @@
+         }
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         this.extent = this.extent.update();
+     }
+ 
+-    public void applyInitialSettings(long gameTime) {
++    public synchronized void applyInitialSettings(long gameTime) {
+         if (!this.initialized) {
+             this.setCenter(this.settings.centerX(), this.settings.centerZ());
+             this.setDamagePerBlock(this.settings.damagePerBlock());
+@@ -491,15 +_,15 @@
+ 
+         public Settings(WorldBorder worldBorder) {
+             this(
+-                worldBorder.centerX,
+-                worldBorder.centerZ,
+-                worldBorder.damagePerBlock,
+-                worldBorder.safeZone,
+-                worldBorder.warningBlocks,
+-                worldBorder.warningTime,
+-                worldBorder.extent.getSize(),
+-                worldBorder.extent.getLerpTime(),
+-                worldBorder.extent.getLerpTarget()
++                worldBorder.getCenterX(),
++                worldBorder.getCenterZ(),
++                worldBorder.getDamagePerBlock(),
++                worldBorder.getSafeZone(),
++                worldBorder.getWarningBlocks(),
++                worldBorder.getWarningTime(),
++                worldBorder.getSize(),
++                worldBorder.getLerpTime(),
++                worldBorder.getLerpTarget()
+             );
+         }
+     }

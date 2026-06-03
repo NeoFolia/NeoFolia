@@ -1,0 +1,483 @@
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -66,21 +_,23 @@
+     private final PacketFlow receiving;
+     private volatile boolean sendLoginDisconnect = true;
+     private final Queue<Consumer<Connection>> pendingActions = Queues.newConcurrentLinkedQueue();
+-    private Channel channel;
+-    private SocketAddress address;
++    private volatile Channel channel;
++    private volatile SocketAddress address;
+     private volatile @Nullable PacketListener disconnectListener;
+     private volatile @Nullable PacketListener packetListener;
+-    private @Nullable DisconnectionDetails disconnectionDetails;
+-    private boolean encrypted;
+-    private boolean disconnectionHandled;
++    private volatile @Nullable DisconnectionDetails disconnectionDetails;
++    private volatile boolean encrypted;
++    private volatile boolean disconnectionHandled;
+     private int receivedPackets;
+     private int sentPackets;
+     private float averageReceivedPackets;
+     private float averageSentPackets;
+     private int tickCount;
+-    private boolean handlingFault;
++    private volatile boolean handlingFault;
+     private volatile @Nullable DisconnectionDetails delayedDisconnect;
+-    private @Nullable BandwidthDebugMonitor bandwidthDebugMonitor;
++    private volatile @Nullable BandwidthDebugMonitor bandwidthDebugMonitor;
++    @Nullable
++    private volatile ProtocolInfo<?> inboundProtocol;
+ 
+     public Connection(PacketFlow receiving) {
+         this.receiving = receiving;
+@@ -94,11 +_,13 @@
+         if (this.delayedDisconnect != null) {
+             this.disconnect(this.delayedDisconnect);
+         }
++        net.neoforged.neoforge.network.connection.ConnectionUtils.setConnection(ctx, this);
+     }
+ 
+     @Override
+     public void channelInactive(ChannelHandlerContext ctx) {
+         this.disconnect(Component.translatable("disconnect.endOfStream"));
++        net.neoforged.neoforge.network.connection.ConnectionUtils.removeConnection(ctx);
+     }
+ 
+     @Override
+@@ -108,13 +_,21 @@
+         } else {
+             boolean isFirstFault = !this.handlingFault;
+             this.handlingFault = true;
+-            if (this.channel.isOpen()) {
++            Channel channel = this.channel;
++            if (channel != null && channel.isOpen()) {
+                 if (cause instanceof TimeoutException) {
+                     LOGGER.debug("Timeout", cause);
+                     this.disconnect(Component.translatable("disconnect.timeout"));
+                 } else {
+                     Component reason = Component.translatable("disconnect.genericReason", "Internal Exception: " + cause);
+                     PacketListener listener = this.packetListener;
++                    if (listener != null) {
++                        ConnectionProtocol protocol = listener.protocol();
++                        if (protocol == ConnectionProtocol.CONFIGURATION || protocol == ConnectionProtocol.PLAY) {
++                            // Neo: Always log critical network exceptions for config and play packets
++                            LOGGER.error("Exception caught in connection", cause);
++                        }
++                    }
+                     DisconnectionDetails details;
+                     if (listener != null) {
+                         details = listener.createDisconnectionInfo(reason, cause);
+@@ -144,22 +_,23 @@
+     }
+ 
+     protected void channelRead0(ChannelHandlerContext ctx, Packet<?> packet) {
+-        if (this.channel.isOpen()) {
++        Channel channel = this.channel;
++        if (channel != null && channel.isOpen()) {
+             PacketListener packetListener = this.packetListener;
+             if (packetListener == null) {
+                 throw new IllegalStateException("Received a packet before the packet listener was initialized");
+-            } else {
+-                if (packetListener.shouldHandleMessage(packet)) {
+-                    try {
+-                        genericsFtw(packet, packetListener);
+-                    } catch (RunningOnDifferentThreadException var5) {
+-                    } catch (RejectedExecutionException var6) {
+-                        this.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
+-                    } catch (ClassCastException var7) {
+-                        LOGGER.error("Received {} that couldn't be processed", packet.getClass(), var7);
+-                        this.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
+-                    }
++            } else if (packetListener.shouldHandleMessage(packet)) {
++                try {
++                    genericsFtw(packet, packetListener);
++                } catch (RunningOnDifferentThreadException var5) {
++                } catch (RejectedExecutionException var6) {
++                    this.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
++                } catch (ClassCastException var7) {
++                    LOGGER.error("Received {} that couldn't be processed", packet.getClass(), var7);
++                    this.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
++                }
+ 
++                synchronized (this) {
+                     this.receivedPackets++;
+                 }
+             }
+@@ -196,40 +_,55 @@
+     }
+ 
+     public <T extends PacketListener> void setupInboundProtocol(ProtocolInfo<T> protocol, T packetListener) {
+-        this.validateListener(protocol, packetListener);
+-        if (protocol.flow() != this.getReceiving()) {
+-            throw new IllegalStateException("Invalid inbound protocol: " + protocol.id());
+-        } else {
++        UnconfiguredPipelineHandler.InboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupInboundProtocol(protocol);
++        BundlerInfo bundlerInfo = protocol.bundlerInfo();
++        if (bundlerInfo != null) {
++            PacketBundlePacker newBundler = new PacketBundlePacker(bundlerInfo);
++            configMessage = configMessage.andThen(ctx -> ctx.pipeline().addAfter("decoder", "bundler", newBundler));
++        }
++
++        Channel channel;
++        synchronized (this) {
++            this.validateListener(protocol, packetListener);
++            if (protocol.flow() != this.receiving) {
++                throw new IllegalStateException("Invalid inbound protocol: " + protocol.id());
++            }
++
++            this.inboundProtocol = protocol;
+             this.packetListener = packetListener;
+             this.disconnectListener = null;
+-            UnconfiguredPipelineHandler.InboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupInboundProtocol(protocol);
+-            BundlerInfo bundlerInfo = protocol.bundlerInfo();
+-            if (bundlerInfo != null) {
+-                PacketBundlePacker newBundler = new PacketBundlePacker(bundlerInfo);
+-                configMessage = configMessage.andThen(ctx -> ctx.pipeline().addAfter("decoder", "bundler", newBundler));
+-            }
+-
+-            syncAfterConfigurationChange(this.channel.writeAndFlush(configMessage));
++            channel = this.channel;
+         }
++
++        syncAfterConfigurationChange(channel.writeAndFlush(configMessage));
+     }
+ 
+     public void setupOutboundProtocol(ProtocolInfo<?> protocol) {
+-        if (protocol.flow() != this.getSending()) {
++        if (protocol.flow() != this.receiving.getOpposite()) {
+             throw new IllegalStateException("Invalid outbound protocol: " + protocol.id());
+         } else {
+             UnconfiguredPipelineHandler.OutboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupOutboundProtocol(protocol);
+             BundlerInfo bundlerInfo = protocol.bundlerInfo();
+             if (bundlerInfo != null) {
+                 PacketBundleUnpacker newUnbundler = new PacketBundleUnpacker(bundlerInfo);
+-                configMessage = configMessage.andThen(ctx -> ctx.pipeline().addAfter("encoder", "unbundler", newUnbundler));
++                configMessage = configMessage.andThen(ctx -> {
++                    ctx.pipeline().addAfter("encoder", "unbundler", newUnbundler);
++                    // Neo: our handlers must be between the encoder and the unbundler, so re-inject them
++                    // Note, this call must be inside the .andThen lambda, or it will actually run before the unbundler gets added.
++                    net.neoforged.neoforge.network.filters.NetworkFilters.injectIfNecessary(this);
++                });
+             }
+ 
++            Channel channel;
++            synchronized (this) {
++                channel = this.channel;
++            }
+             boolean isLoginProtocol = protocol.id() == ConnectionProtocol.LOGIN;
+-            syncAfterConfigurationChange(this.channel.writeAndFlush(configMessage.andThen(ctx -> this.sendLoginDisconnect = isLoginProtocol)));
++            syncAfterConfigurationChange(channel.writeAndFlush(configMessage.andThen(ctx -> this.sendLoginDisconnect = isLoginProtocol)));
+         }
+     }
+ 
+-    public void setListenerForServerboundHandshake(PacketListener packetListener) {
++    public synchronized void setListenerForServerboundHandshake(PacketListener packetListener) {
+         if (this.packetListener != null) {
+             throw new IllegalStateException("Listener already set");
+         } else if (this.receiving == PacketFlow.SERVERBOUND
+@@ -241,21 +_,21 @@
+         }
+     }
+ 
+-    public void initiateServerboundStatusConnection(String hostName, int port, ClientStatusPacketListener listener) {
++    public synchronized void initiateServerboundStatusConnection(String hostName, int port, ClientStatusPacketListener listener) {
+         this.initiateServerboundConnection(hostName, port, StatusProtocols.SERVERBOUND, StatusProtocols.CLIENTBOUND, listener, ClientIntent.STATUS);
+     }
+ 
+-    public void initiateServerboundPlayConnection(String hostName, int port, ClientLoginPacketListener listener) {
++    public synchronized void initiateServerboundPlayConnection(String hostName, int port, ClientLoginPacketListener listener) {
+         this.initiateServerboundConnection(hostName, port, LoginProtocols.SERVERBOUND, LoginProtocols.CLIENTBOUND, listener, ClientIntent.LOGIN);
+     }
+ 
+-    public <S extends ServerboundPacketListener, C extends ClientboundPacketListener> void initiateServerboundPlayConnection(
++    public synchronized <S extends ServerboundPacketListener, C extends ClientboundPacketListener> void initiateServerboundPlayConnection(
+         String hostName, int port, ProtocolInfo<S> outbound, ProtocolInfo<C> inbound, C listener, boolean transfer
+     ) {
+         this.initiateServerboundConnection(hostName, port, outbound, inbound, listener, transfer ? ClientIntent.TRANSFER : ClientIntent.LOGIN);
+     }
+ 
+-    private <S extends ServerboundPacketListener, C extends ClientboundPacketListener> void initiateServerboundConnection(
++    private synchronized <S extends ServerboundPacketListener, C extends ClientboundPacketListener> void initiateServerboundConnection(
+         String hostName, int port, ProtocolInfo<S> outbound, ProtocolInfo<C> inbound, C listener, ClientIntent intent
+     ) {
+         if (outbound.id() != inbound.id()) {
+@@ -279,16 +_,17 @@
+     }
+ 
+     public void send(Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
+-        if (this.isConnected()) {
++        Channel channel = this.channel;
++        if (isConnected(channel)) {
+             this.flushQueue();
+-            this.sendPacket(packet, listener, flush);
++            this.sendPacket(channel, packet, listener, flush);
+         } else {
+             this.pendingActions.add(connection -> connection.sendPacket(packet, listener, flush));
+         }
+     }
+ 
+     public void runOnceConnected(Consumer<Connection> action) {
+-        if (this.isConnected()) {
++        if (isConnected(this.channel)) {
+             this.flushQueue();
+             action.accept(this);
+         } else {
+@@ -297,55 +_,76 @@
+     }
+ 
+     private void sendPacket(Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
+-        this.sentPackets++;
+-        if (this.channel.eventLoop().inEventLoop()) {
+-            this.doSendPacket(packet, listener, flush);
++        Channel channel = this.channel;
++        if (channel != null) {
++            this.sendPacket(channel, packet, listener, flush);
++        }
++    }
++
++    private void sendPacket(Channel channel, Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
++        synchronized (this) {
++            this.sentPackets++;
++        }
++
++        if (channel.eventLoop().inEventLoop()) {
++            this.doSendPacket(channel, packet, listener, flush);
+         } else {
+-            this.channel.eventLoop().execute(() -> this.doSendPacket(packet, listener, flush));
++            channel.eventLoop().execute(() -> this.doSendPacket(channel, packet, listener, flush));
+         }
+     }
+ 
+-    private void doSendPacket(Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
++    private void doSendPacket(Channel channel, Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
+         if (listener != null) {
+-            ChannelFuture future = flush ? this.channel.writeAndFlush(packet) : this.channel.write(packet);
++            ChannelFuture future = flush ? channel.writeAndFlush(packet) : channel.write(packet);
+             future.addListener(listener);
+         } else if (flush) {
+-            this.channel.writeAndFlush(packet, this.channel.voidPromise());
++            channel.writeAndFlush(packet, channel.voidPromise());
+         } else {
+-            this.channel.write(packet, this.channel.voidPromise());
++            channel.write(packet, channel.voidPromise());
+         }
+     }
+ 
+     public void flushChannel() {
+-        if (this.isConnected()) {
+-            this.flush();
++        Channel channel = this.channel;
++        if (isConnected(channel)) {
++            this.flush(channel);
+         } else {
+             this.pendingActions.add(Connection::flush);
+         }
+     }
+ 
+     private void flush() {
+-        if (this.channel.eventLoop().inEventLoop()) {
+-            this.channel.flush();
++        Channel channel = this.channel;
++        if (channel != null) {
++            this.flush(channel);
++        }
++    }
++
++    private void flush(Channel channel) {
++        if (channel.eventLoop().inEventLoop()) {
++            channel.flush();
+         } else {
+-            this.channel.eventLoop().execute(() -> this.channel.flush());
++            channel.eventLoop().execute(channel::flush);
+         }
+     }
+ 
+     private void flushQueue() {
+-        if (this.channel != null && this.channel.isOpen()) {
+-            synchronized (this.pendingActions) {
+-                Consumer<Connection> pendingAction;
+-                while ((pendingAction = this.pendingActions.poll()) != null) {
+-                    pendingAction.accept(this);
+-                }
++        if (isConnected(this.channel)) {
++            Consumer<Connection> pendingAction;
++            while ((pendingAction = this.pendingActions.poll()) != null) {
++                pendingAction.accept(this);
+             }
+         }
++    }
++
++    private static boolean isConnected(@Nullable Channel channel) {
++        return channel != null && channel.isOpen();
+     }
+ 
+     public void tick() {
+         this.flushQueue();
+-        if (this.packetListener instanceof TickablePacketListener tickable) {
++        PacketListener packetListener = this.packetListener;
++        if (packetListener instanceof TickablePacketListener tickable) {
+             tickable.tick();
+         }
+ 
+@@ -353,20 +_,22 @@
+             this.handleDisconnection();
+         }
+ 
+-        if (this.channel != null) {
+-            this.channel.flush();
++        Channel channel = this.channel;
++        if (channel != null) {
++            channel.flush();
+         }
+ 
+         if (this.tickCount++ % 20 == 0) {
+             this.tickSecond();
+         }
+ 
+-        if (this.bandwidthDebugMonitor != null) {
+-            this.bandwidthDebugMonitor.tick();
++        BandwidthDebugMonitor bandwidthDebugMonitor = this.bandwidthDebugMonitor;
++        if (bandwidthDebugMonitor != null) {
++            bandwidthDebugMonitor.tick();
+         }
+     }
+ 
+-    protected void tickSecond() {
++    protected synchronized void tickSecond() {
+         this.averageSentPackets = Mth.lerp(0.75F, (float)this.sentPackets, this.averageSentPackets);
+         this.averageReceivedPackets = Mth.lerp(0.75F, (float)this.receivedPackets, this.averageReceivedPackets);
+         this.sentPackets = 0;
+@@ -381,7 +_,7 @@
+         if (this.address == null) {
+             return "local";
+         } else {
+-            return logIPs ? this.address.toString() : "IP hidden";
++            return logIPs ? net.neoforged.neoforge.network.DualStackUtils.getAddressString(this.address) : "IP hidden";
+         }
+     }
+ 
+@@ -390,13 +_,20 @@
+     }
+ 
+     public void disconnect(DisconnectionDetails details) {
+-        if (this.channel == null) {
+-            this.delayedDisconnect = details;
++        Channel channel;
++        synchronized (this) {
++            if (this.channel == null) {
++                this.delayedDisconnect = details;
++            }
++
++            channel = this.channel;
+         }
+ 
+-        if (this.isConnected()) {
+-            this.channel.close().awaitUninterruptibly();
+-            this.disconnectionDetails = details;
++        if (channel != null && channel.isOpen()) {
++            channel.close().awaitUninterruptibly();
++            synchronized (this) {
++                this.disconnectionDetails = details;
++            }
+         }
+     }
+ 
+@@ -424,6 +_,7 @@
+     }
+ 
+     public static ChannelFuture connect(InetSocketAddress address, EventLoopGroupHolder eventLoopGroupHolder, Connection connection) {
++        net.neoforged.neoforge.network.DualStackUtils.checkIPv6(address.getAddress());
+         return new Bootstrap().group(eventLoopGroupHolder.eventLoopGroup()).handler(new ChannelInitializer<Channel>() {
+             @Override
+             protected void initChannel(Channel channel) {
+@@ -506,7 +_,7 @@
+         return connection;
+     }
+ 
+-    public void setEncryptionKey(Cipher decryptCipher, Cipher encryptCipher) {
++    public synchronized void setEncryptionKey(Cipher decryptCipher, Cipher encryptCipher) {
+         this.encrypted = true;
+         this.channel.pipeline().addBefore("splitter", "decrypt", new CipherDecoder(decryptCipher));
+         this.channel.pipeline().addBefore("prepender", "encrypt", new CipherEncoder(encryptCipher));
+@@ -533,12 +_,13 @@
+     }
+ 
+     public void setReadOnly() {
+-        if (this.channel != null) {
+-            this.channel.config().setAutoRead(false);
++        Channel channel = this.channel;
++        if (channel != null) {
++            channel.config().setAutoRead(false);
+         }
+     }
+ 
+-    public void setupCompression(int threshold, boolean validateDecompressed) {
++    public synchronized void setupCompression(int threshold, boolean validateDecompressed) {
+         if (threshold >= 0) {
+             if (this.channel.pipeline().get("decompress") instanceof CompressionDecoder compressionDecoder) {
+                 compressionDecoder.setThreshold(threshold, validateDecompressed);
+@@ -563,32 +_,52 @@
+     }
+ 
+     public void handleDisconnection() {
+-        if (this.channel != null && !this.channel.isOpen()) {
++        PacketListener disconnectListener;
++        DisconnectionDetails details;
++        synchronized (this) {
++            if (this.channel == null || this.channel.isOpen()) {
++                return;
++            }
++
+             if (this.disconnectionHandled) {
+                 LOGGER.warn("handleDisconnection() called twice");
++                return;
+             } else {
+                 this.disconnectionHandled = true;
+                 PacketListener packetListener = this.getPacketListener();
+-                PacketListener disconnectListener = packetListener != null ? packetListener : this.disconnectListener;
+-                if (disconnectListener != null) {
+-                    DisconnectionDetails details = Objects.requireNonNullElseGet(
+-                        this.getDisconnectionDetails(), () -> new DisconnectionDetails(Component.translatable("multiplayer.disconnect.generic"))
+-                    );
+-                    disconnectListener.onDisconnect(details);
+-                }
++                disconnectListener = packetListener != null ? packetListener : this.disconnectListener;
++                details = Objects.requireNonNullElseGet(
++                    this.getDisconnectionDetails(), () -> new DisconnectionDetails(Component.translatable("multiplayer.disconnect.generic"))
++                );
+             }
+         }
++
++        if (disconnectListener != null) {
++            disconnectListener.onDisconnect(details);
++        }
+     }
+ 
+-    public float getAverageReceivedPackets() {
++    public synchronized float getAverageReceivedPackets() {
+         return this.averageReceivedPackets;
+     }
+ 
+-    public float getAverageSentPackets() {
++    public synchronized float getAverageSentPackets() {
+         return this.averageSentPackets;
+     }
+ 
+-    public void setBandwidthLogger(LocalSampleLogger bandwidthLogger) {
++    public synchronized void setBandwidthLogger(LocalSampleLogger bandwidthLogger) {
+         this.bandwidthDebugMonitor = new BandwidthDebugMonitor(bandwidthLogger);
++    }
++
++    public Channel channel() {
++        return this.channel;
++    }
++
++    public PacketFlow getDirection() {
++        return this.receiving;
++    }
++
++    public ProtocolInfo<?> getInboundProtocol() {
++        return Objects.requireNonNull(this.inboundProtocol, "Inbound protocol not set?");
+     }
+ }

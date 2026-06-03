@@ -1,0 +1,113 @@
+--- a/net/minecraft/server/commands/SetBlockCommand.java
++++ b/net/minecraft/server/commands/SetBlockCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.function.Predicate;
+@@ -21,7 +_,6 @@
+     private static final SimpleCommandExceptionType ERROR_FAILED = new SimpleCommandExceptionType(Component.translatable("commands.setblock.failed"));
+ 
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context) {
+-        Predicate<BlockInWorld> filter = b -> b.getLevel().isEmptyBlock(b.getPos());
+         dispatcher.register(
+             Commands.literal("setblock")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+@@ -29,74 +_,44 @@
+                     Commands.argument("pos", BlockPosArgument.blockPos())
+                         .then(
+                             Commands.argument("block", BlockStateArgument.block(context))
+-                                .executes(
+-                                    c -> setBlock(
+-                                        c.getSource(),
+-                                        BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                        BlockStateArgument.getBlock(c, "block"),
+-                                        SetBlockCommand.Mode.REPLACE,
+-                                        null,
+-                                        false
+-                                    )
+-                                )
++                                .executes(c -> setBlock(c, SetBlockCommand.Mode.REPLACE, false, false))
+                                 .then(
+                                     Commands.literal("destroy")
+-                                        .executes(
+-                                            c -> setBlock(
+-                                                c.getSource(),
+-                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                BlockStateArgument.getBlock(c, "block"),
+-                                                SetBlockCommand.Mode.DESTROY,
+-                                                null,
+-                                                false
+-                                            )
+-                                        )
++                                        .executes(c -> setBlock(c, SetBlockCommand.Mode.DESTROY, false, false))
+                                 )
+                                 .then(
+                                     Commands.literal("keep")
+-                                        .executes(
+-                                            c -> setBlock(
+-                                                c.getSource(),
+-                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                BlockStateArgument.getBlock(c, "block"),
+-                                                SetBlockCommand.Mode.REPLACE,
+-                                                filter,
+-                                                false
+-                                            )
+-                                        )
++                                        .executes(c -> setBlock(c, SetBlockCommand.Mode.REPLACE, true, false))
+                                 )
+                                 .then(
+                                     Commands.literal("replace")
+-                                        .executes(
+-                                            c -> setBlock(
+-                                                c.getSource(),
+-                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                BlockStateArgument.getBlock(c, "block"),
+-                                                SetBlockCommand.Mode.REPLACE,
+-                                                null,
+-                                                false
+-                                            )
+-                                        )
++                                        .executes(c -> setBlock(c, SetBlockCommand.Mode.REPLACE, false, false))
+                                 )
+                                 .then(
+                                     Commands.literal("strict")
+-                                        .executes(
+-                                            c -> setBlock(
+-                                                c.getSource(),
+-                                                BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                BlockStateArgument.getBlock(c, "block"),
+-                                                SetBlockCommand.Mode.REPLACE,
+-                                                null,
+-                                                true
+-                                            )
+-                                        )
++                                        .executes(c -> setBlock(c, SetBlockCommand.Mode.REPLACE, false, true))
+                                 )
+                         )
+                 )
+         );
+     }
+ 
++    private static int setBlock(CommandContext<CommandSourceStack> context, SetBlockCommand.Mode mode, boolean keep, boolean strict)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        Predicate<BlockInWorld> predicate = keep ? b -> b.getLevel().isEmptyBlock(b.getPos()) : null;
++        return setBlock(
++            source, BlockPosArgument.getLoadedBlockPos(context, "pos"), BlockStateArgument.getBlock(context, "block"), mode, predicate, strict
++        );
++    }
++
+     private static int setBlock(
++        CommandSourceStack source, BlockPos pos, BlockInput block, SetBlockCommand.Mode mode, @Nullable Predicate<BlockInWorld> predicate, boolean strict
++    ) throws CommandSyntaxException {
++        return RegionizedCommandHelper.callOnRegionThrowing(source, source.getLevel(), pos, () -> setBlockOnRegion(source, pos, block, mode, predicate, strict));
++    }
++
++    private static int setBlockOnRegion(
+         CommandSourceStack source, BlockPos pos, BlockInput block, SetBlockCommand.Mode mode, @Nullable Predicate<BlockInWorld> predicate, boolean strict
+     ) throws CommandSyntaxException {
+         ServerLevel level = source.getLevel();

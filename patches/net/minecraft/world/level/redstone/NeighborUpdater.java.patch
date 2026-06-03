@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/level/redstone/NeighborUpdater.java
++++ b/net/minecraft/world/level/redstone/NeighborUpdater.java
+@@ -7,11 +_,14 @@
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.registries.BuiltInRegistries;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelAccessor;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface NeighborUpdater {
+@@ -43,7 +_,7 @@
+         BlockState currentState = level.getBlockState(pos);
+         if ((updateFlags & 128) == 0 || !currentState.is(Blocks.REDSTONE_WIRE)) {
+             try {
+-                BlockState newState = currentState.updateShape(level, level, pos, direction, neighborPos, neighborState, level.getRandom());
++                BlockState newState = currentState.updateShape(level, level, pos, direction, neighborPos, neighborState, neighborRandom(level));
+                 Block.updateOrDestroy(currentState, newState, level, pos, updateFlags, updateLimit);
+             } catch (Throwable var12) {
+                 CrashReport report = CrashReport.forThrowable(var12, "Exception while updating neighbour shapes");
+@@ -81,5 +_,9 @@
+             CrashReportCategory.populateBlockDetails(category, level, pos, state);
+             throw new ReportedException(report);
+         }
++    }
++
++    private static RandomSource neighborRandom(LevelAccessor level) {
++        return level instanceof ServerLevel serverLevel ? RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()) : level.getRandom();
+     }
+ }

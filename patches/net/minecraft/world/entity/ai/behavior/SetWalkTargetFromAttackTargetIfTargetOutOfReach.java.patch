@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetWalkTargetFromAttackTargetIfTargetOutOfReach.java
++++ b/net/minecraft/world/entity/ai/behavior/SetWalkTargetFromAttackTargetIfTargetOutOfReach.java
+@@ -12,11 +_,11 @@
+ public class SetWalkTargetFromAttackTargetIfTargetOutOfReach {
+     private static final int PROJECTILE_ATTACK_RANGE_BUFFER = 1;
+ 
+-    public static BehaviorControl<Mob> create(float speedModifier) {
++    public static synchronized BehaviorControl<Mob> create(float speedModifier) {
+         return create(mob -> speedModifier);
+     }
+ 
+-    public static BehaviorControl<Mob> create(Function<LivingEntity, Float> speedModifier) {
++    public static synchronized BehaviorControl<Mob> create(Function<LivingEntity, Float> speedModifier) {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.registered(MemoryModuleType.WALK_TARGET),
+@@ -25,9 +_,17 @@
+                     i.registered(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES)
+                 )
+                 .apply(i, (walkTarget, lookTarget, attackTarget, nearestEntities) -> (level, body, timestamp) -> {
+-                    LivingEntity toAttack = i.get(attackTarget);
++                    LivingEntity toAttack = BehaviorUtils.regionSafeEntity(body, i.get(attackTarget));
++                    if (toAttack == null) {
++                        attackTarget.erase();
++                        walkTarget.erase();
++                        lookTarget.erase();
++                        return false;
++                    }
++
+                     Optional<NearestVisibleLivingEntities> entities = i.tryGet(nearestEntities);
+-                    if (entities.isPresent() && entities.get().contains(toAttack) && BehaviorUtils.isWithinAttackRange(body, toAttack, 1)) {
++                    NearestVisibleLivingEntities visibleEntities = entities.orElse(null);
++                    if (visibleEntities != null && visibleEntities.contains(toAttack) && BehaviorUtils.isWithinAttackRange(body, toAttack, 1)) {
+                         walkTarget.erase();
+                     } else {
+                         lookTarget.set(new EntityTracker(toAttack, true));

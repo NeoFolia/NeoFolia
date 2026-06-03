@@ -1,0 +1,97 @@
+--- a/net/minecraft/world/level/block/entity/ShelfBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ShelfBlockEntity.java
+@@ -40,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.items.clear();
+         ContainerHelper.loadAllItems(input, this.items);
+@@ -48,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         ContainerHelper.saveAllItems(output, this.items, true);
+         output.putBoolean("align_items_to_bottom", this.alignItemsToBottom);
+@@ -63,8 +_,10 @@
+         CompoundTag var4;
+         try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.problemPath(), LOGGER)) {
+             TagValueOutput output = TagValueOutput.createWithContext(reporter, registries);
+-            ContainerHelper.saveAllItems(output, this.items, true);
+-            output.putBoolean("align_items_to_bottom", this.alignItemsToBottom);
++            synchronized (this) {
++                ContainerHelper.saveAllItems(output, this.items, true);
++                output.putBoolean("align_items_to_bottom", this.alignItemsToBottom);
++            }
+             var4 = output.buildResult();
+         }
+ 
+@@ -72,7 +_,7 @@
+     }
+ 
+     @Override
+-    public NonNullList<ItemStack> getItems() {
++    public synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ 
+@@ -81,12 +_,28 @@
+         return Container.stillValidBlockEntity(this, player);
+     }
+ 
+-    public ItemStack swapItemNoUpdate(int slot, ItemStack heldItemStack) {
++    public synchronized ItemStack swapItemNoUpdate(int slot, ItemStack heldItemStack) {
+         ItemStack retrievedItem = this.removeItemNoUpdate(slot);
+         this.setItemNoUpdate(slot, heldItemStack);
+         return retrievedItem;
+     }
+ 
++    @Override
++    public void setItem(int slot, ItemStack itemStack) {
++        setItem(slot, itemStack, false);
++    }
++
++    // Neo: Skip side effects if insideTransaction is true so the caller can defer them until the transaction commits
++    @Override
++    public void setItem(int slot, ItemStack itemStack, boolean insideTransaction) {
++        synchronized (this) {
++            this.setItemNoUpdate(slot, itemStack);
++        }
++        if (!insideTransaction) {
++            this.setChanged();
++        }
++    }
++
+     public void setChanged(Holder.@Nullable Reference<GameEvent> event) {
+         super.setChanged();
+         if (this.level != null) {
+@@ -104,13 +_,13 @@
+     }
+ 
+     @Override
+-    protected void applyImplicitComponents(DataComponentGetter components) {
++    protected synchronized void applyImplicitComponents(DataComponentGetter components) {
+         super.applyImplicitComponents(components);
+         components.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyInto(this.items);
+     }
+ 
+     @Override
+-    protected void collectImplicitComponents(DataComponentMap.Builder components) {
++    protected synchronized void collectImplicitComponents(DataComponentMap.Builder components) {
+         super.collectImplicitComponents(components);
+         components.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(this.items));
+     }
+@@ -135,7 +_,7 @@
+         return this.getBlockState().getValue(ShelfBlock.FACING).getOpposite().toYRot();
+     }
+ 
+-    public boolean getAlignItemsToBottom() {
++    public synchronized boolean getAlignItemsToBottom() {
+         return this.alignItemsToBottom;
+     }
+ }

@@ -1,0 +1,81 @@
+--- a/net/minecraft/world/entity/ai/goal/LlamaFollowCaravanGoal.java
++++ b/net/minecraft/world/entity/ai/goal/LlamaFollowCaravanGoal.java
+@@ -6,7 +_,9 @@
+ import net.minecraft.world.entity.EntityType;
+ import net.minecraft.world.entity.animal.equine.Llama;
+ import net.minecraft.world.entity.decoration.LeashFenceKnotEntity;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class LlamaFollowCaravanGoal extends Goal {
+     public final Llama llama;
+@@ -21,11 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (!this.llama.isLeashed() && !this.llama.inCaravan()) {
+-            List<Entity> llamas = this.llama
+-                .level()
+-                .getEntities(this.llama, this.llama.getBoundingBox().inflate(9.0, 4.0, 9.0), e -> e.is(EntityType.LLAMA) || e.is(EntityType.TRADER_LLAMA));
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.llama.level(), this.llama.getBoundingBox().inflate(9.0, 4.0, 9.0));
++            List<Entity> llamas = searchBox == null
++                ? List.of()
++                : List.copyOf(this.llama.level().getEntities(this.llama, searchBox, e -> e.is(EntityType.LLAMA) || e.is(EntityType.TRADER_LLAMA)));
+             Llama closest = null;
+             double closestDistSquare = Double.MAX_VALUE;
+ 
+@@ -69,9 +_,10 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        if (this.llama.inCaravan() && this.llama.getCaravanHead().isAlive() && this.firstIsLeashed(this.llama, 0)) {
+-            double distSqr = this.llama.distanceToSqr(this.llama.getCaravanHead());
++    public synchronized boolean canContinueToUse() {
++        Llama caravanHead = this.llama.getCaravanHead();
++        if (caravanHead != null && caravanHead.isAlive() && this.firstIsLeashed(this.llama, 0)) {
++            double distSqr = this.llama.distanceToSqr(caravanHead);
+             if (distSqr > 676.0) {
+                 if (this.speedModifier <= 3.0) {
+                     this.speedModifier *= 1.2;
+@@ -95,16 +_,20 @@
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.llama.leaveCaravan();
+         this.speedModifier = 2.1;
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.llama.inCaravan()) {
+             if (!(this.llama.getLeashHolder() instanceof LeashFenceKnotEntity)) {
+                 Llama follows = this.llama.getCaravanHead();
++                if (follows == null) {
++                    return;
++                }
++
+                 double distanceTo = this.llama.distanceTo(follows);
+                 float wantedDistance = 2.0F;
+                 Vec3 delta = new Vec3(follows.getX() - this.llama.getX(), follows.getY() - this.llama.getY(), follows.getZ() - this.llama.getZ())
+@@ -115,11 +_,12 @@
+         }
+     }
+ 
+-    private boolean firstIsLeashed(Llama currentMob, int counter) {
++    private synchronized boolean firstIsLeashed(Llama currentMob, int counter) {
+         if (counter > 8) {
+             return false;
+         } else if (currentMob.inCaravan()) {
+-            return currentMob.getCaravanHead().isLeashed() ? true : this.firstIsLeashed(currentMob.getCaravanHead(), ++counter);
++            Llama caravanHead = currentMob.getCaravanHead();
++            return caravanHead != null && (caravanHead.isLeashed() ? true : this.firstIsLeashed(caravanHead, ++counter));
+         } else {
+             return false;
+         }

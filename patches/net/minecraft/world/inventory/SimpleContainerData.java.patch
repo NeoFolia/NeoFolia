@@ -1,0 +1,23 @@
+--- a/net/minecraft/world/inventory/SimpleContainerData.java
++++ b/net/minecraft/world/inventory/SimpleContainerData.java
+@@ -8,17 +_,17 @@
+     }
+ 
+     @Override
+-    public int get(int dataId) {
++    public synchronized int get(int dataId) {
+         return this.ints[dataId];
+     }
+ 
+     @Override
+-    public void set(int dataId, int value) {
++    public synchronized void set(int dataId, int value) {
+         this.ints[dataId] = value;
+     }
+ 
+     @Override
+-    public int getCount() {
++    public synchronized int getCount() {
+         return this.ints.length;
+     }
+ }

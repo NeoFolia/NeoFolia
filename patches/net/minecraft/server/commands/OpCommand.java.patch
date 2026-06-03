@@ -1,0 +1,22 @@
+--- a/net/minecraft/server/commands/OpCommand.java
++++ b/net/minecraft/server/commands/OpCommand.java
+@@ -25,7 +_,7 @@
+                             (c, p) -> {
+                                 PlayerList list = c.getSource().getServer().getPlayerList();
+                                 return SharedSuggestionProvider.suggest(
+-                                    list.getPlayers().stream().filter(player -> !list.isOp(player.nameAndId())).map(pl -> pl.getGameProfile().name()), p
++                                    list.getPlayersAcrossRegions().stream().filter(player -> !list.isOp(player.nameAndId())).map(pl -> pl.getGameProfile().name()), p
+                                 );
+                             }
+                         )
+@@ -35,6 +_,10 @@
+     }
+ 
+     private static int opPlayers(CommandSourceStack source, Collection<NameAndId> players) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> opPlayers(source, players))) {
++            return players.size();
++        }
++
+         PlayerList list = source.getServer().getPlayerList();
+         int count = 0;
+ 

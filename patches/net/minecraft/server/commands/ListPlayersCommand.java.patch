@@ -1,0 +1,32 @@
+--- a/net/minecraft/server/commands/ListPlayersCommand.java
++++ b/net/minecraft/server/commands/ListPlayersCommand.java
+@@ -21,10 +_,18 @@
+     }
+ 
+     private static int listPlayers(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listPlayers(source))) {
++            return 0;
++        }
++
+         return format(source, Player::getDisplayName);
+     }
+ 
+     private static int listPlayersWithUuids(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listPlayersWithUuids(source))) {
++            return 0;
++        }
++
+         return format(
+             source, player -> Component.translatable("commands.list.nameAndId", player.getName(), Component.translationArg(player.getGameProfile().id()))
+         );
+@@ -32,8 +_,8 @@
+ 
+     private static int format(CommandSourceStack source, Function<ServerPlayer, Component> formatter) {
+         PlayerList playerList = source.getServer().getPlayerList();
+-        List<ServerPlayer> players = playerList.getPlayers();
+-        Component listComponent = ComponentUtils.formatList(players, formatter);
++        List<ServerPlayer> players = playerList.getAllPlayers();
++        Component listComponent = ComponentUtils.formatList(players, player -> RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> formatter.apply(player)));
+         source.sendSuccess(() -> Component.translatable("commands.list.players", players.size(), playerList.getMaxPlayers(), listComponent), false);
+         return players.size();
+     }

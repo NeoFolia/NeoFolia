@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/ai/sensing/AdultSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/AdultSensor.java
+@@ -10,18 +_,18 @@
+ 
+ public class AdultSensor extends Sensor<LivingEntity> {
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return ImmutableSet.of(MemoryModuleType.NEAREST_VISIBLE_ADULT, MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES);
+     }
+ 
+     @Override
+-    protected void doTick(ServerLevel level, LivingEntity body) {
++    protected synchronized void doTick(ServerLevel level, LivingEntity body) {
+         body.getBrain()
+             .getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES)
+             .ifPresent(livingEntities -> this.setNearestVisibleAdult(body, livingEntities));
+     }
+ 
+-    protected void setNearestVisibleAdult(LivingEntity body, NearestVisibleLivingEntities visibleLivingEntities) {
++    protected synchronized void setNearestVisibleAdult(LivingEntity body, NearestVisibleLivingEntities visibleLivingEntities) {
+         Optional<LivingEntity> adult = visibleLivingEntities.findClosest(entity -> entity.getType() == body.getType() && !entity.isBaby());
+         body.getBrain().setMemory(MemoryModuleType.NEAREST_VISIBLE_ADULT, adult);
+     }

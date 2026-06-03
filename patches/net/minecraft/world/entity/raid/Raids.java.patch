@@ -1,0 +1,132 @@
+--- a/net/minecraft/world/entity/raid/Raids.java
++++ b/net/minecraft/world/entity/raid/Raids.java
+@@ -34,9 +_,9 @@
+                 Raids.RaidWithId.CODEC
+                     .listOf()
+                     .optionalFieldOf("raids", List.of())
+-                    .forGetter(r -> r.raidMap.int2ObjectEntrySet().stream().map(Raids.RaidWithId::from).toList()),
+-                Codec.INT.fieldOf("next_id").forGetter(r -> r.nextId),
+-                Codec.INT.fieldOf("tick").forGetter(r -> r.tick)
++                    .forGetter(Raids::packRaids),
++                Codec.INT.fieldOf("next_id").forGetter(Raids::nextId),
++                Codec.INT.fieldOf("tick").forGetter(Raids::tickCount)
+             )
+             .apply(i, Raids::new)
+     );
+@@ -58,11 +_,23 @@
+         this.tick = tick;
+     }
+ 
+-    public @Nullable Raid get(int raidId) {
++    private synchronized List<Raids.RaidWithId> packRaids() {
++        return this.raidMap.int2ObjectEntrySet().stream().map(Raids.RaidWithId::from).toList();
++    }
++
++    private synchronized int nextId() {
++        return this.nextId;
++    }
++
++    private synchronized int tickCount() {
++        return this.tick;
++    }
++
++    public synchronized @Nullable Raid get(int raidId) {
+         return this.raidMap.get(raidId);
+     }
+ 
+-    public OptionalInt getId(Raid raid) {
++    public synchronized OptionalInt getId(Raid raid) {
+         for (Entry<Raid> entry : this.raidMap.int2ObjectEntrySet()) {
+             if (entry.getValue() == raid) {
+                 return OptionalInt.of(entry.getIntKey());
+@@ -72,25 +_,41 @@
+         return OptionalInt.empty();
+     }
+ 
++    private synchronized List<Raids.RaidWithId> snapshotRaids() {
++        return this.raidMap.int2ObjectEntrySet().stream().map(Raids.RaidWithId::from).toList();
++    }
++
++    private synchronized void removeRaid(int id, Raid raid) {
++        if (this.raidMap.get(id) == raid) {
++            this.raidMap.remove(id);
++            this.setDirty();
++        }
++    }
++
+     public void tick(ServerLevel level) {
+-        this.tick++;
+-        Iterator<Raid> raidIterator = this.raidMap.values().iterator();
++        int tickCount;
++        synchronized (this) {
++            this.tick++;
++            tickCount = this.tick;
++        }
+ 
+-        while (raidIterator.hasNext()) {
+-            Raid raid = raidIterator.next();
++        for (Raids.RaidWithId raidWithId : this.snapshotRaids()) {
++            Raid raid = raidWithId.raid();
+             if (!level.getGameRules().get(GameRules.RAIDS)) {
+                 raid.stop();
+             }
+ 
+             if (raid.isStopped()) {
+-                raidIterator.remove();
+-                this.setDirty();
++                this.removeRaid(raidWithId.id(), raid);
+             } else {
+                 raid.tick(level);
++                if (raid.isStopped()) {
++                    this.removeRaid(raidWithId.id(), raid);
++                }
+             }
+         }
+ 
+-        if (this.tick % 200 == 0) {
++        if (tickCount % 200 == 0) {
+             this.setDirty();
+         }
+     }
+@@ -130,8 +_,12 @@
+                 }
+ 
+                 Raid raid = this.getOrCreateRaid(level, raidCenterPos);
+-                if (!raid.isStarted() && !this.raidMap.containsValue(raid)) {
+-                    this.raidMap.put(this.getUniqueId(), raid);
++                if (!raid.isStarted()) {
++                    synchronized (this) {
++                        if (!this.raidMap.containsValue(raid)) {
++                            this.raidMap.put(this.getUniqueId(), raid);
++                        }
++                    }
+                 }
+ 
+                 if (!raid.isStarted() || raid.getRaidOmenLevel() < raid.getMaxRaidOmenLevel()) {
+@@ -153,7 +_,7 @@
+         return CODEC.parse(NbtOps.INSTANCE, tag).resultOrPartial().orElseGet(Raids::new);
+     }
+ 
+-    private int getUniqueId() {
++    private synchronized int getUniqueId() {
+         return ++this.nextId;
+     }
+ 
+@@ -161,7 +_,7 @@
+         Raid closest = null;
+         double closestDistanceSqr = maxDistSqr;
+ 
+-        for (Raid raid : this.raidMap.values()) {
++        for (Raid raid : this.snapshotRaids().stream().map(Raids.RaidWithId::raid).toList()) {
+             double distance = raid.getCenter().distSqr(pos);
+             if (raid.isActive() && distance < closestDistanceSqr) {
+                 closest = raid;
+@@ -174,7 +_,7 @@
+ 
+     @VisibleForDebug
+     public List<BlockPos> getRaidCentersInChunk(ChunkPos chunkPos) {
+-        return this.raidMap.values().stream().map(Raid::getCenter).filter(chunkPos::contains).toList();
++        return this.snapshotRaids().stream().map(Raids.RaidWithId::raid).map(Raid::getCenter).filter(chunkPos::contains).toList();
+     }
+ 
+     private record RaidWithId(int id, Raid raid) {

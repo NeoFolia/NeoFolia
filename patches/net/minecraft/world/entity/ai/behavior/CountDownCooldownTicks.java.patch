@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/entity/ai/behavior/CountDownCooldownTicks.java
++++ b/net/minecraft/world/entity/ai/behavior/CountDownCooldownTicks.java
+@@ -15,29 +_,29 @@
+         this.cooldownTicks = cooldownTicks;
+     }
+ 
+-    private Optional<Integer> getCooldownTickMemory(LivingEntity body) {
++    private synchronized Optional<Integer> getCooldownTickMemory(LivingEntity body) {
+         return body.getBrain().getMemory(this.cooldownTicks);
+     }
+ 
+     @Override
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return false;
+     }
+ 
+     @Override
+-    protected boolean canStillUse(ServerLevel level, LivingEntity body, long timestamp) {
+-        Optional<Integer> calmDownTicks = this.getCooldownTickMemory(body);
+-        return calmDownTicks.isPresent() && calmDownTicks.get() > 0;
+-    }
+-
+-    @Override
+-    protected void tick(ServerLevel level, LivingEntity body, long timestamp) {
+-        Optional<Integer> calmDownTicks = this.getCooldownTickMemory(body);
+-        body.getBrain().setMemory(this.cooldownTicks, calmDownTicks.get() - 1);
+-    }
+-
+-    @Override
+-    protected void stop(ServerLevel level, LivingEntity body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, LivingEntity body, long timestamp) {
++        Optional<Integer> calmDownTicks = this.getCooldownTickMemory(body);
++        return calmDownTicks.orElse(0) > 0;
++    }
++
++    @Override
++    protected synchronized void tick(ServerLevel level, LivingEntity body, long timestamp) {
++        Optional<Integer> calmDownTicks = this.getCooldownTickMemory(body);
++        calmDownTicks.ifPresent(ticks -> body.getBrain().setMemory(this.cooldownTicks, ticks - 1));
++    }
++
++    @Override
++    protected synchronized void stop(ServerLevel level, LivingEntity body, long timestamp) {
+         body.getBrain().eraseMemory(this.cooldownTicks);
+     }
+ }

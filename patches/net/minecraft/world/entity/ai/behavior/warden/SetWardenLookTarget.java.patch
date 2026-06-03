@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/SetWardenLookTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/SetWardenLookTarget.java
+@@ -4,6 +_,7 @@
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.LivingEntity;
++import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
+ import net.minecraft.world.entity.ai.behavior.BehaviorControl;
+ import net.minecraft.world.entity.ai.behavior.BlockPosTracker;
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+@@ -19,7 +_,10 @@
+                     i.absent(MemoryModuleType.ATTACK_TARGET)
+                 )
+                 .apply(i, (lookTarget, disturbance, roarTarget, attackTarget) -> (level, body, timestamp) -> {
+-                    Optional<BlockPos> target = i.<LivingEntity>tryGet(roarTarget).map(Entity::blockPosition).or(() -> i.tryGet(disturbance));
++                    Optional<BlockPos> target = i.<LivingEntity>tryGet(roarTarget)
++                        .map(roaringAt -> BehaviorUtils.regionSafeEntity(body, roaringAt))
++                        .map(Entity::blockPosition)
++                        .or(() -> i.tryGet(disturbance));
+                     if (target.isEmpty()) {
+                         return false;
+                     } else {

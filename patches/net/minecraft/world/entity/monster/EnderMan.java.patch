@@ -1,0 +1,249 @@
+--- a/net/minecraft/world/entity/monster/EnderMan.java
++++ b/net/minecraft/world/entity/monster/EnderMan.java
+@@ -64,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class EnderMan extends Monster implements NeutralMob {
+@@ -121,7 +_,6 @@
+ 
+     @Override
+     public void setTarget(@Nullable LivingEntity target) {
+-        super.setTarget(target);
+         AttributeInstance movementSpeed = this.getAttribute(Attributes.MOVEMENT_SPEED);
+         if (target == null) {
+             this.targetChangeTime = 0;
+@@ -135,6 +_,7 @@
+                 movementSpeed.addTransientModifier(SPEED_MODIFIER_ATTACKING);
+             }
+         }
++        super.setTarget(target); //Forge: Moved down to allow event handlers to write data manager values.
+     }
+ 
+     @Override
+@@ -207,7 +_,7 @@
+     }
+ 
+     private boolean isBeingStaredBy(Player player) {
+-        return !LivingEntity.PLAYER_NOT_WEARING_DISGUISE_ITEM.test(player) ? false : this.isLookingAtMe(player, 0.025, true, false, this.getEyeY());
++        return !LivingEntity.PLAYER_NOT_WEARING_DISGUISE_ITEM_FOR_TARGET.test(player, this) ? false : this.isLookingAtMe(player, 0.025, true, false, this.getEyeY()) && !net.neoforged.neoforge.common.CommonHooks.shouldSuppressEnderManAnger(this, player);
+     }
+ 
+     @Override
+@@ -244,7 +_,11 @@
+     protected void customServerAiStep(ServerLevel level) {
+         if (level.isBrightOutside() && this.tickCount >= this.targetChangeTime + 600) {
+             float br = this.getLightLevelDependentMagicValue();
+-            if (br > 0.5F && level.canSeeSky(this.blockPosition()) && this.random.nextFloat() * 30.0F < (br - 0.4F) * 2.0F) {
++            BlockPos blockPos = this.blockPosition();
++            if (br > 0.5F
++                && canReadBlock(level, blockPos)
++                && level.canSeeSky(blockPos)
++                && this.random.nextFloat() * 30.0F < (br - 0.4F) * 2.0F) {
+                 this.setTarget(null);
+                 this.teleport();
+             }
+@@ -276,11 +_,18 @@
+ 
+     private boolean teleport(double x, double y, double z) {
+         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(x, y, z);
++        if (!canReadBlock(this.level(), pos)) {
++            return false;
++        }
+ 
+         while (pos.getY() > this.level().getMinY() && !this.level().getBlockState(pos).blocksMotion()) {
+             pos.move(Direction.DOWN);
+         }
+ 
++        if (!canReadBlock(this.level(), pos)) {
++            return false;
++        }
++
+         BlockState blockState = this.level().getBlockState(pos);
+         boolean couldStandOn = blockState.blocksMotion();
+         boolean isWet = blockState.getFluidState().is(FluidTags.WATER);
+@@ -353,10 +_,12 @@
+         if (this.isInvulnerableTo(level, source)) {
+             return false;
+         } else {
+-            AbstractThrownPotion thrownPotion = source.getDirectEntity() instanceof AbstractThrownPotion potion ? potion : null;
++            Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
++            Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++            AbstractThrownPotion thrownPotion = directEntity instanceof AbstractThrownPotion potion ? potion : null;
+             if (!source.is(DamageTypeTags.IS_PROJECTILE) && thrownPotion == null) {
+                 boolean result = super.hurtServer(level, source, damage);
+-                if (!(source.getEntity() instanceof LivingEntity) && this.random.nextInt(10) != 0) {
++                if (!(sourceEntity instanceof LivingEntity) && this.random.nextInt(10) != 0) {
+                     this.teleport();
+                 }
+ 
+@@ -393,6 +_,31 @@
+         this.entityData.set(DATA_STARED_AT, true);
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
++    private static boolean canReadBetween(Level level, Vec3 from, Vec3 to) {
++        int minChunkX = Mth.floor(Math.min(from.x, to.x)) >> 4;
++        int maxChunkX = Mth.floor(Math.max(from.x, to.x)) >> 4;
++        int minChunkZ = Mth.floor(Math.min(from.z, to.z)) >> 4;
++        int maxChunkZ = Mth.floor(Math.max(from.z, to.z)) >> 4;
++
++        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
++            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
++                if (!RegionizedWorldGuard.shouldLoadChunk(level, chunkX, chunkZ)) {
++                    return false;
++                }
++            }
++        }
++
++        return true;
++    }
++
+     @Override
+     public boolean requiresCustomPersistence() {
+         return super.requiresCustomPersistence() || this.getCarriedBlock() != null;
+@@ -409,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            this.target = this.enderman.getTarget();
++            this.target = this.enderman.regionSafeTarget(this.enderman.getTarget());
+             if (this.target instanceof Player playerTarget) {
+                 double dist = this.target.distanceToSqr(this.enderman);
+                 return dist > 256.0 ? false : this.enderman.isBeingStaredBy(playerTarget);
+@@ -441,7 +_,7 @@
+             if (this.enderman.getCarriedBlock() == null) {
+                 return false;
+             } else {
+-                return !getServerLevel(this.enderman).getGameRules().get(GameRules.MOB_GRIEFING)
++                return !net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(this.enderman.level()), this.enderman)
+                     ? false
+                     : this.enderman.getRandom().nextInt(reducedTickDelay(2000)) == 0;
+             }
+@@ -455,13 +_,17 @@
+             int yt = Mth.floor(this.enderman.getY() + random.nextDouble() * 2.0);
+             int zt = Mth.floor(this.enderman.getZ() - 1.0 + random.nextDouble() * 2.0);
+             BlockPos pos = new BlockPos(xt, yt, zt);
++            if (!canReadBlock(level, pos) || !canReadBlock(level, pos.below())) {
++                return;
++            }
++
+             BlockState targetState = level.getBlockState(pos);
+             BlockPos below = pos.below();
+             BlockState belowState = level.getBlockState(below);
+             BlockState carried = this.enderman.getCarriedBlock();
+             if (carried != null) {
+                 carried = Block.updateFromNeighbourShapes(carried, this.enderman.level(), pos);
+-                if (this.canPlaceBlock(level, pos, carried, targetState, belowState, below)) {
++                if (this.canPlaceBlock(level, pos, carried, targetState, belowState, below) && !net.neoforged.neoforge.event.EventHooks.onBlockPlace(enderman, net.neoforged.neoforge.common.util.BlockSnapshot.create(level.dimension(), level, below), net.minecraft.core.Direction.UP)) {
+                     level.setBlock(pos, carried, 3);
+                     level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(this.enderman, carried));
+                     this.enderman.setCarriedBlock(null);
+@@ -473,9 +_,15 @@
+             return targetState.isAir()
+                 && !belowState.isAir()
+                 && !belowState.is(Blocks.BEDROCK)
++                && !belowState.is(net.neoforged.neoforge.common.Tags.Blocks.ENDERMAN_PLACE_ON_BLACKLIST)
+                 && belowState.isCollisionShapeFullBlock(level, below)
+                 && carried.canSurvive(level, pos)
+-                && level.getEntities(this.enderman, AABB.unitCubeFromLowerCorner(Vec3.atLowerCornerOf(pos))).isEmpty();
++                && this.isPlacementAreaEmpty(level, pos);
++        }
++
++        private boolean isPlacementAreaEmpty(Level level, BlockPos pos) {
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, AABB.unitCubeFromLowerCorner(Vec3.atLowerCornerOf(pos)));
++            return searchBox != null && level.getEntities(this.enderman, searchBox).isEmpty();
+         }
+     }
+ 
+@@ -518,6 +_,11 @@
+         @Override
+         public boolean canContinueToUse() {
+             if (this.pendingTarget != null) {
++                this.pendingTarget = (Player)this.enderman.regionSafeTarget(this.pendingTarget);
++                if (this.pendingTarget == null) {
++                    return false;
++                }
++
+                 if (!this.isAngerInducing.test(this.pendingTarget, getServerLevel(this.enderman))) {
+                     return false;
+                 } else {
+@@ -526,6 +_,11 @@
+                 }
+             } else {
+                 if (this.target != null) {
++                    this.target = (Player)this.enderman.regionSafeTarget(this.target);
++                    if (this.target == null) {
++                        return false;
++                    }
++
+                     if (this.enderman.hasIndirectPassenger(this.target)) {
+                         return false;
+                     }
+@@ -541,11 +_,16 @@
+ 
+         @Override
+         public void tick() {
+-            if (this.enderman.getTarget() == null) {
++            if (this.enderman.regionSafeTarget(this.enderman.getTarget()) == null) {
+                 super.setTarget(null);
+             }
+ 
+             if (this.pendingTarget != null) {
++                this.pendingTarget = (Player)this.enderman.regionSafeTarget(this.pendingTarget);
++                if (this.pendingTarget == null) {
++                    return;
++                }
++
+                 if (--this.aggroTime <= 0) {
+                     this.target = this.pendingTarget;
+                     this.pendingTarget = null;
+@@ -553,6 +_,11 @@
+                 }
+             } else {
+                 if (this.target != null && !this.enderman.isPassenger()) {
++                    this.target = (Player)this.enderman.regionSafeTarget(this.target);
++                    if (this.target == null) {
++                        return;
++                    }
++
+                     if (this.enderman.isBeingStaredBy((Player)this.target)) {
+                         if (this.target.distanceToSqr(this.enderman) < 16.0) {
+                             this.enderman.teleport();
+@@ -583,7 +_,7 @@
+             if (this.enderman.getCarriedBlock() != null) {
+                 return false;
+             } else {
+-                return !getServerLevel(this.enderman).getGameRules().get(GameRules.MOB_GRIEFING)
++                return !net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(this.enderman.level()), this.enderman)
+                     ? false
+                     : this.enderman.getRandom().nextInt(reducedTickDelay(20)) == 0;
+             }
+@@ -597,9 +_,17 @@
+             int yt = Mth.floor(this.enderman.getY() + random.nextDouble() * 3.0);
+             int zt = Mth.floor(this.enderman.getZ() - 2.0 + random.nextDouble() * 4.0);
+             BlockPos pos = new BlockPos(xt, yt, zt);
++            if (!canReadBlock(level, pos)) {
++                return;
++            }
++
+             BlockState blockState = level.getBlockState(pos);
+             Vec3 from = new Vec3(this.enderman.getBlockX() + 0.5, yt + 0.5, this.enderman.getBlockZ() + 0.5);
+             Vec3 to = new Vec3(xt + 0.5, yt + 0.5, zt + 0.5);
++            if (!canReadBetween(level, from, to)) {
++                return;
++            }
++
+             BlockHitResult result = level.clip(new ClipContext(from, to, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, this.enderman));
+             boolean reachable = result.getBlockPos().equals(pos);
+             if (blockState.is(BlockTags.ENDERMAN_HOLDABLE) && reachable) {

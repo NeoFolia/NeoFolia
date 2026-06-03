@@ -1,0 +1,81 @@
+--- a/net/minecraft/server/commands/SwingCommand.java
++++ b/net/minecraft/server/commands/SwingCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.Collection;
+@@ -22,28 +_,42 @@
+         dispatcher.register(
+             Commands.literal("swing")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .executes(c -> swing(c.getSource(), List.of(c.getSource().getEntityOrException()), InteractionHand.MAIN_HAND))
++                .executes(c -> swing(c, false, InteractionHand.MAIN_HAND))
+                 .then(
+                     Commands.argument("targets", EntityArgument.entities())
+-                        .executes(c -> swing(c.getSource(), EntityArgument.getEntities(c, "targets"), InteractionHand.MAIN_HAND))
+-                        .then(
+-                            Commands.literal("mainhand")
+-                                .executes(c -> swing(c.getSource(), EntityArgument.getEntities(c, "targets"), InteractionHand.MAIN_HAND))
+-                        )
+-                        .then(
+-                            Commands.literal("offhand").executes(c -> swing(c.getSource(), EntityArgument.getEntities(c, "targets"), InteractionHand.OFF_HAND))
++                        .executes(c -> swing(c, true, InteractionHand.MAIN_HAND))
++                        .then(Commands.literal("mainhand").executes(c -> swing(c, true, InteractionHand.MAIN_HAND)))
++                        .then(
++                            Commands.literal("offhand").executes(c -> swing(c, true, InteractionHand.OFF_HAND))
+                         )
+                 )
+         );
+     }
+ 
++    private static int swing(CommandContext<CommandSourceStack> context, boolean hasTargets, InteractionHand hand) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> swing(context, hasTargets, hand))) {
++            return 0;
++        }
++
++        return swing(source, hasTargets ? EntityArgument.getEntities(context, "targets") : List.of(source.getEntityOrException()), hand);
++    }
++
+     private static int swing(CommandSourceStack source, Collection<? extends Entity> targets, InteractionHand hand) throws CommandSyntaxException {
+         int livingEntitiesCount = 0;
++        Component singleLivingTargetName = null;
+ 
+         for (Entity entity : targets) {
+-            if (entity instanceof LivingEntity livingEntity) {
++            SwingResult result = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> {
++                if (!(entity instanceof LivingEntity livingEntity)) {
++                    return new SwingResult(false, entity.getDisplayName());
++                }
+                 livingEntity.swing(hand, true);
++                return new SwingResult(true, entity.getDisplayName());
++            });
++            if (result.success()) {
+                 livingEntitiesCount++;
++                singleLivingTargetName = result.targetName();
+             }
+         }
+ 
+@@ -51,7 +_,8 @@
+             throw ERROR_NO_LIVING_ENTITY.create();
+         } else {
+             if (livingEntitiesCount == 1) {
+-                source.sendSuccess(() -> Component.translatable("commands.swing.success.single", targets.iterator().next().getDisplayName()), true);
++                Component targetName = singleLivingTargetName;
++                source.sendSuccess(() -> Component.translatable("commands.swing.success.single", targetName), true);
+             } else {
+                 int count = livingEntitiesCount;
+                 source.sendSuccess(() -> Component.translatable("commands.swing.success.multiple", count), true);
+@@ -59,5 +_,8 @@
+ 
+             return livingEntitiesCount;
+         }
++    }
++
++    private record SwingResult(boolean success, Component targetName) {
+     }
+ }

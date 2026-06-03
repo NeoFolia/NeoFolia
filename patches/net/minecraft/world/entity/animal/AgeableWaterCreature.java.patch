@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/entity/animal/AgeableWaterCreature.java
++++ b/net/minecraft/world/entity/animal/AgeableWaterCreature.java
+@@ -12,6 +_,7 @@
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.pathfinder.PathType;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class AgeableWaterCreature extends AgeableMob {
+     protected AgeableWaterCreature(EntityType<? extends AgeableWaterCreature> type, Level level) {
+@@ -68,9 +_,17 @@
+     ) {
+         int seaLevel = level.getSeaLevel();
+         int minSpawnLevel = seaLevel - 13;
++        BlockPos below = pos.below();
++        BlockPos above = pos.above();
+         return pos.getY() >= minSpawnLevel
+             && pos.getY() <= seaLevel
+-            && level.getFluidState(pos.below()).is(FluidTags.WATER)
+-            && level.getBlockState(pos.above()).is(Blocks.WATER);
++            && canReadBlock(level, below)
++            && canReadBlock(level, above)
++            && level.getFluidState(below).is(FluidTags.WATER)
++            && level.getBlockState(above).is(Blocks.WATER);
++    }
++
++    private static boolean canReadBlock(LevelAccessor level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

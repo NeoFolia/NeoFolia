@@ -1,0 +1,42 @@
+--- a/net/minecraft/world/item/BowItem.java
++++ b/net/minecraft/world/item/BowItem.java
+@@ -12,6 +_,7 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.entity.projectile.Projectile;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BowItem extends ProjectileWeaponItem {
+@@ -32,6 +_,8 @@
+                 return false;
+             } else {
+                 int timeHeld = this.getUseDuration(itemStack, entity) - remainingTime;
++                timeHeld = net.neoforged.neoforge.event.EventHooks.onArrowLoose(itemStack, level, player, timeHeld, !projectile.isEmpty());
++                if (timeHeld < 0) return false;
+                 float pow = getPowerForTime(timeHeld);
+                 if (pow < 0.1) {
+                     return false;
+@@ -49,9 +_,9 @@
+                         SoundEvents.ARROW_SHOOT,
+                         SoundSource.PLAYERS,
+                         1.0F,
+-                        1.0F / (level.getRandom().nextFloat() * 0.4F + 1.2F) + pow * 0.5F
++                        1.0F / (player.getRandom().nextFloat() * 0.4F + 1.2F) + pow * 0.5F
+                     );
+-                    player.awardStat(Stats.ITEM_USED.get(this));
++                    RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+                     return true;
+                 }
+             }
+@@ -89,6 +_,10 @@
+     public InteractionResult use(Level level, Player player, InteractionHand hand) {
+         ItemStack itemStack = player.getItemInHand(hand);
+         boolean foundProjectile = !player.getProjectile(itemStack).isEmpty();
++
++        InteractionResult ret = net.neoforged.neoforge.event.EventHooks.onArrowNock(itemStack, level, player, hand, foundProjectile);
++        if (ret != null) return ret;
++
+         if (!player.hasInfiniteMaterials() && !foundProjectile) {
+             return InteractionResult.FAIL;
+         } else {

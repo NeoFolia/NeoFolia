@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/animal/nautilus/NautilusAi.java
++++ b/net/minecraft/world/entity/animal/nautilus/NautilusAi.java
+@@ -121,7 +_,7 @@
+             } else if (body.getBrain().hasMemoryValue(MemoryModuleType.ATTACK_TARGET_COOLDOWN)) {
+                 return Optional.empty();
+             } else {
+-                RandomSource random = level.getRandom();
++                RandomSource random = body.getRandom();
+                 body.getBrain().setMemory(MemoryModuleType.ATTACK_TARGET_COOLDOWN, TIME_BETWEEN_NON_PLAYER_ATTACKS.sample(random));
+                 return random.nextFloat() < 0.5F
+                     ? Optional.empty()

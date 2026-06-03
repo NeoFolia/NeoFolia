@@ -1,0 +1,98 @@
+--- a/net/minecraft/world/level/gameevent/GameEventDispatcher.java
++++ b/net/minecraft/world/level/gameevent/GameEventDispatcher.java
+@@ -2,15 +_,22 @@
+ 
+ import java.util.ArrayList;
+ import java.util.Collections;
++import java.util.HashSet;
+ import java.util.List;
++import java.util.Set;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.debug.DebugGameEventInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
++import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class GameEventDispatcher {
+     private final ServerLevel level;
+@@ -20,6 +_,11 @@
+     }
+ 
+     public void post(Holder<GameEvent> gameEvent, Vec3 position, GameEvent.Context context) {
++        this.postForRegion(gameEvent, position, context, null);
++    }
++
++    private void postForRegion(Holder<GameEvent> gameEvent, Vec3 position, GameEvent.Context context, @Nullable RegionKey onlyRegion) {
++        GameEvent.Context regionContext = this.contextForCurrentRegion(context);
+         int radius = gameEvent.value().notificationRadius();
+         BlockPos center = BlockPos.containing(position);
+         int sectionMinX = SectionPos.blockToSectionCoord(center.getX() - radius);
+@@ -31,15 +_,41 @@
+         List<GameEvent.ListenerInfo> toHandleByDistance = new ArrayList<>();
+         GameEventListenerRegistry.ListenerVisitor visitListeners = (listener, pos) -> {
+             if (listener.getDeliveryMode() == GameEventListener.DeliveryMode.BY_DISTANCE) {
+-                toHandleByDistance.add(new GameEvent.ListenerInfo(gameEvent, position, context, listener, pos));
++                toHandleByDistance.add(new GameEvent.ListenerInfo(gameEvent, position, regionContext, listener, pos));
+             } else {
+-                listener.handleGameEvent(this.level, gameEvent, context, position);
++                listener.handleGameEvent(this.level, gameEvent, regionContext, position);
+             }
+         };
+         boolean applicable = false;
++        Set<RegionKey> scheduledRegions = null;
++        boolean regionThread = RegionizedTickContext.isRegionThread();
+ 
+         for (int chunkX = sectionMinX; chunkX <= sectionMaxX; chunkX++) {
+             for (int chunkZ = sectionMinZ; chunkZ <= sectionMaxZ; chunkZ++) {
++                if (regionThread) {
++                    RegionKey chunkRegion = RegionizedWorldGuard.regionFor(this.level, chunkX, chunkZ);
++                    if (onlyRegion != null) {
++                        if (!onlyRegion.equals(chunkRegion)) {
++                            continue;
++                        }
++                    } else if (!RegionizedWorldGuard.isRegionThreadFor(this.level, chunkX, chunkZ)) {
++                        if (scheduledRegions == null) {
++                            scheduledRegions = new HashSet<>();
++                        }
++
++                        if (scheduledRegions.add(chunkRegion)) {
++                            RegionKey scheduledRegion = chunkRegion;
++                            if (!this.level
++                                .getServer()
++                                .regionizedTaskDispatcher()
++                                .tryExecute(scheduledRegion, () -> this.postForRegion(gameEvent, position, context, scheduledRegion))) {
++                                throw new IllegalStateException("Cannot dispatch cross-region game event while region dispatcher is not running");
++                            }
++                        }
++                        continue;
++                    }
++                }
++
+                 ChunkAccess chunk = this.level.getChunkSource().getChunkNow(chunkX, chunkZ);
+                 if (chunk != null) {
+                     for (int section = sectionMinY; section <= sectionMaxY; section++) {
+@@ -58,6 +_,16 @@
+                 .debugSynchronizers()
+                 .broadcastEventToTracking(BlockPos.containing(position), DebugSubscriptions.GAME_EVENTS, new DebugGameEventInfo(gameEvent, position));
+         }
++    }
++
++    private GameEvent.Context contextForCurrentRegion(GameEvent.Context context) {
++        Entity sourceEntity = context.sourceEntity();
++        if (sourceEntity == null) {
++            return context;
++        }
++
++        Entity restrictedSource = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, sourceEntity);
++        return restrictedSource == sourceEntity ? context : new GameEvent.Context(restrictedSource, context.affectedState());
+     }
+ 
+     private void handleGameEventMessagesInQueue(List<GameEvent.ListenerInfo> listenerInfos) {

@@ -1,0 +1,26 @@
+--- a/net/minecraft/server/jsonrpc/ManagementServer.java
++++ b/net/minecraft/server/jsonrpc/ManagementServer.java
+@@ -117,7 +_,9 @@
+             this.serverChannel = null;
+         }
+ 
+-        this.connections.clear();
++        synchronized (this.connections) {
++            this.connections.clear();
++        }
+         if (closeNioEventLoopGroup) {
+             this.nioEventLoopGroup.shutdownGracefully().sync();
+         }
+@@ -132,8 +_,11 @@
+     }
+ 
+     void forEachConnection(Consumer<Connection> action) {
++        Set<Connection> snapshot;
+         synchronized (this.connections) {
+-            this.connections.forEach(action);
++            snapshot = Set.copyOf(this.connections);
+         }
++
++        snapshot.forEach(action);
+     }
+ }

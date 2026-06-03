@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/level/chunk/storage/RegionBitmap.java
++++ b/net/minecraft/world/level/chunk/storage/RegionBitmap.java
+@@ -9,15 +_,15 @@
+ public class RegionBitmap {
+     private final BitSet used = new BitSet();
+ 
+-    public void force(int position, int size) {
++    public synchronized void force(int position, int size) {
+         this.used.set(position, position + size);
+     }
+ 
+-    public void free(int position, int size) {
++    public synchronized void free(int position, int size) {
+         this.used.clear(position, position + size);
+     }
+ 
+-    public int allocate(int size) {
++    public synchronized int allocate(int size) {
+         int current = 0;
+ 
+         while (true) {
+@@ -33,7 +_,7 @@
+     }
+ 
+     @VisibleForTesting
+-    public IntSet getUsed() {
++    public synchronized IntSet getUsed() {
+         return this.used.stream().collect(IntArraySet::new, IntCollection::add, IntCollection::addAll);
+     }
+ }

@@ -1,0 +1,23 @@
+--- a/net/minecraft/world/entity/ai/behavior/GoToTargetLocation.java
++++ b/net/minecraft/world/entity/ai/behavior/GoToTargetLocation.java
+@@ -7,16 +_,16 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ 
+ public class GoToTargetLocation {
+-    private static BlockPos getNearbyPos(Mob body, BlockPos pos) {
+-        RandomSource random = body.level().getRandom();
++    private static synchronized BlockPos getNearbyPos(Mob body, BlockPos pos) {
++        RandomSource random = body.getRandom();
+         return pos.offset(getRandomOffset(random), 0, getRandomOffset(random));
+     }
+ 
+-    private static int getRandomOffset(RandomSource random) {
++    private static synchronized int getRandomOffset(RandomSource random) {
+         return random.nextInt(3) - 1;
+     }
+ 
+-    public static <E extends Mob> OneShot<E> create(MemoryModuleType<BlockPos> locationMemory, int closeEnoughDist, float speedModifier) {
++    public static synchronized <E extends Mob> OneShot<E> create(MemoryModuleType<BlockPos> locationMemory, int closeEnoughDist, float speedModifier) {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.present(locationMemory),

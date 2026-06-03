@@ -1,0 +1,45 @@
+--- a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
++++ b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+@@ -12,7 +_,7 @@
+ import net.minecraft.world.entity.npc.villager.VillagerProfession;
+ 
+ public class PoiCompetitorScan {
+-    public static BehaviorControl<Villager> create() {
++    public static synchronized BehaviorControl<Villager> create() {
+         return BehaviorBuilder.create(
+             i -> i.group(i.present(MemoryModuleType.JOB_SITE), i.present(MemoryModuleType.NEAREST_LIVING_ENTITIES))
+                 .apply(
+@@ -22,7 +_,7 @@
+                         level.getPoiManager()
+                             .getType(pos.pos())
+                             .ifPresent(
+-                                poiType -> i.<List<LivingEntity>>get(nearestEntities)
++                                poiType -> List.copyOf(i.<List<LivingEntity>>get(nearestEntities))
+                                     .stream()
+                                     .filter(v -> v instanceof Villager && v != body)
+                                     .map(v -> (Villager)v)
+@@ -36,7 +_,7 @@
+         );
+     }
+ 
+-    private static Villager selectWinner(Villager first, Villager second) {
++    private static synchronized Villager selectWinner(Villager first, Villager second) {
+         Villager winner;
+         Villager loser;
+         if (first.getVillagerXp() > second.getVillagerXp()) {
+@@ -51,12 +_,12 @@
+         return winner;
+     }
+ 
+-    private static boolean competesForSameJobsite(GlobalPos pos, Holder<PoiType> poiType, Villager nearbyVillager) {
++    private static synchronized boolean competesForSameJobsite(GlobalPos pos, Holder<PoiType> poiType, Villager nearbyVillager) {
+         Optional<GlobalPos> jobSite = nearbyVillager.getBrain().getMemory(MemoryModuleType.JOB_SITE);
+-        return jobSite.isPresent() && pos.equals(jobSite.get()) && hasMatchingProfession(poiType, nearbyVillager.getVillagerData().profession());
++        return jobSite.map(pos::equals).orElse(false) && hasMatchingProfession(poiType, nearbyVillager.getVillagerData().profession());
+     }
+ 
+-    private static boolean hasMatchingProfession(Holder<PoiType> poiType, Holder<VillagerProfession> profession) {
++    private static synchronized boolean hasMatchingProfession(Holder<PoiType> poiType, Holder<VillagerProfession> profession) {
+         return profession.value().heldJobSite().test(poiType);
+     }
+ }

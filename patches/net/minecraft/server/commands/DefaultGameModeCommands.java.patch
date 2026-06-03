@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/DefaultGameModeCommands.java
++++ b/net/minecraft/server/commands/DefaultGameModeCommands.java
+@@ -21,6 +_,10 @@
+     }
+ 
+     private static int setMode(CommandSourceStack source, GameType type) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setMode(source, type))) {
++            return 0;
++        }
++
+         MinecraftServer server = source.getServer();
+         server.setDefaultGameType(type);
+         int count = server.enforceGameTypeForPlayers(server.getForcedGameType());

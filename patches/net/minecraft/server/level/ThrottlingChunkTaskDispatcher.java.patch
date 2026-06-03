@@ -1,0 +1,30 @@
+--- a/net/minecraft/server/level/ThrottlingChunkTaskDispatcher.java
++++ b/net/minecraft/server/level/ThrottlingChunkTaskDispatcher.java
+@@ -21,23 +_,23 @@
+     }
+ 
+     @Override
+-    protected void onRelease(long key) {
++    protected synchronized void onRelease(long key) {
+         this.chunkPositionsInExecution.remove(key);
+     }
+ 
+     @Override
+-    protected ChunkTaskPriorityQueue.@Nullable TasksForChunk popTasks() {
++    protected synchronized ChunkTaskPriorityQueue.@Nullable TasksForChunk popTasks() {
+         return this.chunkPositionsInExecution.size() < this.maxChunksInExecution ? super.popTasks() : null;
+     }
+ 
+     @Override
+-    protected void scheduleForExecution(ChunkTaskPriorityQueue.TasksForChunk tasksForChunk) {
++    protected synchronized void scheduleForExecution(ChunkTaskPriorityQueue.TasksForChunk tasksForChunk) {
+         this.chunkPositionsInExecution.add(tasksForChunk.chunkPos());
+         super.scheduleForExecution(tasksForChunk);
+     }
+ 
+     @VisibleForTesting
+-    public String getDebugStatus() {
++    public synchronized String getDebugStatus() {
+         return this.executorSchedulerName
+             + "=["
+             + this.chunkPositionsInExecution.longStream().mapToObj(key -> key + ":" + ChunkPos.unpack(key)).collect(Collectors.joining(","))

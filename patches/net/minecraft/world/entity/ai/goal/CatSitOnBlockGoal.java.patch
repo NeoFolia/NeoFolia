@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/entity/ai/goal/CatSitOnBlockGoal.java
++++ b/net/minecraft/world/entity/ai/goal/CatSitOnBlockGoal.java
+@@ -3,6 +_,7 @@
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.tags.BlockTags;
+ import net.minecraft.world.entity.animal.feline.Cat;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.block.BedBlock;
+ import net.minecraft.world.level.block.Blocks;
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.level.block.entity.ChestBlockEntity;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.properties.BedPart;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class CatSitOnBlockGoal extends MoveToBlockGoal {
+     private final Cat cat;
+@@ -20,31 +_,32 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.cat.isTame() && !this.cat.isOrderedToSit() && super.canUse();
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         super.start();
+         this.cat.setInSittingPose(false);
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         super.stop();
+         this.cat.setInSittingPose(false);
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         super.tick();
+         this.cat.setInSittingPose(this.isReachedTarget());
+     }
+ 
+     @Override
+-    protected boolean isValidTarget(LevelReader level, BlockPos pos) {
+-        if (!level.isEmptyBlock(pos.above())) {
++    protected synchronized boolean isValidTarget(LevelReader level, BlockPos pos) {
++        BlockPos above = pos.above();
++        if (!this.canReadBlock(level, pos) || !this.canReadBlock(level, above) || !level.isEmptyBlock(above)) {
+             return false;
+         } else {
+             BlockState blockState = level.getBlockState(pos);
+@@ -56,5 +_,9 @@
+                     : blockState.is(BlockTags.BEDS, s -> s.getOptionalValue(BedBlock.PART).map(v -> v != BedPart.HEAD).orElse(true));
+             }
+         }
++    }
++
++    private boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

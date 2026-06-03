@@ -1,0 +1,35 @@
+--- a/net/minecraft/world/inventory/LecternMenu.java
++++ b/net/minecraft/world/inventory/LecternMenu.java
+@@ -32,7 +_,7 @@
+             }
+ 
+             @Override
+-            public void setChanged() {
++            public synchronized void setChanged() {
+                 super.setChanged();
+                 LecternMenu.this.slotsChanged(this.container);
+             }
+@@ -41,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean clickMenuButton(Player player, int buttonId) {
++    public synchronized boolean clickMenuButton(Player player, int buttonId) {
+         if (buttonId >= 100) {
+             int pageToSet = buttonId - 100;
+             this.setData(0, pageToSet);
+@@ -77,12 +_,12 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         return ItemStack.EMPTY;
+     }
+ 
+     @Override
+-    public void setData(int id, int value) {
++    public synchronized void setData(int id, int value) {
+         super.setData(id, value);
+         this.broadcastChanges();
+     }

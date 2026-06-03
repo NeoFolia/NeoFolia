@@ -1,0 +1,147 @@
+--- a/net/minecraft/world/level/chunk/storage/SectionStorage.java
++++ b/net/minecraft/world/level/chunk/storage/SectionStorage.java
+@@ -77,7 +_,7 @@
+         this.levelHeightAccessor = levelHeightAccessor;
+     }
+ 
+-    protected void tick(BooleanSupplier haveTime) {
++    protected synchronized void tick(BooleanSupplier haveTime) {
+         LongIterator iterator = this.dirtyChunks.iterator();
+ 
+         while (iterator.hasNext() && haveTime.getAsBoolean()) {
+@@ -89,7 +_,7 @@
+         this.unpackPendingLoads();
+     }
+ 
+-    private void unpackPendingLoads() {
++    private synchronized void unpackPendingLoads() {
+         synchronized (this.loadLock) {
+             Iterator<Entry<CompletableFuture<Optional<SectionStorage.PackedChunk<P>>>>> iterator = Long2ObjectMaps.fastIterator(this.pendingLoads);
+ 
+@@ -106,22 +_,22 @@
+         }
+     }
+ 
+-    public void flushAll() {
++    public synchronized void flushAll() {
+         if (!this.dirtyChunks.isEmpty()) {
+             this.dirtyChunks.forEach(pos -> this.writeChunk(ChunkPos.unpack(pos)));
+             this.dirtyChunks.clear();
+         }
+     }
+ 
+-    public boolean hasWork() {
++    public synchronized boolean hasWork() {
+         return !this.dirtyChunks.isEmpty();
+     }
+ 
+-    protected @Nullable Optional<R> get(long sectionPos) {
++    protected synchronized @Nullable Optional<R> get(long sectionPos) {
+         return this.storage.get(sectionPos);
+     }
+ 
+-    protected Optional<R> getOrLoad(long sectionPos) {
++    protected synchronized Optional<R> getOrLoad(long sectionPos) {
+         if (this.outsideStoredRange(sectionPos)) {
+             return Optional.empty();
+         } else {
+@@ -140,12 +_,12 @@
+         }
+     }
+ 
+-    protected boolean outsideStoredRange(long sectionPos) {
++    protected synchronized boolean outsideStoredRange(long sectionPos) {
+         int y = SectionPos.sectionToBlockCoord(SectionPos.y(sectionPos));
+         return this.levelHeightAccessor.isOutsideBuildHeight(y);
+     }
+ 
+-    protected R getOrCreate(long sectionPos) {
++    protected synchronized R getOrCreate(long sectionPos) {
+         if (this.outsideStoredRange(sectionPos)) {
+             throw (IllegalArgumentException)Util.pauseInIde(new IllegalArgumentException("sectionPos out of bounds"));
+         } else {
+@@ -160,7 +_,7 @@
+         }
+     }
+ 
+-    public CompletableFuture<?> prefetch(ChunkPos chunkPos) {
++    public synchronized CompletableFuture<?> prefetch(ChunkPos chunkPos) {
+         synchronized (this.loadLock) {
+             long chunkKey = chunkPos.pack();
+             return this.loadedChunks.contains(chunkKey)
+@@ -169,7 +_,7 @@
+         }
+     }
+ 
+-    private void unpackChunk(ChunkPos chunkPos) {
++    private synchronized void unpackChunk(ChunkPos chunkPos) {
+         long chunkKey = chunkPos.pack();
+         CompletableFuture<Optional<SectionStorage.PackedChunk<P>>> future;
+         synchronized (this.loadLock) {
+@@ -209,7 +_,7 @@
+             });
+     }
+ 
+-    private void unpackChunk(ChunkPos pos, SectionStorage.@Nullable PackedChunk<P> packedChunk) {
++    private synchronized void unpackChunk(ChunkPos pos, SectionStorage.@Nullable PackedChunk<P> packedChunk) {
+         if (packedChunk == null) {
+             for (int sectionY = this.levelHeightAccessor.getMinSectionY(); sectionY <= this.levelHeightAccessor.getMaxSectionY(); sectionY++) {
+                 this.storage.put(getKey(pos, sectionY), Optional.empty());
+@@ -232,7 +_,7 @@
+         }
+     }
+ 
+-    private void writeChunk(ChunkPos chunkPos) {
++    private synchronized void writeChunk(ChunkPos chunkPos) {
+         RegistryOps<Tag> registryOps = this.registryAccess.createSerializationContext(NbtOps.INSTANCE);
+         Dynamic<Tag> tag = this.writeChunk(chunkPos, registryOps);
+         Tag value = tag.getValue();
+@@ -246,7 +_,7 @@
+         }
+     }
+ 
+-    private <T> Dynamic<T> writeChunk(ChunkPos chunkPos, DynamicOps<T> ops) {
++    private synchronized <T> Dynamic<T> writeChunk(ChunkPos chunkPos, DynamicOps<T> ops) {
+         Map<T, T> sections = Maps.newHashMap();
+ 
+         for (int sectionY = this.levelHeightAccessor.getMinSectionY(); sectionY <= this.levelHeightAccessor.getMaxSectionY(); sectionY++) {
+@@ -279,7 +_,7 @@
+     protected void onSectionLoad(long sectionPos) {
+     }
+ 
+-    protected void setDirty(long sectionPos) {
++    protected synchronized void setDirty(long sectionPos) {
+         Optional<R> r = this.storage.get(sectionPos);
+         if (r != null && !r.isEmpty()) {
+             this.dirtyChunks.add(ChunkPos.pack(SectionPos.x(sectionPos), SectionPos.z(sectionPos)));
+@@ -288,15 +_,28 @@
+         }
+     }
+ 
+-    public void flush(ChunkPos chunkPos) {
++    public synchronized void flush(ChunkPos chunkPos) {
+         if (this.dirtyChunks.remove(chunkPos.pack())) {
+             this.writeChunk(chunkPos);
+         }
+     }
+ 
+     @Override
+-    public void close() throws IOException {
++    public synchronized void close() throws IOException {
+         this.simpleRegionStorage.close();
++    }
++
++    /**
++     * Neo: Removes the data for the given chunk position.
++     * See PR #937
++     */
++    public synchronized void remove(ChunkPos chunkPos) {
++        synchronized (this.loadLock) {
++            for (int y = this.levelHeightAccessor.getMinSectionY(); y <= this.levelHeightAccessor.getMaxSectionY(); y++) {
++                this.storage.remove(getKey(chunkPos, y));
++            }
++            this.loadedChunks.remove(chunkPos.pack());
++        }
+     }
+ 
+     private record PackedChunk<T>(Int2ObjectMap<T> sectionsByY, boolean versionChanged) {

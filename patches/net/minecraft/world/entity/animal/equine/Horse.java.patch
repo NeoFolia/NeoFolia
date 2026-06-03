@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/animal/equine/Horse.java
++++ b/net/minecraft/world/entity/animal/equine/Horse.java
+@@ -237,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         Variant variant;
+         if (groupData instanceof Horse.HorseGroupData) {
+             variant = ((Horse.HorseGroupData)groupData).variant;

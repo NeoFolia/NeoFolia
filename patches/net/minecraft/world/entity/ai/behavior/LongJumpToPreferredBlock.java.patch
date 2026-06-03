@@ -1,0 +1,33 @@
+--- a/net/minecraft/world/entity/ai/behavior/LongJumpToPreferredBlock.java
++++ b/net/minecraft/world/entity/ai/behavior/LongJumpToPreferredBlock.java
+@@ -36,24 +_,25 @@
+     }
+ 
+     @Override
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+         super.start(level, body, timestamp);
+         this.notPrefferedJumpCandidates.clear();
+         this.currentlyWantingPreferredOnes = body.getRandom().nextFloat() < this.preferredBlocksChance;
+     }
+ 
+     @Override
+-    protected Optional<LongJumpToRandomPos.PossibleJump> getJumpCandidate(ServerLevel level) {
++    protected synchronized Optional<LongJumpToRandomPos.PossibleJump> getJumpCandidate(ServerLevel level, E body) {
+         if (!this.currentlyWantingPreferredOnes) {
+-            return super.getJumpCandidate(level);
++            return super.getJumpCandidate(level, body);
+         } else {
+             BlockPos.MutableBlockPos testPos = new BlockPos.MutableBlockPos();
+ 
+             while (!this.jumpCandidates.isEmpty()) {
+-                Optional<LongJumpToRandomPos.PossibleJump> jumpCandidate = super.getJumpCandidate(level);
++                Optional<LongJumpToRandomPos.PossibleJump> jumpCandidate = super.getJumpCandidate(level, body);
+                 if (jumpCandidate.isPresent()) {
+                     LongJumpToRandomPos.PossibleJump possibleJump = jumpCandidate.get();
+-                    if (level.getBlockState(testPos.setWithOffset(possibleJump.targetPos(), Direction.DOWN)).is(this.preferredBlockTag)) {
++                    testPos.setWithOffset(possibleJump.targetPos(), Direction.DOWN);
++                    if (canReadBlock(level, testPos) && level.getBlockState(testPos).is(this.preferredBlockTag)) {
+                         return jumpCandidate;
+                     }
+ 

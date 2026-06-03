@@ -1,0 +1,40 @@
+--- a/net/minecraft/server/commands/SayCommand.java
++++ b/net/minecraft/server/commands/SayCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.MessageArgument;
+@@ -12,14 +_,20 @@
+         dispatcher.register(
+             Commands.literal("say")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .then(Commands.argument("message", MessageArgument.message()).executes(c -> {
+-                    MessageArgument.resolveChatMessage(c, "message", message -> {
+-                        CommandSourceStack source = c.getSource();
+-                        PlayerList playerList = source.getServer().getPlayerList();
+-                        playerList.broadcastChatMessage(message, source, ChatType.bind(ChatType.SAY_COMMAND, source));
+-                    });
+-                    return 1;
+-                }))
++                .then(Commands.argument("message", MessageArgument.message()).executes(SayCommand::say))
+         );
++    }
++
++    private static int say(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> say(context))) {
++            return 0;
++        }
++
++        MessageArgument.resolveChatMessage(context, "message", message -> {
++            PlayerList playerList = source.getServer().getPlayerList();
++            playerList.broadcastChatMessage(message, source, ChatType.bind(ChatType.SAY_COMMAND, source));
++        });
++        return 1;
+     }
+ }

@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/SetPlayerIdleTimeoutCommand.java
++++ b/net/minecraft/server/commands/SetPlayerIdleTimeoutCommand.java
+@@ -19,6 +_,10 @@
+     }
+ 
+     private static int setIdleTimeout(CommandSourceStack source, int time) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setIdleTimeout(source, time))) {
++            return 0;
++        }
++
+         source.getServer().setPlayerIdleTimeout(time);
+         if (time > 0) {
+             source.sendSuccess(() -> Component.translatable("commands.setidletimeout.success", time), true);

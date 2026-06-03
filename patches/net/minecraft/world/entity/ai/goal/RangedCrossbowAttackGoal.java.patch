@@ -1,0 +1,106 @@
+--- a/net/minecraft/world/entity/ai/goal/RangedCrossbowAttackGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RangedCrossbowAttackGoal.java
+@@ -13,8 +_,10 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
+ import net.minecraft.world.item.component.ChargedProjectiles;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+-public class RangedCrossbowAttackGoal<T extends Monster & RangedAttackMob & CrossbowAttackMob> extends Goal {
++public class RangedCrossbowAttackGoal<T extends net.minecraft.world.entity.Mob & CrossbowAttackMob> extends Goal {
+     public static final UniformInt PATHFINDING_DELAY_RANGE = TimeUtil.rangeOfSeconds(1, 2);
+     private final T mob;
+     private RangedCrossbowAttackGoal.CrossbowState crossbowState = RangedCrossbowAttackGoal.CrossbowState.UNCHARGED;
+@@ -24,6 +_,10 @@
+     private int attackDelay;
+     private int updatePathDelay;
+ 
++    public <M extends Monster & CrossbowAttackMob> RangedCrossbowAttackGoal(M mob, double speedModifier, float attackRadius) {
++        this((T) mob, speedModifier, attackRadius);
++    }
++
+     public RangedCrossbowAttackGoal(T mob, double speedModifier, float attackRadius) {
+         this.mob = mob;
+         this.speedModifier = speedModifier;
+@@ -32,29 +_,33 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.isValidTarget() && this.isHoldingCrossbow();
+     }
+ 
+-    private boolean isHoldingCrossbow() {
+-        return this.mob.isHolding(Items.CROSSBOW);
++    private synchronized boolean isHoldingCrossbow() {
++        return this.mob.isHolding(is -> is.getItem() instanceof CrossbowItem);
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return this.isValidTarget() && (this.canUse() || !this.mob.getNavigation().isDone()) && this.isHoldingCrossbow();
+     }
+ 
+-    private boolean isValidTarget() {
+-        return this.mob.getTarget() != null && this.mob.getTarget().isAlive();
++    private synchronized boolean isValidTarget() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
++        return target != null && target.isAlive();
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         super.stop();
+         this.mob.setAggressive(false);
+         this.mob.setTarget(null);
+         this.seeTime = 0;
++        this.attackDelay = 0;
++        this.updatePathDelay = 0;
++        this.crossbowState = RangedCrossbowAttackGoal.CrossbowState.UNCHARGED;
+         if (this.mob.isUsingItem()) {
+             this.mob.stopUsingItem();
+             this.mob.setChargingCrossbow(false);
+@@ -63,13 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
+-        LivingEntity target = this.mob.getTarget();
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
+         if (target != null) {
+             boolean hasLineOfSight = this.mob.getSensing().hasLineOfSight(target);
+             boolean hadLineOfSight = this.seeTime > 0;
+@@ -99,7 +_,7 @@
+             this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+             if (this.crossbowState == RangedCrossbowAttackGoal.CrossbowState.UNCHARGED) {
+                 if (!needsToMove) {
+-                    this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, Items.CROSSBOW));
++                    this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, item -> item instanceof CrossbowItem));
+                     this.crossbowState = RangedCrossbowAttackGoal.CrossbowState.CHARGING;
+                     this.mob.setChargingCrossbow(true);
+                 }
+@@ -128,8 +_,12 @@
+         }
+     }
+ 
+-    private boolean canRun() {
++    private synchronized boolean canRun() {
+         return this.crossbowState == RangedCrossbowAttackGoal.CrossbowState.UNCHARGED;
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ 
+     private static enum CrossbowState {

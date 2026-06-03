@@ -1,0 +1,98 @@
+--- a/net/minecraft/server/commands/DialogCommand.java
++++ b/net/minecraft/server/commands/DialogCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import net.minecraft.commands.CommandBuildContext;
+ import net.minecraft.commands.CommandSourceStack;
+@@ -12,6 +_,7 @@
+ import net.minecraft.network.protocol.common.ClientboundClearDialogPacket;
+ import net.minecraft.server.dialog.Dialog;
+ import net.minecraft.server.level.ServerPlayer;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class DialogCommand {
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context) {
+@@ -25,11 +_,7 @@
+                                 .then(
+                                     Commands.argument("dialog", ResourceOrIdArgument.dialog(context))
+                                         .executes(
+-                                            c -> showDialog(
+-                                                (CommandSourceStack)c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                ResourceOrIdArgument.getDialog(c, "dialog")
+-                                            )
++                                            DialogCommand::showDialog
+                                         )
+                                 )
+                         )
+@@ -38,19 +_,42 @@
+                     Commands.literal("clear")
+                         .then(
+                             Commands.argument("targets", EntityArgument.players())
+-                                .executes(c -> clearDialog(c.getSource(), EntityArgument.getPlayers(c, "targets")))
++                                .executes(DialogCommand::clearDialog)
+                         )
+                 )
+         );
+     }
+ 
++    private static int showDialog(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack sender = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(sender, () -> showDialog(context))) {
++            return 0;
++        }
++
++        return showDialog(sender, EntityArgument.getPlayers(context, "targets"), ResourceOrIdArgument.getDialog(context, "dialog"));
++    }
++
++    private static int clearDialog(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack sender = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(sender, () -> clearDialog(context))) {
++            return 0;
++        }
++
++        return clearDialog(sender, EntityArgument.getPlayers(context, "targets"));
++    }
++
+     private static int showDialog(CommandSourceStack sender, Collection<ServerPlayer> targets, Holder<Dialog> dialog) {
++        Component singleTargetName = null;
+         for (ServerPlayer target : targets) {
+-            target.openDialog(dialog);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(sender, target, () -> {
++                target.openDialog(dialog);
++                return target.getDisplayName();
++            });
+         }
+ 
+         if (targets.size() == 1) {
+-            sender.sendSuccess(() -> Component.translatable("commands.dialog.show.single", targets.iterator().next().getDisplayName()), true);
++            Component finalSingleTargetName = singleTargetName;
++            sender.sendSuccess(() -> Component.translatable("commands.dialog.show.single", finalSingleTargetName), true);
+         } else {
+             sender.sendSuccess(() -> Component.translatable("commands.dialog.show.multiple", targets.size()), true);
+         }
+@@ -59,12 +_,17 @@
+     }
+ 
+     private static int clearDialog(CommandSourceStack sender, Collection<ServerPlayer> targets) {
++        Component singleTargetName = null;
+         for (ServerPlayer target : targets) {
+-            target.connection.send(ClientboundClearDialogPacket.INSTANCE);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(sender, target, () -> {
++                RegionizedWorldGuard.sendToPlayer(target, ClientboundClearDialogPacket.INSTANCE);
++                return target.getDisplayName();
++            });
+         }
+ 
+         if (targets.size() == 1) {
+-            sender.sendSuccess(() -> Component.translatable("commands.dialog.clear.single", targets.iterator().next().getDisplayName()), true);
++            Component finalSingleTargetName = singleTargetName;
++            sender.sendSuccess(() -> Component.translatable("commands.dialog.clear.single", finalSingleTargetName), true);
+         } else {
+             sender.sendSuccess(() -> Component.translatable("commands.dialog.clear.multiple", targets.size()), true);
+         }

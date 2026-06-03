@@ -1,0 +1,152 @@
+--- a/net/minecraft/world/level/block/entity/BrushableBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BrushableBlockEntity.java
+@@ -32,6 +_,8 @@
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -56,7 +_,7 @@
+         super(BlockEntityType.BRUSHABLE_BLOCK, worldPosition, blockState);
+     }
+ 
+-    public boolean brush(long gameTime, ServerLevel level, LivingEntity user, Direction direction, ItemStack brush) {
++    public synchronized boolean brush(long gameTime, ServerLevel level, LivingEntity user, Direction direction, ItemStack brush) {
+         if (this.hitDirection == null) {
+             this.hitDirection = direction;
+         }
+@@ -85,11 +_,11 @@
+         }
+     }
+ 
+-    private void unpackLootTable(ServerLevel level, LivingEntity user, ItemInstance brush) {
++    private synchronized void unpackLootTable(ServerLevel level, LivingEntity user, ItemInstance brush) {
+         if (this.lootTable != null) {
+             LootTable lootTable = level.getServer().reloadableRegistries().getLootTable(this.lootTable);
+             if (user instanceof ServerPlayer serverPlayer) {
+-                CriteriaTriggers.GENERATE_LOOT.trigger(serverPlayer, this.lootTable);
++                triggerGenerateLoot(serverPlayer, this.lootTable);
+             }
+ 
+             LootParams params = new LootParams.Builder(level)
+@@ -113,7 +_,11 @@
+         }
+     }
+ 
+-    private void brushingCompleted(ServerLevel level, LivingEntity user, ItemStack brush) {
++    private static void triggerGenerateLoot(ServerPlayer player, ResourceKey<LootTable> lootTable) {
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.GENERATE_LOOT.trigger(player, lootTable));
++    }
++
++    private synchronized void brushingCompleted(ServerLevel level, LivingEntity user, ItemStack brush) {
+         this.dropContent(level, user, brush);
+         BlockState blockState = this.getBlockState();
+         level.levelEvent(3008, this.getBlockPos(), Block.getId(blockState));
+@@ -127,7 +_,7 @@
+         level.setBlock(this.worldPosition, turnsInto.defaultBlockState(), 3);
+     }
+ 
+-    private void dropContent(ServerLevel level, LivingEntity user, ItemStack brush) {
++    private synchronized void dropContent(ServerLevel level, LivingEntity user, ItemStack brush) {
+         this.unpackLootTable(level, user, brush);
+         if (!this.item.isEmpty()) {
+             double size = EntityType.ITEM.getWidth();
+@@ -138,14 +_,14 @@
+             double xo = dropPos.getX() + 0.5 * centerRange + halfSize;
+             double yo = dropPos.getY() + 0.5 + EntityType.ITEM.getHeight() / 2.0F;
+             double zo = dropPos.getZ() + 0.5 * centerRange + halfSize;
+-            ItemEntity entity = new ItemEntity(level, xo, yo, zo, this.item.split(level.getRandom().nextInt(21) + 10));
++            ItemEntity entity = new ItemEntity(level, xo, yo, zo, this.item.split(RegionizedTickContext.currentRandom().orElse(level.getRandom()).nextInt(21) + 10));
+             entity.setDeltaMovement(Vec3.ZERO);
+             level.addFreshEntity(entity);
+             this.item = ItemStack.EMPTY;
+         }
+     }
+ 
+-    public void checkReset(ServerLevel level) {
++    public synchronized void checkReset(ServerLevel level) {
+         if (this.brushCount != 0 && level.getGameTime() >= this.brushCountResetsAtTick) {
+             int previousCompletionState = this.getCompletionState();
+             this.brushCount = Math.max(0, this.brushCount - 2);
+@@ -167,13 +_,13 @@
+         }
+     }
+ 
+-    private boolean tryLoadLootTable(ValueInput input) {
++    private synchronized boolean tryLoadLootTable(ValueInput input) {
+         this.lootTable = input.read("LootTable", LootTable.KEY_CODEC).orElse(null);
+         this.lootTableSeed = input.getLongOr("LootTableSeed", 0L);
+         return this.lootTable != null;
+     }
+ 
+-    private boolean trySaveLootTable(ValueOutput base) {
++    private synchronized boolean trySaveLootTable(ValueOutput base) {
+         if (this.lootTable == null) {
+             return false;
+         } else {
+@@ -189,10 +_,12 @@
+     @Override
+     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+         CompoundTag tag = super.getUpdateTag(registries);
+-        tag.storeNullable("hit_direction", Direction.LEGACY_ID_CODEC, this.hitDirection);
+-        if (!this.item.isEmpty()) {
+-            RegistryOps<Tag> ops = registries.createSerializationContext(NbtOps.INSTANCE);
+-            tag.store("item", ItemStack.CODEC, ops, this.item);
++        synchronized (this) {
++            tag.storeNullable("hit_direction", Direction.LEGACY_ID_CODEC, this.hitDirection);
++            if (!this.item.isEmpty()) {
++                RegistryOps<Tag> ops = registries.createSerializationContext(NbtOps.INSTANCE);
++                tag.store("item", ItemStack.CODEC, ops, this.item);
++            }
+         }
+ 
+         return tag;
+@@ -203,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         if (!this.tryLoadLootTable(input)) {
+             this.item = input.read("item", ItemStack.CODEC).orElse(ItemStack.EMPTY);
+@@ -215,19 +_,19 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         if (!this.trySaveLootTable(output) && !this.item.isEmpty()) {
+             output.store("item", ItemStack.CODEC, this.item);
+         }
+     }
+ 
+-    public void setLootTable(ResourceKey<LootTable> lootTable, long seed) {
++    public synchronized void setLootTable(ResourceKey<LootTable> lootTable, long seed) {
+         this.lootTable = lootTable;
+         this.lootTableSeed = seed;
+     }
+ 
+-    private int getCompletionState() {
++    private synchronized int getCompletionState() {
+         if (this.brushCount == 0) {
+             return 0;
+         } else if (this.brushCount < 3) {
+@@ -237,11 +_,11 @@
+         }
+     }
+ 
+-    public @Nullable Direction getHitDirection() {
++    public synchronized @Nullable Direction getHitDirection() {
+         return this.hitDirection;
+     }
+ 
+-    public ItemStack getItem() {
++    public synchronized ItemStack getItem() {
+         return this.item;
+     }
+ }

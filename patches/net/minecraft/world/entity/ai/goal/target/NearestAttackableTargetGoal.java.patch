@@ -1,0 +1,75 @@
+--- a/net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.world.entity.ai.goal.target;
+ 
+ import java.util.EnumSet;
++import java.util.List;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.world.entity.LivingEntity;
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class NearestAttackableTargetGoal<T extends LivingEntity> extends TargetGoal {
+@@ -41,24 +_,27 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.randomInterval > 0 && this.mob.getRandom().nextInt(this.randomInterval) != 0) {
+             return false;
+         } else {
+             this.findTarget();
++            this.target = this.regionSafeTarget(this.target);
+             return this.target != null;
+         }
+     }
+ 
+-    protected AABB getTargetSearchArea(double followDistance) {
++    protected synchronized AABB getTargetSearchArea(double followDistance) {
+         return this.mob.getBoundingBox().inflate(followDistance, followDistance, followDistance);
+     }
+ 
+-    protected void findTarget() {
++    protected synchronized void findTarget() {
+         ServerLevel level = getServerLevel(this.mob);
+         if (this.targetType != Player.class && this.targetType != ServerPlayer.class) {
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.getTargetSearchArea(this.getFollowDistance()));
++            List<T> candidates = searchBox == null ? List.of() : List.copyOf(this.mob.level().getEntitiesOfClass(this.targetType, searchBox, entity -> true));
+             this.target = level.getNearestEntity(
+-                this.mob.level().getEntitiesOfClass(this.targetType, this.getTargetSearchArea(this.getFollowDistance()), entity -> true),
++                candidates,
+                 this.getTargetConditions(),
+                 this.mob,
+                 this.mob.getX(),
+@@ -71,16 +_,19 @@
+     }
+ 
+     @Override
+-    public void start() {
+-        this.mob.setTarget(this.target);
++    public synchronized void start() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        if (target != null) {
++            this.mob.setTarget(target);
++        }
+         super.start();
+     }
+ 
+-    public void setTarget(@Nullable LivingEntity target) {
+-        this.target = target;
++    public synchronized void setTarget(@Nullable LivingEntity target) {
++        this.target = this.regionSafeTarget(target);
+     }
+ 
+-    private TargetingConditions getTargetConditions() {
++    private synchronized TargetingConditions getTargetConditions() {
+         return this.targetConditions.range(this.getFollowDistance());
+     }
+ }

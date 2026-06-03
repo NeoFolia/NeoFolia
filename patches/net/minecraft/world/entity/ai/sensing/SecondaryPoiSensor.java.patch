@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/ai/sensing/SecondaryPoiSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/SecondaryPoiSensor.java
+@@ -12,6 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.npc.villager.Villager;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class SecondaryPoiSensor extends Sensor<Villager> {
+     private static final int SCAN_RATE = 40;
+@@ -30,7 +_,8 @@
+             for (int y = -2; y <= 2; y++) {
+                 for (int z = -4; z <= 4; z++) {
+                     BlockPos testPos = center.offset(x, y, z);
+-                    if (body.getVillagerData().profession().value().secondaryPoi().contains(level.getBlockState(testPos).getBlock())) {
++                    if (RegionizedWorldGuard.shouldLoadChunk(level, testPos.getX() >> 4, testPos.getZ() >> 4)
++                        && body.getVillagerData().profession().value().secondaryPoi().contains(level.getBlockState(testPos).getBlock())) {
+                         jobSites.add(GlobalPos.of(dimensionType, testPos));
+                     }
+                 }
+@@ -39,7 +_,7 @@
+ 
+         Brain<?> brain = body.getBrain();
+         if (!jobSites.isEmpty()) {
+-            brain.setMemory(MemoryModuleType.SECONDARY_JOB_SITE, jobSites);
++            brain.setMemory(MemoryModuleType.SECONDARY_JOB_SITE, List.copyOf(jobSites));
+         } else {
+             brain.eraseMemory(MemoryModuleType.SECONDARY_JOB_SITE);
+         }

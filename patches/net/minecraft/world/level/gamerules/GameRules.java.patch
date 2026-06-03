@@ -1,0 +1,62 @@
+--- a/net/minecraft/world/level/gamerules/GameRules.java
++++ b/net/minecraft/world/level/gamerules/GameRules.java
+@@ -117,11 +_,11 @@
+         this.rules = GameRuleMap.of(rules.stream());
+     }
+ 
+-    public Stream<GameRule<?>> availableRules() {
++    public synchronized Stream<GameRule<?>> availableRules() {
+         return this.rules.keySet().stream();
+     }
+ 
+-    public <T> T get(GameRule<T> gameRule) {
++    public synchronized <T> T get(GameRule<T> gameRule) {
+         T value = this.rules.get(gameRule);
+         if (value == null) {
+             throw new IllegalArgumentException("Tried to access invalid game rule " + gameRule.getIdentifierWithFallback());
+@@ -130,7 +_,7 @@
+         }
+     }
+ 
+-    public <T> void set(GameRule<T> gameRule, T value, @Nullable MinecraftServer server) {
++    public synchronized <T> void set(GameRule<T> gameRule, T value, @Nullable MinecraftServer server) {
+         if (!this.rules.has(gameRule)) {
+             LOGGER.warn("Tried to set invalid game rule '{}' to value '{}'", gameRule.getIdentifierWithFallback(), value);
+         } else {
+@@ -141,15 +_,15 @@
+         }
+     }
+ 
+-    public GameRules copy(FeatureFlagSet enabledFeatures) {
++    public synchronized GameRules copy(FeatureFlagSet enabledFeatures) {
+         return new GameRules(enabledFeatures, GameRuleMap.copyOf(this.rules));
+     }
+ 
+-    public void setAll(GameRules other, @Nullable MinecraftServer server) {
++    public synchronized void setAll(GameRules other, @Nullable MinecraftServer server) {
+         this.setAll(other.rules, server);
+     }
+ 
+-    public void setAll(GameRuleMap gameRulesMap, @Nullable MinecraftServer server) {
++    public synchronized void setAll(GameRuleMap gameRulesMap, @Nullable MinecraftServer server) {
+         gameRulesMap.keySet().forEach(gameRule -> this.setFromOther(gameRulesMap, (GameRule<?>)gameRule, server));
+     }
+ 
+@@ -157,7 +_,7 @@
+         this.set(gameRule, Objects.requireNonNull(gameRulesMap.get(gameRule)), server);
+     }
+ 
+-    public void visitGameRuleTypes(GameRuleTypeVisitor visitor) {
++    public synchronized void visitGameRuleTypes(GameRuleTypeVisitor visitor) {
+         this.rules.keySet().forEach(gameRule -> {
+             visitor.visit((GameRule<?>)gameRule);
+             gameRule.callVisitor(visitor);
+@@ -222,7 +_,7 @@
+         return ADVANCE_TIME;
+     }
+ 
+-    public <T> String getAsString(GameRule<T> gameRule) {
++    public synchronized <T> String getAsString(GameRule<T> gameRule) {
+         return gameRule.serialize(this.get(gameRule));
+     }
+ 

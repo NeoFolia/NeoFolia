@@ -1,0 +1,89 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
+@@ -20,51 +_,74 @@
+ 
+     @Override
+     public boolean isReady() {
+-        return this.server.isReady();
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, this.server::isReady);
+     }
+ 
+     @Override
+     public boolean saveEverything(boolean suppressLogs, boolean flush, boolean force, ClientInfo clientInfo) {
++        if (!this.server.isSameThread() && !net.neoforged.neoforge.server.region.RegionizedTickContext.isRegionThread()) {
++            return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.saveEverything(suppressLogs, flush, force, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.saveEverything(suppressLogs, flush, force, clientInfo))) {
++            return true;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Save everything. SuppressLogs: {}, flush: {}, force: {}", suppressLogs, flush, force);
+         return this.server.saveEverything(suppressLogs, flush, force);
+     }
+ 
+     @Override
+     public void halt(boolean waitForShutdown, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.halt(waitForShutdown, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Halt server. WaitForShutdown: {}", waitForShutdown);
+         this.server.halt(waitForShutdown);
+     }
+ 
+     @Override
+     public void sendSystemMessage(Component message, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.sendSystemMessage(message, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Send system message: '{}'", message.getString());
+         this.server.sendSystemMessage(message);
+     }
+ 
+     @Override
+     public void sendSystemMessage(Component message, boolean overlay, Collection<ServerPlayer> players, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.sendSystemMessage(message, overlay, players, clientInfo))) {
++            return;
++        }
++
+         List<String> playerNames = players.stream().map(Player::getPlainTextName).toList();
+         this.jsonrpcLogger.log(clientInfo, "Send system message to '{}' players (overlay: {}): '{}'", playerNames.size(), overlay, message.getString());
+ 
+         for (ServerPlayer player : players) {
+-            if (overlay) {
+-                player.sendOverlayMessage(message);
+-            } else {
+-                player.sendSystemMessage(message);
+-            }
++            RegionizedJsonRpcGuard.executeOnPlayerRegionIfNeeded(this.server, player, () -> this.sendSystemMessageToPlayer(message, overlay, player));
+         }
+     }
+ 
+     @Override
+     public void broadcastSystemMessage(Component message, boolean overlay, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.broadcastSystemMessage(message, overlay, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Broadcast system message (overlay: {}): '{}'", overlay, message.getString());
+ 
+-        for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+-            if (overlay) {
+-                player.sendOverlayMessage(message);
+-            } else {
+-                player.sendSystemMessage(message);
+-            }
++        for (ServerPlayer player : this.server.getPlayerList().getAllPlayers()) {
++            RegionizedJsonRpcGuard.executeOnPlayerRegionIfNeeded(this.server, player, () -> this.sendSystemMessageToPlayer(message, overlay, player));
++        }
++    }
++
++    private void sendSystemMessageToPlayer(Component message, boolean overlay, ServerPlayer player) {
++        if (overlay) {
++            player.sendOverlayMessage(message);
++        } else {
++            player.sendSystemMessage(message);
+         }
+     }
+ }

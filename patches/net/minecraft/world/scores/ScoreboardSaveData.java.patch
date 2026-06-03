@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/scores/ScoreboardSaveData.java
++++ b/net/minecraft/world/scores/ScoreboardSaveData.java
+@@ -26,11 +_,11 @@
+         this.data = data;
+     }
+ 
+-    public ScoreboardSaveData.Packed getData() {
++    public synchronized ScoreboardSaveData.Packed getData() {
+         return this.data;
+     }
+ 
+-    public void setData(ScoreboardSaveData.Packed data) {
++    public synchronized void setData(ScoreboardSaveData.Packed data) {
+         if (!data.equals(this.data)) {
+             this.data = data;
+             this.setDirty();

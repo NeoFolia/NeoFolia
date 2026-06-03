@@ -1,0 +1,98 @@
+--- a/net/minecraft/world/inventory/LoomMenu.java
++++ b/net/minecraft/world/inventory/LoomMenu.java
+@@ -45,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             super.setChanged();
+             LoomMenu.this.slotsChanged(this);
+             LoomMenu.this.slotUpdateListener.run();
+@@ -57,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             super.setChanged();
+             LoomMenu.this.slotUpdateListener.run();
+         }
+@@ -76,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return itemStack.getItem() instanceof BannerItem;
+             }
+         });
+@@ -86,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return LoomMenu.isDyeItem(itemStack);
+             }
+         });
+@@ -96,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return LoomMenu.isPatternItem(itemStack);
+             }
+         });
+@@ -106,12 +_,12 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return false;
+             }
+ 
+             @Override
+-            public void onTake(Player player, ItemStack carried) {
++            public synchronized void onTake(Player player, ItemStack carried) {
+                 LoomMenu.this.bannerSlot.remove(1);
+                 LoomMenu.this.dyeSlot.remove(1);
+                 if (!LoomMenu.this.bannerSlot.hasItem() || !LoomMenu.this.dyeSlot.hasItem()) {
+@@ -147,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean clickMenuButton(Player player, int buttonId) {
++    public synchronized boolean clickMenuButton(Player player, int buttonId) {
+         if (buttonId >= 0 && buttonId < this.selectablePatterns.size()) {
+             this.selectedBannerPatternIndex.set(buttonId);
+             this.setupResultSlot(this.selectablePatterns.get(buttonId));
+@@ -171,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         ItemStack bannerStack = this.bannerSlot.getItem();
+         ItemStack dyeStack = this.dyeSlot.getItem();
+         ItemStack patternStack = this.patternSlot.getItem();
+@@ -233,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -286,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.access.execute((level, pos) -> this.clearContainer(player, this.inputContainer));
+     }

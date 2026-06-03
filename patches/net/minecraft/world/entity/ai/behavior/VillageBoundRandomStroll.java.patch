@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/entity/ai/behavior/VillageBoundRandomStroll.java
++++ b/net/minecraft/world/entity/ai/behavior/VillageBoundRandomStroll.java
+@@ -15,11 +_,11 @@
+     private static final int MAX_XZ_DIST = 10;
+     private static final int MAX_Y_DIST = 7;
+ 
+-    public static OneShot<PathfinderMob> create(float speedModifier) {
++    public static synchronized OneShot<PathfinderMob> create(float speedModifier) {
+         return create(speedModifier, 10, 7);
+     }
+ 
+-    public static OneShot<PathfinderMob> create(float speedModifier, int maxXyDist, int maxYDist) {
++    public static synchronized OneShot<PathfinderMob> create(float speedModifier, int maxXyDist, int maxYDist) {
+         return BehaviorBuilder.create(
+             i -> i.group(i.absent(MemoryModuleType.WALK_TARGET))
+                 .apply(

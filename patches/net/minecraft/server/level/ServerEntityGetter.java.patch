@@ -1,0 +1,54 @@
+--- a/net/minecraft/server/level/ServerEntityGetter.java
++++ b/net/minecraft/server/level/ServerEntityGetter.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.EntityGetter;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface ServerEntityGetter extends EntityGetter {
+@@ -39,6 +_,10 @@
+         LivingEntity nearestEntity = null;
+ 
+         for (LivingEntity entity : this.getEntitiesOfClass(LivingEntity.class, bb, e -> e.is(tag))) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.getLevel(), entity) == null) {
++                continue;
++            }
++
+             if (targetConditions.test(this.getLevel(), source, entity)) {
+                 double distance = entity.distanceToSqr(x, y, z);
+                 if (distance < bestDistance) {
+@@ -58,6 +_,10 @@
+         T result = null;
+ 
+         for (T entity : entities) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.getLevel(), entity) == null) {
++                continue;
++            }
++
+             if (targetConditions.test(this.getLevel(), source, entity)) {
+                 double dist = entity.distanceToSqr(x, y, z);
+                 if (best == -1.0 || dist < best) {
+@@ -74,6 +_,10 @@
+         List<Player> foundPlayers = new ArrayList<>();
+ 
+         for (Player player : this.players()) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.getLevel(), player) == null) {
++                continue;
++            }
++
+             if (bb.contains(player.getX(), player.getY(), player.getZ()) && targetConditions.test(this.getLevel(), source, player)) {
+                 foundPlayers.add(player);
+             }
+@@ -87,6 +_,10 @@
+         List<T> entities = new ArrayList<>();
+ 
+         for (T entity : nearby) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.getLevel(), entity) == null) {
++                continue;
++            }
++
+             if (targetConditions.test(this.getLevel(), source, entity)) {
+                 entities.add(entity);
+             }

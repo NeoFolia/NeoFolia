@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/ai/behavior/CopyMemoryWithExpiry.java
++++ b/net/minecraft/world/entity/ai/behavior/CopyMemoryWithExpiry.java
+@@ -7,14 +_,14 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ 
+ public class CopyMemoryWithExpiry {
+-    public static <E extends LivingEntity, T> BehaviorControl<E> create(
++    public static synchronized <E extends LivingEntity, T> BehaviorControl<E> create(
+         Predicate<E> copyIfTrue, MemoryModuleType<? extends T> sourceMemory, MemoryModuleType<T> targetMemory, UniformInt durationOfCopy
+     ) {
+         return BehaviorBuilder.create(i -> i.group(i.present(sourceMemory), i.absent(targetMemory)).apply(i, (source, target) -> (level, body, timestamp) -> {
+             if (!copyIfTrue.test(body)) {
+                 return false;
+             } else {
+-                target.setWithExpiry(i.get(source), durationOfCopy.sample(level.getRandom()));
++                target.setWithExpiry(i.get(source), durationOfCopy.sample(body.getRandom()));
+                 return true;
+             }
+         }));

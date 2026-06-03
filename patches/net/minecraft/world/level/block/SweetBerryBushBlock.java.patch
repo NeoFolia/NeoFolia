@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/level/block/SweetBerryBushBlock.java
++++ b/net/minecraft/world/level/block/SweetBerryBushBlock.java
+@@ -30,6 +_,7 @@
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class SweetBerryBushBlock extends VegetationBlock implements BonemealableBlock {
+     public static final MapCodec<SweetBerryBushBlock> CODEC = simpleCodec(SweetBerryBushBlock::new);
+@@ -71,9 +_,10 @@
+     @Override
+     protected void randomTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+         int age = state.getValue(AGE);
+-        if (age < 3 && random.nextInt(5) == 0 && level.getRawBrightness(pos.above(), 0) >= 9) {
++        if (age < 3 && level.getRawBrightness(pos.above(), 0) >= 9 && net.neoforged.neoforge.common.CommonHooks.canCropGrow(level, pos, state, random.nextInt(5) == 0)) {
+             BlockState newState = state.setValue(AGE, age + 1);
+             level.setBlock(pos, newState, 2);
++            net.neoforged.neoforge.common.CommonHooks.fireCropGrowPost(level, pos, state);
+             level.gameEvent(GameEvent.BLOCK_CHANGE, pos, GameEvent.Context.of(newState));
+         }
+     }
+@@ -120,7 +_,12 @@
+                     (serverlvl, itemStack) -> Block.popResource(serverlvl, pos, itemStack)
+                 );
+                 serverLevel.playSound(
+-                    null, pos, SoundEvents.SWEET_BERRY_BUSH_PICK_BERRIES, SoundSource.BLOCKS, 1.0F, 0.8F + serverLevel.getRandom().nextFloat() * 0.4F
++                    null,
++                    pos,
++                    SoundEvents.SWEET_BERRY_BUSH_PICK_BERRIES,
++                    SoundSource.BLOCKS,
++                    1.0F,
++                    0.8F + RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()).nextFloat() * 0.4F
+                 );
+                 BlockState newState = state.setValue(AGE, 1);
+                 serverLevel.setBlock(pos, newState, 2);

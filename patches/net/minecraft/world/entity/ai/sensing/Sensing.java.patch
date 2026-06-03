@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/ai/sensing/Sensing.java
++++ b/net/minecraft/world/entity/ai/sensing/Sensing.java
+@@ -16,12 +_,12 @@
+         this.mob = mob;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         this.seen.clear();
+         this.unseen.clear();
+     }
+ 
+-    public boolean hasLineOfSight(Entity target) {
++    public synchronized boolean hasLineOfSight(Entity target) {
+         int targetId = target.getId();
+         if (this.seen.contains(targetId)) {
+             return true;

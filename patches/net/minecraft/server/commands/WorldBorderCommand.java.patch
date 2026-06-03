@@ -1,0 +1,68 @@
+--- a/net/minecraft/server/commands/WorldBorderCommand.java
++++ b/net/minecraft/server/commands/WorldBorderCommand.java
+@@ -127,6 +_,10 @@
+     }
+ 
+     private static int setDamageBuffer(CommandSourceStack source, float distance) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setDamageBuffer(source, distance))) {
++            return 0;
++        }
++
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getSafeZone() == distance) {
+             throw ERROR_SAME_DAMAGE_BUFFER.create();
+@@ -138,6 +_,10 @@
+     }
+ 
+     private static int setDamageAmount(CommandSourceStack source, float damagePerBlock) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setDamageAmount(source, damagePerBlock))) {
++            return 0;
++        }
++
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getDamagePerBlock() == damagePerBlock) {
+             throw ERROR_SAME_DAMAGE_AMOUNT.create();
+@@ -151,6 +_,10 @@
+     }
+ 
+     private static int setWarningTime(CommandSourceStack source, int ticks) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWarningTime(source, ticks))) {
++            return 0;
++        }
++
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getWarningTime() == ticks) {
+             throw ERROR_SAME_WARNING_TIME.create();
+@@ -162,6 +_,10 @@
+     }
+ 
+     private static int setWarningDistance(CommandSourceStack source, int distance) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWarningDistance(source, distance))) {
++            return 0;
++        }
++
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getWarningBlocks() == distance) {
+             throw ERROR_SAME_WARNING_DISTANCE.create();
+@@ -179,6 +_,10 @@
+     }
+ 
+     private static int setCenter(CommandSourceStack source, Vec2 center) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setCenter(source, center))) {
++            return 0;
++        }
++
+         WorldBorder border = source.getLevel().getWorldBorder();
+         if (border.getCenterX() == center.x && border.getCenterZ() == center.y) {
+             throw ERROR_SAME_CENTER.create();
+@@ -197,6 +_,10 @@
+     }
+ 
+     private static int setSize(CommandSourceStack source, double distance, long ticks) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setSize(source, distance, ticks))) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         WorldBorder border = level.getWorldBorder();
+         double current = border.getSize();

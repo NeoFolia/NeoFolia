@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/BellBlock.java
++++ b/net/minecraft/world/level/block/BellBlock.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.Entity;
+@@ -97,7 +_,7 @@
+         if (properHit) {
+             boolean didRing = this.attemptToRing(player, level, blockPos, direction);
+             if (didRing && player != null) {
+-                player.awardStat(Stats.BELL_RING);
++                RegionizedWorldGuard.awardStat(player, Stats.BELL_RING);
+             }
+ 
+             return true;

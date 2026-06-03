@@ -1,0 +1,149 @@
+--- a/net/minecraft/world/entity/animal/turtle/Turtle.java
++++ b/net/minecraft/world/entity/animal/turtle/Turtle.java
+@@ -1,6 +_,5 @@
+ package net.minecraft.world.entity.animal.turtle;
+ 
+-import net.minecraft.advancements.CriteriaTriggers;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.network.syncher.EntityDataAccessor;
+ import net.minecraft.network.syncher.EntityDataSerializers;
+@@ -10,7 +_,6 @@
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+-import net.minecraft.stats.Stats;
+ import net.minecraft.tags.FluidTags;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+@@ -60,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Turtle extends Animal {
+@@ -230,7 +_,9 @@
+ 
+     @Override
+     public float getWalkTargetValue(BlockPos pos, LevelReader level) {
+-        if (!this.goingHome && level.getFluidState(pos).is(FluidTags.WATER)) {
++        if (!canReadBlock(level, pos)) {
++            return 0.0F;
++        } else if (!this.goingHome && level.getFluidState(pos).is(FluidTags.WATER)) {
+             return 10.0F;
+         } else {
+             return TurtleEggBlock.onSand(level, pos) ? 10.0F : level.getPathfindingCostFromLightLevels(pos);
+@@ -242,7 +_,7 @@
+         super.aiStep();
+         if (this.isAlive() && this.isLayingEgg() && this.layEggCounter >= 1 && this.layEggCounter % 5 == 0) {
+             BlockPos pos = this.blockPosition();
+-            if (TurtleEggBlock.onSand(this.level(), pos)) {
++            if (canReadBlock(this.level(), pos) && canReadBlock(this.level(), pos.below()) && TurtleEggBlock.onSand(this.level(), pos)) {
+                 this.level().levelEvent(2001, pos, Block.getId(this.level().getBlockState(pos.below())));
+                 this.gameEvent(GameEvent.ENTITY_ACTION);
+             }
+@@ -262,7 +_,8 @@
+         this.moveRelative(0.1F, input);
+         this.move(MoverType.SELF, this.getDeltaMovement());
+         this.setDeltaMovement(this.getDeltaMovement().scale(0.9));
+-        if (this.getTarget() == null && (!this.goingHome || !this.homePos.closerToCenterThan(this.position(), 20.0))) {
++        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.getTarget()) == null
++            && (!this.goingHome || !this.homePos.closerToCenterThan(this.position(), 20.0))) {
+             this.setDeltaMovement(this.getDeltaMovement().add(0.0, -0.005, 0.0));
+         }
+     }
+@@ -282,6 +_,10 @@
+         return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+     }
+ 
++    protected static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private static class TurtleBreedGoal extends BreedGoal {
+         private final Turtle turtle;
+ 
+@@ -297,14 +_,13 @@
+ 
+         @Override
+         protected void breed() {
+-            ServerPlayer loveCause = this.animal.getLoveCause();
+-            if (loveCause == null && this.partner.getLoveCause() != null) {
+-                loveCause = this.partner.getLoveCause();
++            ServerPlayer loveCause = this.animal.getLoveCauseAcrossRegions();
++            if (loveCause == null) {
++                loveCause = this.partner.getLoveCauseAcrossRegions();
+             }
+ 
+             if (loveCause != null) {
+-                loveCause.awardStat(Stats.ANIMALS_BRED);
+-                CriteriaTriggers.BRED_ANIMALS.trigger(loveCause, this.animal, this.partner, null);
++                Animal.triggerBredAnimals(loveCause, this.animal, this.partner, null);
+             }
+ 
+             this.turtle.setHasEgg(true);
+@@ -378,7 +_,10 @@
+                     nextPos = DefaultRandomPos.getPosTowards(this.turtle, 8, 7, homePosVec, (float) (Math.PI / 2));
+                 }
+ 
+-                if (nextPos != null && !closeToHome && !this.turtle.level().getBlockState(BlockPos.containing(nextPos)).is(Blocks.WATER)) {
++                if (nextPos != null
++                    && !closeToHome
++                    && (!canReadBlock(this.turtle.level(), BlockPos.containing(nextPos))
++                        || !this.turtle.level().getBlockState(BlockPos.containing(nextPos)).is(Blocks.WATER))) {
+                     nextPos = DefaultRandomPos.getPosTowards(this.turtle, 16, 5, homePosVec, (float) (Math.PI / 2));
+                 }
+ 
+@@ -404,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            return !this.turtle.isInWater() && this.tryTicks <= 1200 && this.isValidTarget(this.turtle.level(), this.blockPos);
++            return !this.turtle.isInWater() && this.tryTicks <= 1200 && this.canReadBlock(this.blockPos) && this.isValidTarget(this.turtle.level(), this.blockPos);
+         }
+ 
+         @Override
+@@ -423,7 +_,7 @@
+ 
+         @Override
+         protected boolean isValidTarget(LevelReader level, BlockPos pos) {
+-            return level.getBlockState(pos).is(Blocks.WATER);
++            return this.canReadBlock(pos) && level.getBlockState(pos).is(Blocks.WATER);
+         }
+     }
+ 
+@@ -454,8 +_,12 @@
+                     this.turtle.setLayingEgg(true);
+                 } else if (this.turtle.layEggCounter > this.adjustedTickDelay(200)) {
+                     Level level = this.turtle.level();
+-                    level.playSound(null, turtlePos, SoundEvents.TURTLE_LAY_EGG, SoundSource.BLOCKS, 0.3F, 0.9F + level.getRandom().nextFloat() * 0.2F);
++                    level.playSound(null, turtlePos, SoundEvents.TURTLE_LAY_EGG, SoundSource.BLOCKS, 0.3F, 0.9F + this.turtle.getRandom().nextFloat() * 0.2F);
+                     BlockPos eggPos = this.blockPos.above();
++                    if (!Turtle.canReadBlock(level, eggPos)) {
++                        return;
++                    }
++
+                     BlockState eggState = Blocks.TURTLE_EGG.defaultBlockState().setValue(TurtleEggBlock.EGGS, this.turtle.random.nextInt(4) + 1);
+                     level.setBlock(eggPos, eggState, 3);
+                     level.gameEvent(GameEvent.BLOCK_PLACE, eggPos, GameEvent.Context.of(this.turtle, eggState));
+@@ -472,7 +_,7 @@
+ 
+         @Override
+         protected boolean isValidTarget(LevelReader level, BlockPos pos) {
+-            return !level.isEmptyBlock(pos.above()) ? false : TurtleEggBlock.isSand(level, pos);
++            return this.canReadBlock(pos) && this.canReadBlock(pos.above()) && level.isEmptyBlock(pos.above()) && TurtleEggBlock.isSand(level, pos);
+         }
+     }
+ 
+@@ -555,8 +_,8 @@
+         @Override
+         public boolean isStableDestination(BlockPos pos) {
+             return this.mob instanceof Turtle turtle && turtle.travelPos != null
+-                ? this.level.getBlockState(pos).is(Blocks.WATER)
+-                : !this.level.getBlockState(pos.below()).isAir();
++                ? this.canReadBlock(pos) && this.level.getBlockState(pos).is(Blocks.WATER)
++                : this.canReadBlock(pos.below()) && !this.level.getBlockState(pos.below()).isAir();
+         }
+     }
+ 

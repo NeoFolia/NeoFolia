@@ -1,0 +1,57 @@
+--- a/net/minecraft/world/entity/SpawnPlacementTypes.java
++++ b/net/minecraft/world/entity/SpawnPlacementTypes.java
+@@ -2,10 +_,12 @@
+ 
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.tags.FluidTags;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.NaturalSpawner;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.pathfinder.PathComputationType;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface SpawnPlacementTypes {
+@@ -13,12 +_,17 @@
+     SpawnPlacementType IN_WATER = (level, blockPos, type) -> {
+         if (type != null && level.getWorldBorder().isWithinBounds(blockPos)) {
+             BlockPos above = blockPos.above();
++            if (!canReadBlock(level, blockPos) || !canReadBlock(level, above)) {
++                return false;
++            }
++
+             return level.getFluidState(blockPos).is(FluidTags.WATER) && !level.getBlockState(above).isRedstoneConductor(level, above);
+         } else {
+             return false;
+         }
+     };
+     SpawnPlacementType IN_LAVA = (level, blockPos, type) -> type != null && level.getWorldBorder().isWithinBounds(blockPos)
++        && canReadBlock(level, blockPos)
+         ? level.getFluidState(blockPos).is(FluidTags.LAVA)
+         : false;
+     SpawnPlacementType ON_GROUND = new SpawnPlacementType() {
+@@ -27,6 +_,10 @@
+             if (type != null && level.getWorldBorder().isWithinBounds(blockPos)) {
+                 BlockPos above = blockPos.above();
+                 BlockPos below = blockPos.below();
++                if (!canReadBlock(level, below) || !canReadBlock(level, blockPos) || !canReadBlock(level, above)) {
++                    return false;
++                }
++
+                 BlockState belowState = level.getBlockState(below);
+                 return !belowState.isValidSpawn(level, below, type)
+                     ? false
+@@ -44,7 +_,11 @@
+         @Override
+         public BlockPos adjustSpawnPosition(LevelReader level, BlockPos candidate) {
+             BlockPos below = candidate.below();
+-            return level.getBlockState(below).isPathfindable(PathComputationType.LAND) ? below : candidate;
++            return canReadBlock(level, below) && level.getBlockState(below).isPathfindable(PathComputationType.LAND) ? below : candidate;
+         }
+     };
++
++    private static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
+ }

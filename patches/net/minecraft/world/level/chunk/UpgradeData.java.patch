@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/level/chunk/UpgradeData.java
++++ b/net/minecraft/world/level/chunk/UpgradeData.java
+@@ -18,6 +_,8 @@
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.nbt.CompoundTag;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.EmptyBlockGetter;
+ import net.minecraft.world.level.Level;
+@@ -36,6 +_,7 @@
+ import net.minecraft.world.level.material.Fluid;
+ import net.minecraft.world.level.material.Fluids;
+ import net.minecraft.world.ticks.SavedTick;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.slf4j.Logger;
+ 
+ public class UpgradeData {
+@@ -315,7 +_,7 @@
+         DEFAULT {
+             @Override
+             public BlockState updateShape(BlockState state, Direction direction, BlockState neighbour, LevelAccessor level, BlockPos pos, BlockPos neighbourPos) {
+-                return state.updateShape(level, level, pos, direction, neighbourPos, level.getBlockState(neighbourPos), level.getRandom());
++                return state.updateShape(level, level, pos, direction, neighbourPos, level.getBlockState(neighbourPos), upgradeRandom(level));
+             }
+         },
+         CHEST(Blocks.CHEST, Blocks.TRAPPED_CHEST) {
+@@ -359,7 +_,7 @@
+ 
+             @Override
+             public BlockState updateShape(BlockState state, Direction direction, BlockState neighbour, LevelAccessor level, BlockPos pos, BlockPos neighbourPos) {
+-                BlockState newState = state.updateShape(level, level, pos, direction, neighbourPos, level.getBlockState(neighbourPos), level.getRandom());
++                BlockState newState = state.updateShape(level, level, pos, direction, neighbourPos, level.getBlockState(neighbourPos), upgradeRandom(level));
+                 if (state != newState) {
+                     int distance = newState.getValue(BlockStateProperties.DISTANCE);
+                     List<ObjectSet<BlockPos>> queue = this.queue.get();
+@@ -438,5 +_,9 @@
+                 UpgradeData.CHUNKY_FIXERS.add(this);
+             }
+         }
++    }
++
++    private static RandomSource upgradeRandom(LevelAccessor level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ }

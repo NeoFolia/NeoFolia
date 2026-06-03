@@ -1,0 +1,136 @@
+--- a/net/minecraft/world/entity/animal/panda/Panda.java
++++ b/net/minecraft/world/entity/animal/panda/Panda.java
+@@ -69,7 +_,9 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Panda extends Animal {
+@@ -344,7 +_,7 @@
+             }
+         }
+ 
+-        LivingEntity target = this.getTarget();
++        LivingEntity target = this.regionSafeTarget(this.getTarget());
+         if (target == null) {
+             this.gotBamboo = false;
+             this.didBite = false;
+@@ -515,9 +_,12 @@
+         );
+         this.playSound(SoundEvents.PANDA_SNEEZE, 1.0F, 1.0F);
+ 
+-        for (Panda panda : level.getEntitiesOfClass(Panda.class, this.getBoundingBox().inflate(10.0))) {
+-            if (!panda.isBaby() && panda.onGround() && !panda.isInWater() && panda.canPerformAction()) {
+-                panda.jumpFromGround();
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, this.getBoundingBox().inflate(10.0));
++        if (searchBox != null) {
++            for (Panda panda : level.getEntitiesOfClass(Panda.class, searchBox)) {
++                if (!panda.isBaby() && panda.onGround() && !panda.isInWater() && panda.canPerformAction()) {
++                    panda.jumpFromGround();
++                }
+             }
+         }
+ 
+@@ -544,11 +_,19 @@
+         return super.hurtServer(level, source, damage);
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         this.setMainGene(Panda.Gene.getRandom(random));
+         this.setHiddenGene(Panda.Gene.getRandom(random));
+         this.setAttributes();
+@@ -616,7 +_,7 @@
+             this.setOnBack(false);
+             return InteractionResult.SUCCESS;
+         } else if (this.isFood(interactionItemStack)) {
+-            if (this.getTarget() != null) {
++            if (this.regionSafeTarget(this.getTarget()) != null) {
+                 this.gotBamboo = true;
+             }
+ 
+@@ -827,7 +_,7 @@
+                     for (int x = 0; x <= r; x = x > 0 ? -x : 1 - x) {
+                         for (int z = x < r && x > -r ? r : 0; z <= r; z = z > 0 ? -z : 1 - z) {
+                             pos.setWithOffset(pandaPos, x, yOff, z);
+-                            if (this.level.getBlockState(pos).is(Blocks.BAMBOO)) {
++                            if (this.panda.canReadBlock(pos) && this.level.getBlockState(pos).is(Blocks.BAMBOO)) {
+                                 return true;
+                             }
+                         }
+@@ -928,12 +_,11 @@
+                     if (this.lookAtType == Player.class) {
+                         this.lookAt = level.getNearestPlayer(this.lookAtContext, this.mob, this.mob.getX(), this.mob.getEyeY(), this.mob.getZ());
+                     } else {
++                        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(
++                            this.mob.level(), this.mob.getBoundingBox().inflate(this.lookDistance, 3.0, this.lookDistance)
++                        );
+                         this.lookAt = level.getNearestEntity(
+-                            this.mob
+-                                .level()
+-                                .getEntitiesOfClass(
+-                                    this.lookAtType, this.mob.getBoundingBox().inflate(this.lookDistance, 3.0, this.lookDistance), entity -> true
+-                                ),
++                            searchBox == null ? List.of() : this.mob.level().getEntitiesOfClass(this.lookAtType, searchBox, entity -> true),
+                             this.lookAtContext,
+                             this.mob,
+                             this.mob.getX(),
+@@ -1009,7 +_,8 @@
+                     float zDir = Mth.cos(angle);
+                     int xStep = Math.abs(xDir) > 0.5 ? Mth.sign(xDir) : 0;
+                     int zStep = Math.abs(zDir) > 0.5 ? Mth.sign(zDir) : 0;
+-                    if (this.panda.level().getBlockState(this.panda.blockPosition().offset(xStep, -1, zStep)).isAir()) {
++                    BlockPos landingSupport = this.panda.blockPosition().offset(xStep, -1, zStep);
++                    if (this.panda.canReadBlock(landingSupport) && this.panda.level().getBlockState(landingSupport).isAir()) {
+                         return true;
+                     } else {
+                         return this.panda.isPlayful() && this.panda.random.nextInt(reducedTickDelay(60)) == 1
+@@ -1058,9 +_,7 @@
+             } else {
+                 return !Panda.this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()
+                     ? true
+-                    : !Panda.this.level()
+-                        .getEntitiesOfClass(ItemEntity.class, Panda.this.getBoundingBox().inflate(6.0, 6.0, 6.0), Panda::canPickUpAndEat)
+-                        .isEmpty();
++                    : !this.nearbyPickableItems(6.0).isEmpty();
+             }
+         }
+ 
+@@ -1081,8 +_,7 @@
+         @Override
+         public void start() {
+             if (Panda.this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
+-                List<ItemEntity> items = Panda.this.level()
+-                    .getEntitiesOfClass(ItemEntity.class, Panda.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Panda::canPickUpAndEat);
++                List<ItemEntity> items = this.nearbyPickableItems(8.0);
+                 if (!items.isEmpty()) {
+                     Panda.this.getNavigation().moveTo(items.getFirst(), 1.2F);
+                 }
+@@ -1091,6 +_,11 @@
+             }
+ 
+             this.cooldown = 0;
++        }
++
++        private List<ItemEntity> nearbyPickableItems(double range) {
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(Panda.this.level(), Panda.this.getBoundingBox().inflate(range, range, range));
++            return searchBox == null ? List.of() : Panda.this.level().getEntitiesOfClass(ItemEntity.class, searchBox, Panda::canPickUpAndEat);
+         }
+ 
+         @Override

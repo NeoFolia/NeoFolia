@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/saveddata/maps/MapIndex.java
++++ b/net/minecraft/world/level/saveddata/maps/MapIndex.java
+@@ -25,7 +_,7 @@
+         this.lastMapId = lastMapId;
+     }
+ 
+-    public MapId getNextMapId() {
++    public synchronized MapId getNextMapId() {
+         MapId id = new MapId(++this.lastMapId);
+         this.setDirty();
+         return id;

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/block/CoralFanBlock.java
++++ b/net/minecraft/world/level/block/CoralFanBlock.java
+@@ -31,7 +_,7 @@
+ 
+     @Override
+     protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
+-        this.tryScheduleDieTick(state, level, level, level.getRandom(), pos);
++        this.tryScheduleDieTick(state, level, level, coralRandom(level), pos);
+     }
+ 
+     @Override

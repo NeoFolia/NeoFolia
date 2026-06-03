@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/StopBeingAngryIfTargetDead.java
++++ b/net/minecraft/world/entity/ai/behavior/StopBeingAngryIfTargetDead.java
+@@ -8,7 +_,7 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ 
+ public class StopBeingAngryIfTargetDead {
+-    public static BehaviorControl<LivingEntity> create() {
++    public static synchronized BehaviorControl<LivingEntity> create() {
+         return BehaviorBuilder.create(
+             i -> i.group(i.present(MemoryModuleType.ANGRY_AT))
+                 .apply(

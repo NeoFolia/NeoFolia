@@ -1,0 +1,29 @@
+--- a/net/minecraft/server/ServerFunctionLibrary.java
++++ b/net/minecraft/server/ServerFunctionLibrary.java
+@@ -49,7 +_,7 @@
+     }
+ 
+     public Map<Identifier, CommandFunction<CommandSourceStack>> getFunctions() {
+-        return this.functions;
++        return Map.copyOf(this.functions);
+     }
+ 
+     public List<CommandFunction<CommandSourceStack>> getTag(Identifier tag) {
+@@ -57,7 +_,7 @@
+     }
+ 
+     public Iterable<Identifier> getAvailableTags() {
+-        return this.tags.keySet();
++        return List.copyOf(this.tags.keySet());
+     }
+ 
+     public ServerFunctionLibrary(PermissionSet functionCompilationPermissions, CommandDispatcher<CommandSourceStack> dispatcher) {
+@@ -111,7 +_,7 @@
+                         return null;
+                     }).join());
+                     this.functions = newFunctions.build();
+-                    this.tags = this.tagsLoader.build((Map<Identifier, List<TagLoader.EntryWithSource>>)data.getFirst());
++                    this.tags = Map.copyOf(this.tagsLoader.build((Map<Identifier, List<TagLoader.EntryWithSource>>)data.getFirst()));
+                 },
+                 reloadExecutor
+             );

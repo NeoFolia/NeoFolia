@@ -1,0 +1,45 @@
+--- a/net/minecraft/world/level/block/TrapDoorBlock.java
++++ b/net/minecraft/world/level/block/TrapDoorBlock.java
+@@ -35,6 +_,7 @@
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class TrapDoorBlock extends HorizontalDirectionalBlock implements SimpleWaterloggedBlock {
+@@ -117,11 +_,15 @@
+ 
+     protected void playSound(@Nullable Player player, Level level, BlockPos pos, boolean opening) {
+         level.playSound(
+-            player, pos, opening ? this.type.trapdoorOpen() : this.type.trapdoorClose(), SoundSource.BLOCKS, 1.0F, level.getRandom().nextFloat() * 0.1F + 0.9F
++            player, pos, opening ? this.type.trapdoorOpen() : this.type.trapdoorClose(), SoundSource.BLOCKS, 1.0F, trapdoorRandom(level).nextFloat() * 0.1F + 0.9F
+         );
+         level.gameEvent(player, opening ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE, pos);
+     }
+ 
++    private static RandomSource trapdoorRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
++    }
++
+     @Override
+     protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston) {
+         if (!level.isClientSide()) {
+@@ -185,6 +_,17 @@
+         }
+ 
+         return super.updateShape(state, level, ticks, pos, directionToNeighbour, neighbourPos, neighbourState, random);
++    }
++
++    // Neo: Allows Trapdoors to be climbable if any ladder, even modded ladders, is below Trapdoor
++    @Override
++    public boolean isLadder(BlockState state, net.minecraft.world.level.LevelReader world, BlockPos pos, net.minecraft.world.entity.LivingEntity entity) {
++        if (state.getValue(OPEN)) {
++            BlockPos downPos = pos.below();
++            BlockState down = world.getBlockState(downPos);
++            return down.getBlock().makesOpenTrapdoorAboveClimbable(down, world, downPos, state);
++        }
++        return false;
+     }
+ 
+     protected BlockSetType getType() {

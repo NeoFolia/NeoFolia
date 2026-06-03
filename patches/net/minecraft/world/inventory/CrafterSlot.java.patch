@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/inventory/CrafterSlot.java
++++ b/net/minecraft/world/inventory/CrafterSlot.java
+@@ -12,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean mayPlace(ItemStack itemStack) {
++    public synchronized boolean mayPlace(ItemStack itemStack) {
+         return !this.menu.isSlotDisabled(this.index) && super.mayPlace(itemStack);
+     }
+ 
+     @Override
+-    public void setChanged() {
++    public synchronized void setChanged() {
+         super.setChanged();
+         this.menu.slotsChanged(this.container);
+     }

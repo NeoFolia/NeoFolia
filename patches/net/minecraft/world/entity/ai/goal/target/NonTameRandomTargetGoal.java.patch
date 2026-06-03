@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/ai/goal/target/NonTameRandomTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/NonTameRandomTargetGoal.java
+@@ -14,12 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return !this.tamableMob.isTame() && super.canUse();
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.targetConditions != null ? this.targetConditions.test(getServerLevel(this.mob), this.mob, this.target) : super.canContinueToUse();
++    public synchronized boolean canContinueToUse() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        return target != null ? this.targetConditions.test(getServerLevel(this.mob), this.mob, target) : super.canContinueToUse();
+     }
+ }

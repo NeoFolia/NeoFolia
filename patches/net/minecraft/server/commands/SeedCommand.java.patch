@@ -1,0 +1,30 @@
+--- a/net/minecraft/server/commands/SeedCommand.java
++++ b/net/minecraft/server/commands/SeedCommand.java
+@@ -10,11 +_,23 @@
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, boolean checkPermissions) {
+         dispatcher.register(
+             Commands.literal("seed").requires(Commands.hasPermission(checkPermissions ? Commands.LEVEL_GAMEMASTERS : Commands.LEVEL_ALL)).executes(c -> {
+-                long seed = c.getSource().getLevel().getSeed();
+-                Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
+-                c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
+-                return (int)seed;
++                if (RegionizedCommandHelper.scheduleGlobalIfRegionized(c.getSource(), () -> getSeed(c.getSource()))) {
++                    return 0;
++                }
++
++                return getSeed(c.getSource());
+             })
+         );
++    }
++
++    private static int getSeed(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> getSeed(source))) {
++            return 0;
++        }
++
++        long seed = source.getLevel().getSeed();
++        Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
++        source.sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
++        return (int)seed;
+     }
+ }

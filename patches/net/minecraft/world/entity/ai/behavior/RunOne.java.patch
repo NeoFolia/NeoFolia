@@ -1,0 +1,15 @@
+--- a/net/minecraft/world/entity/ai/behavior/RunOne.java
++++ b/net/minecraft/world/entity/ai/behavior/RunOne.java
+@@ -11,10 +_,10 @@
+ 
+ public class RunOne<E extends LivingEntity> extends GateBehavior<E> {
+     public RunOne(List<Pair<? extends BehaviorControl<? super E>, Integer>> weightedBehaviors) {
+-        this(ImmutableMap.of(), weightedBehaviors);
++        this(ImmutableMap.of(), List.copyOf(weightedBehaviors));
+     }
+ 
+     public RunOne(Map<MemoryModuleType<?>, MemoryStatus> entryCondition, List<Pair<? extends BehaviorControl<? super E>, Integer>> weightedBehaviors) {
+-        super(entryCondition, ImmutableSet.of(), GateBehavior.OrderPolicy.SHUFFLED, GateBehavior.RunningPolicy.RUN_ONE, weightedBehaviors);
++        super(Map.copyOf(entryCondition), ImmutableSet.of(), GateBehavior.OrderPolicy.SHUFFLED, GateBehavior.RunningPolicy.RUN_ONE, List.copyOf(weightedBehaviors));
+     }
+ }

@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/jsonrpc/methods/ServerStateService.java
++++ b/net/minecraft/server/jsonrpc/methods/ServerStateService.java
+@@ -49,7 +_,7 @@
+                     }
+ 
+                     if (player != null) {
+-                        player.sendSystemMessage(component, systemMessage.overlay());
++                        minecraftApi.serverStateService().sendSystemMessage(component, systemMessage.overlay(), List.of(player), clientInfo);
+                     }
+                 }
+             } else {

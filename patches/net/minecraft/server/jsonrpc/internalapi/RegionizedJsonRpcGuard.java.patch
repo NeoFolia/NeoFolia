@@ -1,0 +1,105 @@
+--- /dev/null
++++ b/net/minecraft/server/jsonrpc/internalapi/RegionizedJsonRpcGuard.java
+@@ -1,0 +_,102 @@
++package net.minecraft.server.jsonrpc.internalapi;
++
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
++import java.util.function.Supplier;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerPlayer;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++
++final class RegionizedJsonRpcGuard {
++    private RegionizedJsonRpcGuard() {
++    }
++
++    static boolean scheduleGlobalIfRegionized(MinecraftServer server, Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        return server.regionizedTaskDispatcher().tryExecuteGlobal(task);
++    }
++
++    static boolean executeOnServerThreadIfNeeded(MinecraftServer server, Runnable task) {
++        if (RegionizedTickContext.isRegionThread()) {
++            return server.regionizedTaskDispatcher().tryExecuteGlobal(task);
++        }
++
++        if (server.isSameThread()) {
++            return false;
++        }
++
++        if (server.regionizedTaskDispatcher().isRunning()) {
++            waitForJsonRpcFuture("JSON-RPC server-thread task", server.regionizedTaskDispatcher().submitGlobal(task));
++        } else {
++            server.executeBlocking(task);
++        }
++
++        return true;
++    }
++
++    static <T> T callOnServerThread(MinecraftServer server, Supplier<T> supplier) {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw new IllegalStateException("Cannot wait for JSON-RPC server-thread result from a region worker");
++        }
++
++        if (server.isSameThread()) {
++            return supplier.get();
++        }
++
++        if (server.regionizedTaskDispatcher().isRunning()) {
++            return waitForJsonRpcFuture("JSON-RPC server-thread result", server.regionizedTaskDispatcher().submitGlobal(supplier));
++        }
++
++        return waitForJsonRpcFuture("JSON-RPC server-thread result", server.submit(supplier));
++    }
++
++    static void executeOnPlayerRegionIfNeeded(MinecraftServer server, ServerPlayer player, Runnable task) {
++        if (!scheduleOnPlayerRegionIfNeeded(server, player, task)) {
++            task.run();
++        }
++    }
++
++    static <T> T callOnPlayerRegionIfNeeded(MinecraftServer server, ServerPlayer player, Supplier<T> supplier) {
++        if (!server.regionizedTaskDispatcher().isRunning()) {
++            return supplier.get();
++        }
++
++        return RegionizedWorldGuard.callOnPlayerRegionAndWait(player, "JSON-RPC player result", supplier);
++    }
++
++    static boolean scheduleOnPlayerRegionIfNeeded(MinecraftServer server, ServerPlayer player, Runnable task) {
++        if (!server.regionizedTaskDispatcher().isRunning()) {
++            return false;
++        }
++
++        RegionKey region = RegionizedWorldGuard.regionFor(player.level(), player.blockPosition());
++        if (RegionizedTickContext.currentRegion().map(region::equals).orElse(false)) {
++            return false;
++        }
++
++        RegionizedWorldGuard.executeOnPlayerRegion(player, task);
++        return true;
++    }
++
++    private static <T> T waitForJsonRpcFuture(String reason, CompletableFuture<T> future) {
++        int timeoutSeconds = RegionizedServerSettings.regionTaskTimeoutSeconds();
++        try {
++            return timeoutSeconds <= 0 ? future.get() : future.get(timeoutSeconds, TimeUnit.SECONDS);
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for " + reason, ex);
++        } catch (TimeoutException ex) {
++            throw new IllegalStateException("Timed out waiting for " + reason, ex);
++        } catch (ExecutionException ex) {
++            throw new IllegalStateException("Failed while waiting for " + reason, ex.getCause());
++        }
++    }
++}

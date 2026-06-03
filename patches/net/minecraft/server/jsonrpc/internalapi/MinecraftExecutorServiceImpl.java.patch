@@ -1,0 +1,59 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
+@@ -3,6 +_,7 @@
+ import java.util.concurrent.CompletableFuture;
+ import java.util.function.Supplier;
+ import net.minecraft.server.dedicated.DedicatedServer;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class MinecraftExecutorServiceImpl implements MinecraftExecutorService {
+     private final DedicatedServer server;
+@@ -13,11 +_,48 @@
+ 
+     @Override
+     public <V> CompletableFuture<V> submit(Supplier<V> supplier) {
++        if (RegionizedTickContext.isRegionThread()) {
++            return this.server.regionizedTaskDispatcher().submitGlobal(supplier);
++        }
++
++        if (this.server.isSameThread()) {
++            try {
++                return CompletableFuture.completedFuture(supplier.get());
++            } catch (Throwable throwable) {
++                CompletableFuture<V> future = new CompletableFuture<>();
++                future.completeExceptionally(throwable);
++                return future;
++            }
++        }
++
++        if (this.server.regionizedTaskDispatcher().isRunning()) {
++            return this.server.regionizedTaskDispatcher().submitGlobal(supplier);
++        }
++
+         return this.server.submit(supplier);
+     }
+ 
+     @Override
+     public CompletableFuture<Void> submit(Runnable runnable) {
++        if (RegionizedTickContext.isRegionThread()) {
++            return this.server.regionizedTaskDispatcher().submitGlobal(runnable);
++        }
++
++        if (this.server.isSameThread()) {
++            try {
++                runnable.run();
++                return CompletableFuture.completedFuture(null);
++            } catch (Throwable throwable) {
++                CompletableFuture<Void> future = new CompletableFuture<>();
++                future.completeExceptionally(throwable);
++                return future;
++            }
++        }
++
++        if (this.server.regionizedTaskDispatcher().isRunning()) {
++            return this.server.regionizedTaskDispatcher().submitGlobal(runnable);
++        }
++
+         return this.server.submit(runnable);
+     }
+ }

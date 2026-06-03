@@ -1,0 +1,68 @@
+--- a/net/minecraft/world/entity/ai/memory/MemorySlot.java
++++ b/net/minecraft/world/entity/ai/memory/MemorySlot.java
+@@ -13,7 +_,7 @@
+         this.timeToLive = timeToLive;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.hasValue() && this.canExpire()) {
+             if (this.hasExpired()) {
+                 this.clear();
+@@ -27,46 +_,46 @@
+         return new MemorySlot<>(null, Long.MAX_VALUE);
+     }
+ 
+-    public void set(T value, long timeToLive) {
++    public synchronized void set(T value, long timeToLive) {
+         this.value = value;
+         this.timeToLive = timeToLive;
+     }
+ 
+-    public void set(T value) {
++    public synchronized void set(T value) {
+         this.set(value, Long.MAX_VALUE);
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.value = null;
+         this.timeToLive = Long.MAX_VALUE;
+     }
+ 
+-    public boolean hasValue() {
++    public synchronized boolean hasValue() {
+         return this.value != null;
+     }
+ 
+-    public @Nullable T value() {
++    public synchronized @Nullable T value() {
+         return this.value;
+     }
+ 
+-    public boolean canExpire() {
++    public synchronized boolean canExpire() {
+         return this.timeToLive != Long.MAX_VALUE;
+     }
+ 
+-    public boolean hasExpired() {
++    public synchronized boolean hasExpired() {
+         return this.timeToLive <= 0L;
+     }
+ 
+-    public long timeToLive() {
++    public synchronized long timeToLive() {
+         return this.timeToLive;
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return this.value == null ? "<empty>" : this.value + (this.canExpire() ? " (ttl: " + this.timeToLive + ")" : "");
+     }
+ 
+-    public void visit(MemoryModuleType<T> type, Brain.Visitor visitor) {
++    public synchronized void visit(MemoryModuleType<T> type, Brain.Visitor visitor) {
+         if (this.value != null) {
+             if (this.canExpire()) {
+                 visitor.accept(type, this.value, this.timeToLive);

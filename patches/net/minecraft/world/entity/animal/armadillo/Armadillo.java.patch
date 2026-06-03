@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/entity/animal/armadillo/Armadillo.java
++++ b/net/minecraft/world/entity/animal/armadillo/Armadillo.java
+@@ -50,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Armadillo extends Animal {
+@@ -230,7 +_,8 @@
+     public static boolean checkArmadilloSpawnRules(
+         EntityType<Armadillo> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return level.getBlockState(pos.below()).is(BlockTags.ARMADILLO_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.ARMADILLO_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
+     }
+ 
+     public boolean isScaredBy(LivingEntity livingEntity) {
+@@ -238,7 +_,7 @@
+             return false;
+         } else if (livingEntity.is(EntityTypeTags.UNDEAD)) {
+             return true;
+-        } else if (this.getLastHurtByMob() == livingEntity) {
++        } else if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.getLastHurtByMob()) == livingEntity) {
+             return true;
+         } else if (livingEntity instanceof Player player) {
+             return player.isSpectator() ? false : player.isSprinting() || player.isPassenger();
+@@ -292,7 +_,8 @@
+     protected void actuallyHurt(ServerLevel level, DamageSource source, float dmg) {
+         super.actuallyHurt(level, source, dmg);
+         if (!this.isNoAi() && !this.isDeadOrDying()) {
+-            if (source.getEntity() instanceof LivingEntity) {
++            Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++            if (sourceEntity instanceof LivingEntity) {
+                 this.getBrain().setMemoryWithExpiry(MemoryModuleType.DANGER_DETECTED_RECENTLY, true, 80L);
+                 if (this.canStayRolledUp()) {
+                     this.rollUp();
+@@ -306,7 +_,7 @@
+     @Override
+     public InteractionResult mobInteract(Player player, InteractionHand hand) {
+         ItemStack itemStack = player.getItemInHand(hand);
+-        if (itemStack.is(Items.BRUSH) && this.brushOffScute(player, itemStack)) {
++        if (itemStack.canPerformAction(net.neoforged.neoforge.common.ItemAbilities.BRUSH_BRUSH) && this.brushOffScute(player, itemStack)) {
+             itemStack.hurtAndBreak(16, player, hand.asEquipmentSlot());
+             return InteractionResult.SUCCESS;
+         } else {

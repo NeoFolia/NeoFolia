@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/entity/projectile/ThrowableProjectile.java
++++ b/net/minecraft/world/entity/projectile/ThrowableProjectile.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class ThrowableProjectile extends Projectile {
+     private static final float MIN_CAMERA_DISTANCE_SQUARED = 12.25F;
+@@ -49,7 +_,7 @@
+         this.applyInertia();
+         HitResult result = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+         Vec3 newPosition;
+-        if (result.getType() != HitResult.Type.MISS) {
++        if (result.getType() != HitResult.Type.MISS && !net.neoforged.neoforge.event.EventHooks.onProjectileImpact(this, result)) {
+             newPosition = result.getLocation();
+         } else {
+             newPosition = this.position().add(this.getDeltaMovement());
+@@ -94,6 +_,10 @@
+     private void handleFirstTickBubbleColumn() {
+         if (this.firstTick) {
+             for (BlockPos pos : BlockPos.betweenClosed(this.getBoundingBox())) {
++                if (!RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4)) {
++                    continue;
++                }
++
+                 BlockState state = this.level().getBlockState(pos);
+                 if (state.is(Blocks.BUBBLE_COLUMN)) {
+                     state.entityInside(this.level(), pos, this, InsideBlockEffectApplier.NOOP, true);

@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/level/block/entity/vault/VaultClientData.java
++++ b/net/minecraft/world/level/block/entity/vault/VaultClientData.java
+@@ -10,15 +_,15 @@
+     VaultClientData() {
+     }
+ 
+-    public float currentSpin() {
++    public synchronized float currentSpin() {
+         return this.currentSpin;
+     }
+ 
+-    public float previousSpin() {
++    public synchronized float previousSpin() {
+         return this.previousSpin;
+     }
+ 
+-    void updateDisplayItemSpin() {
++    synchronized void updateDisplayItemSpin() {
+         this.previousSpin = this.currentSpin;
+         this.currentSpin = Mth.wrapDegrees(this.currentSpin + 10.0F);
+     }

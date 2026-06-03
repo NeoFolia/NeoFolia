@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/BarrelBlock.java
++++ b/net/minecraft/world/level/block/BarrelBlock.java
+@@ -5,6 +_,7 @@
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.Containers;
+ import net.minecraft.world.InteractionResult;
+@@ -43,7 +_,7 @@
+     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+         if (level instanceof ServerLevel serverLevel && level.getBlockEntity(pos) instanceof BarrelBlockEntity barrelBlockEntity) {
+             player.openMenu(barrelBlockEntity);
+-            player.awardStat(Stats.OPEN_BARREL);
++            RegionizedWorldGuard.awardStat(player, Stats.OPEN_BARREL);
+             PiglinAi.angerNearbyPiglins(serverLevel, player, true);
+         }
+ 

@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/level/block/TargetBlock.java
++++ b/net/minecraft/world/level/block/TargetBlock.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.world.level.block;
+ 
+ import com.mojang.serialization.MapCodec;
++import java.util.UUID;
+ import net.minecraft.advancements.CriteriaTriggers;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+@@ -22,6 +_,8 @@
+ import net.minecraft.world.level.block.state.properties.IntegerProperty;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class TargetBlock extends Block {
+     public static final MapCodec<TargetBlock> CODEC = simpleCodec(TargetBlock::new);
+@@ -42,10 +_,31 @@
+     @Override
+     protected void onProjectileHit(Level level, BlockState state, BlockHitResult hitResult, Projectile projectile) {
+         int outputStrength = updateRedstoneOutput(level, state, hitResult, projectile);
++        if (level instanceof ServerLevel serverLevel) {
++            ServerPlayer playerOwner = getProjectilePlayerOwner(serverLevel, projectile);
++            if (playerOwner != null) {
++                Vec3 hitLocation = hitResult.getLocation();
++                if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(serverLevel, "Target block hit award", () -> awardTargetHit(playerOwner, projectile, hitLocation, outputStrength))) {
++                    awardTargetHit(playerOwner, projectile, hitLocation, outputStrength);
++                }
++            }
++        }
++    }
++
++    private static @Nullable ServerPlayer getProjectilePlayerOwner(ServerLevel level, Projectile projectile) {
+         if (projectile.getOwner() instanceof ServerPlayer playerOwner) {
+-            playerOwner.awardStat(Stats.TARGET_HIT);
+-            CriteriaTriggers.TARGET_BLOCK_HIT.trigger(playerOwner, projectile, hitResult.getLocation(), outputStrength);
++            return playerOwner;
+         }
++
++        UUID ownerId = projectile.getOwnerUUID();
++        return ownerId != null ? level.getServer().getPlayerList().getAnyRegionPlayer(ownerId) : null;
++    }
++
++    private static void awardTargetHit(ServerPlayer playerOwner, Projectile projectile, Vec3 hitLocation, int outputStrength) {
++        RegionizedWorldGuard.awardStat(playerOwner, Stats.TARGET_HIT);
++        RegionizedWorldGuard.executeOnPlayerRegion(
++            playerOwner, () -> CriteriaTriggers.TARGET_BLOCK_HIT.trigger(playerOwner, projectile, hitLocation, outputStrength)
++        );
+     }
+ 
+     private static int updateRedstoneOutput(LevelAccessor level, BlockState state, BlockHitResult hitResult, Entity entity) {

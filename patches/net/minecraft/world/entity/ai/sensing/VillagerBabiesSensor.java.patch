@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/entity/ai/sensing/VillagerBabiesSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/VillagerBabiesSensor.java
+@@ -12,24 +_,24 @@
+ 
+ public class VillagerBabiesSensor extends Sensor<LivingEntity> {
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return ImmutableSet.of(MemoryModuleType.VISIBLE_VILLAGER_BABIES);
+     }
+ 
+     @Override
+-    protected void doTick(ServerLevel level, LivingEntity body) {
++    protected synchronized void doTick(ServerLevel level, LivingEntity body) {
+         body.getBrain().setMemory(MemoryModuleType.VISIBLE_VILLAGER_BABIES, this.getNearestVillagerBabies(body));
+     }
+ 
+-    private List<LivingEntity> getNearestVillagerBabies(LivingEntity myBody) {
++    private synchronized List<LivingEntity> getNearestVillagerBabies(LivingEntity myBody) {
+         return ImmutableList.copyOf(this.getVisibleEntities(myBody).findAll(this::isVillagerBaby));
+     }
+ 
+-    private boolean isVillagerBaby(LivingEntity entity) {
++    private synchronized boolean isVillagerBaby(LivingEntity entity) {
+         return entity.is(EntityType.VILLAGER) && entity.isBaby();
+     }
+ 
+-    private NearestVisibleLivingEntities getVisibleEntities(LivingEntity myBody) {
++    private synchronized NearestVisibleLivingEntities getVisibleEntities(LivingEntity myBody) {
+         return myBody.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES).orElse(NearestVisibleLivingEntities.empty());
+     }
+ }

@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/entity/ai/behavior/StrollAroundPoi.java
++++ b/net/minecraft/world/entity/ai/behavior/StrollAroundPoi.java
+@@ -15,20 +_,22 @@
+     private static final int STROLL_MAX_XZ_DIST = 8;
+     private static final int STROLL_MAX_Y_DIST = 6;
+ 
+-    public static OneShot<PathfinderMob> create(MemoryModuleType<GlobalPos> memoryType, float speedModifier, int maxDistanceFromPoi) {
++    public static synchronized OneShot<PathfinderMob> create(MemoryModuleType<GlobalPos> memoryType, float speedModifier, int maxDistanceFromPoi) {
+         MutableLong nextOkStartTime = new MutableLong(0L);
+         return BehaviorBuilder.create(
+             i -> i.group(i.registered(MemoryModuleType.WALK_TARGET), i.present(memoryType)).apply(i, (walkTarget, memory) -> (level, body, timestamp) -> {
+-                GlobalPos pos = i.get(memory);
+-                if (level.dimension() != pos.dimension() || !pos.pos().closerToCenterThan(body.position(), maxDistanceFromPoi)) {
+-                    return false;
+-                } else if (timestamp <= nextOkStartTime.longValue()) {
+-                    return true;
+-                } else {
+-                    Optional<Vec3> landPos = Optional.ofNullable(LandRandomPos.getPos(body, 8, 6));
+-                    walkTarget.setOrErase(landPos.map(p -> new WalkTarget(p, speedModifier, 1)));
+-                    nextOkStartTime.setValue(timestamp + 180L);
+-                    return true;
++                synchronized (nextOkStartTime) {
++                    GlobalPos pos = i.get(memory);
++                    if (level.dimension() != pos.dimension() || !pos.pos().closerToCenterThan(body.position(), maxDistanceFromPoi)) {
++                        return false;
++                    } else if (timestamp <= nextOkStartTime.longValue()) {
++                        return true;
++                    } else {
++                        Optional<Vec3> landPos = Optional.ofNullable(LandRandomPos.getPos(body, 8, 6));
++                        walkTarget.setOrErase(landPos.map(p -> new WalkTarget(p, speedModifier, 1)));
++                        nextOkStartTime.setValue(timestamp + 180L);
++                        return true;
++                    }
+                 }
+             })
+         );

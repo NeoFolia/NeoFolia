@@ -1,0 +1,86 @@
+--- a/net/minecraft/world/item/DyeColor.java
++++ b/net/minecraft/world/item/DyeColor.java
+@@ -17,12 +_,14 @@
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.ARGB;
+ import net.minecraft.util.ByIdMap;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+ import net.minecraft.world.item.crafting.CraftingInput;
+ import net.minecraft.world.item.crafting.CraftingRecipe;
+ import net.minecraft.world.item.crafting.RecipeHolder;
+ import net.minecraft.world.item.crafting.RecipeType;
+ import net.minecraft.world.level.material.MapColor;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -58,6 +_,8 @@
+     private final MapColor mapColor;
+     private final int textureDiffuseColor;
+     private final int fireworkColor;
++    private final net.minecraft.tags.TagKey<Item> dyesTag;
++    private final net.minecraft.tags.TagKey<Item> dyedTag;
+     private final int textColor;
+ 
+     private DyeColor(int id, String name, int textureDiffuseColor, MapColor mapColor, int fireworkColor, int textColor) {
+@@ -65,6 +_,8 @@
+         this.name = name;
+         this.mapColor = mapColor;
+         this.textColor = ARGB.opaque(textColor);
++        this.dyesTag = net.minecraft.tags.ItemTags.create(net.minecraft.resources.Identifier.fromNamespaceAndPath("c", "dyes/" + name));
++        this.dyedTag = net.minecraft.tags.ItemTags.create(net.minecraft.resources.Identifier.fromNamespaceAndPath("c", "dyed/" + name));
+         this.textureDiffuseColor = ARGB.opaque(textureDiffuseColor);
+         this.fireworkColor = fireworkColor;
+     }
+@@ -117,13 +_,49 @@
+         return this.name;
+     }
+ 
++    /**
++     * Gets the tag key representing the set of items which provide this dye color.
++     * @return A {@link net.minecraft.tags.TagKey<Item>} representing the set of items which provide this dye color.
++     */
++    public net.minecraft.tags.TagKey<Item> getTag() {
++        return dyesTag;
++    }
++
++    /**
++     * Gets the tag key representing the set of items which are dyed with this color.
++     * @return A {@link net.minecraft.tags.TagKey<Item>} representing the set of items which are dyed with this color.
++     */
++    public net.minecraft.tags.TagKey<Item> getDyedTag() {
++        return dyedTag;
++    }
++
++    @Nullable
++    public static DyeColor getColor(ItemStack stack) {
++        DyeColor dyeColor = stack.get(DataComponents.DYE);
++        if (dyeColor != null) {
++            return dyeColor;
++        }
++
++        for (int x = 0; x < BLACK.getId(); x++) {
++            DyeColor color = byId(x);
++            if (stack.is(color.getTag()))
++                return color;
++        }
++
++        return null;
++    }
++
+     public static DyeColor getMixedColor(ServerLevel level, DyeColor dyeColor1, DyeColor dyeColor2) {
+         DyeColor mixedColor = findColorMixInRecipes(level, dyeColor1, dyeColor2);
+         if (mixedColor != null) {
+             return mixedColor;
+         } else {
+-            return level.getRandom().nextBoolean() ? dyeColor1 : dyeColor2;
++            return dyeColorRandom(level).nextBoolean() ? dyeColor1 : dyeColor2;
+         }
++    }
++
++    private static RandomSource dyeColorRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
+     }
+ 
+     private static @Nullable DyeColor findColorMixInRecipes(ServerLevel level, DyeColor dyeColor1, DyeColor dyeColor2) {

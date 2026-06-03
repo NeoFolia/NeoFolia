@@ -1,0 +1,35 @@
+--- a/net/minecraft/world/entity/ai/behavior/Croak.java
++++ b/net/minecraft/world/entity/ai/behavior/Croak.java
+@@ -16,26 +_,27 @@
+         super(ImmutableMap.of(MemoryModuleType.WALK_TARGET, MemoryStatus.VALUE_ABSENT), 100);
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Frog body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Frog body) {
+         return body.getPose() == Pose.STANDING;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Frog body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Frog body, long timestamp) {
+         return this.croakCounter < 60;
+     }
+ 
+-    protected void start(ServerLevel level, Frog body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Frog body, long timestamp) {
+         if (!body.isInLiquid()) {
+             body.setPose(Pose.CROAKING);
+             this.croakCounter = 0;
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Frog body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Frog body, long timestamp) {
+         body.setPose(Pose.STANDING);
++        this.croakCounter = 0;
+     }
+ 
+-    protected void tick(ServerLevel level, Frog body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Frog body, long timestamp) {
+         this.croakCounter++;
+     }
+ }

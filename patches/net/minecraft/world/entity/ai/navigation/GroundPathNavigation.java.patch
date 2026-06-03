@@ -1,0 +1,124 @@
+--- a/net/minecraft/world/entity/ai/navigation/GroundPathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/GroundPathNavigation.java
+@@ -32,17 +_,21 @@
+     }
+ 
+     @Override
+-    protected boolean canUpdatePath() {
++    protected synchronized boolean canUpdatePath() {
+         return this.mob.onGround() || this.mob.isInLiquid() || this.mob.isPassenger();
+     }
+ 
+     @Override
+-    protected Vec3 getTempMobPos() {
++    protected synchronized Vec3 getTempMobPos() {
+         return new Vec3(this.mob.getX(), this.getSurfaceY(), this.mob.getZ());
+     }
+ 
+     @Override
+-    public Path createPath(BlockPos pos, int reachRange) {
++    public synchronized Path createPath(BlockPos pos, int reachRange) {
++        if (!this.canReadBlock(pos)) {
++            return null;
++        }
++
+         LevelChunk chunk = this.level.getChunkSource().getChunkNow(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+         if (chunk == null) {
+             return null;
+@@ -55,7 +_,7 @@
+         }
+     }
+ 
+-    final BlockPos findSurfacePosition(LevelChunk chunk, BlockPos pos, int reachRange) {
++    synchronized final BlockPos findSurfacePosition(LevelChunk chunk, BlockPos pos, int reachRange) {
+         if (chunk.getBlockState(pos).isAir()) {
+             BlockPos.MutableBlockPos columnPos = pos.mutable().move(Direction.DOWN);
+ 
+@@ -90,18 +_,28 @@
+     }
+ 
+     @Override
+-    public Path createPath(Entity target, int reachRange) {
++    public synchronized Path createPath(Entity target, int reachRange) {
+         return this.createPath(target.blockPosition(), reachRange);
+     }
+ 
+-    private int getSurfaceY() {
++    private synchronized int getSurfaceY() {
+         if (this.mob.isInWater() && this.canFloat()) {
+             int surface = this.mob.getBlockY();
+-            BlockState state = this.level.getBlockState(BlockPos.containing(this.mob.getX(), surface, this.mob.getZ()));
++            BlockPos surfacePos = BlockPos.containing(this.mob.getX(), surface, this.mob.getZ());
++            if (!this.canReadBlock(surfacePos)) {
++                return this.mob.getBlockY();
++            }
++
++            BlockState state = this.level.getBlockState(surfacePos);
+             int steps = 0;
+ 
+             while (state.is(Blocks.WATER)) {
+-                state = this.level.getBlockState(BlockPos.containing(this.mob.getX(), ++surface, this.mob.getZ()));
++                surfacePos = BlockPos.containing(this.mob.getX(), ++surface, this.mob.getZ());
++                if (!this.canReadBlock(surfacePos)) {
++                    return this.mob.getBlockY();
++                }
++
++                state = this.level.getBlockState(surfacePos);
+                 if (++steps > 16) {
+                     return this.mob.getBlockY();
+                 }
+@@ -114,16 +_,18 @@
+     }
+ 
+     @Override
+-    protected void trimPath() {
++    protected synchronized void trimPath() {
+         super.trimPath();
+         if (this.avoidSun) {
+-            if (this.level.canSeeSky(BlockPos.containing(this.mob.getX(), this.mob.getY() + 0.5, this.mob.getZ()))) {
++            BlockPos mobPos = BlockPos.containing(this.mob.getX(), this.mob.getY() + 0.5, this.mob.getZ());
++            if (this.canReadBlock(mobPos) && this.level.canSeeSky(mobPos)) {
+                 return;
+             }
+ 
+             for (int i = 0; i < this.path.getNodeCount(); i++) {
+                 Node node = this.path.getNode(i);
+-                if (this.level.canSeeSky(new BlockPos(node.x, node.y, node.z))) {
++                BlockPos nodePos = new BlockPos(node.x, node.y, node.z);
++                if (!this.canReadBlock(nodePos) || this.level.canSeeSky(nodePos)) {
+                     this.path.truncateNodes(i);
+                     return;
+                 }
+@@ -132,11 +_,11 @@
+     }
+ 
+     @Override
+-    public boolean canNavigateGround() {
++    public synchronized boolean canNavigateGround() {
+         return true;
+     }
+ 
+-    protected boolean hasValidPathType(PathType pathType) {
++    protected synchronized boolean hasValidPathType(PathType pathType) {
+         if (pathType == PathType.WATER) {
+             return false;
+         } else {
+@@ -144,15 +_,15 @@
+         }
+     }
+ 
+-    public void setAvoidSun(boolean avoidSun) {
++    public synchronized void setAvoidSun(boolean avoidSun) {
+         this.avoidSun = avoidSun;
+     }
+ 
+-    public void setCanWalkOverFences(boolean canWalkOverFences) {
++    public synchronized void setCanWalkOverFences(boolean canWalkOverFences) {
+         this.nodeEvaluator.setCanWalkOverFences(canWalkOverFences);
+     }
+ 
+-    public void setCanPathToTargetsBelowSurface(boolean canPathToTargetsBelowSurface) {
++    public synchronized void setCanPathToTargetsBelowSurface(boolean canPathToTargetsBelowSurface) {
+         this.canPathToTargetsBelowSurface = canPathToTargetsBelowSurface;
+     }
+ }

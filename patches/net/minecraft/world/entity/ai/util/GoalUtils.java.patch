@@ -1,0 +1,41 @@
+--- a/net/minecraft/world/entity/ai/util/GoalUtils.java
++++ b/net/minecraft/world/entity/ai/util/GoalUtils.java
+@@ -7,6 +_,7 @@
+ import net.minecraft.world.entity.ai.navigation.PathNavigation;
+ import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class GoalUtils {
+     public static boolean hasGroundPathNavigation(Mob mob) {
+@@ -18,7 +_,7 @@
+     }
+ 
+     public static boolean isOutsideLimits(BlockPos pos, PathfinderMob mob) {
+-        return mob.level().isOutsideBuildHeight(pos.getY());
++        return mob.level().isOutsideBuildHeight(pos.getY()) || !canReadBlock(mob, pos);
+     }
+ 
+     public static boolean isRestricted(boolean restrict, PathfinderMob mob, BlockPos pos) {
+@@ -34,14 +_,18 @@
+     }
+ 
+     public static boolean isWater(PathfinderMob mob, BlockPos pos) {
+-        return mob.level().getFluidState(pos).is(FluidTags.WATER);
++        return canReadBlock(mob, pos) && mob.level().getFluidState(pos).is(FluidTags.WATER);
+     }
+ 
+     public static boolean hasMalus(PathfinderMob mob, BlockPos pos) {
+-        return mob.getPathfindingMalus(WalkNodeEvaluator.getPathTypeStatic(mob, pos)) != 0.0F;
++        return !canReadBlock(mob, pos) || mob.getPathfindingMalus(WalkNodeEvaluator.getPathTypeStatic(mob, pos)) != 0.0F;
+     }
+ 
+     public static boolean isSolid(PathfinderMob mob, BlockPos pos) {
+-        return mob.level().getBlockState(pos).isSolid();
++        return !canReadBlock(mob, pos) || mob.level().getBlockState(pos).isSolid();
++    }
++
++    private static boolean canReadBlock(PathfinderMob mob, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(mob.level(), pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

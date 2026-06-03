@@ -1,0 +1,114 @@
+--- a/net/minecraft/world/entity/monster/zombie/Drowned.java
++++ b/net/minecraft/world/entity/monster/zombie/Drowned.java
+@@ -61,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.Path;
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Drowned extends Zombie implements RangedAttackMob {
+@@ -107,14 +_,15 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         groupData = super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+-        if (this.getItemBySlot(EquipmentSlot.OFFHAND).isEmpty() && level.getRandom().nextFloat() < 0.03F) {
++        RandomSource random = this.getRandom();
++        if (this.getItemBySlot(EquipmentSlot.OFFHAND).isEmpty() && random.nextFloat() < 0.03F) {
+             this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.NAUTILUS_SHELL));
+             this.setGuaranteedDrop(EquipmentSlot.OFFHAND);
+         }
+ 
+         if ((spawnReason == EntitySpawnReason.NATURAL || spawnReason == EntitySpawnReason.STRUCTURE)
+             && this.getMainHandItem().is(Items.TRIDENT)
+-            && level.getRandom().nextFloat() < 0.5F
++            && random.nextFloat() < 0.5F
+             && !this.isBaby()
+             && !level.getBiome(this.blockPosition()).is(BiomeTags.MORE_FREQUENT_DROWNED_SPAWNS)) {
+             ZombieNautilus zombieNautilus = EntityType.ZOMBIE_NAUTILUS.create(this.level(), EntitySpawnReason.JOCKEY);
+@@ -136,13 +_,14 @@
+     public static boolean checkDrownedSpawnRules(
+         EntityType<Drowned> type, ServerLevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        if (!level.getFluidState(pos.below()).is(FluidTags.WATER) && !EntitySpawnReason.isSpawner(spawnReason)) {
++        BlockPos below = pos.below();
++        if (!EntitySpawnReason.isSpawner(spawnReason) && (!canReadBlock(level, below) || !level.getFluidState(below).is(FluidTags.WATER))) {
+             return false;
+         } else {
+             Holder<Biome> biome = level.getBiome(pos);
+             boolean canMonsterSpawn = level.getDifficulty() != Difficulty.PEACEFUL
+                 && (EntitySpawnReason.ignoresLightRequirements(spawnReason) || isDarkEnoughToSpawn(level, pos, random))
+-                && (EntitySpawnReason.isSpawner(spawnReason) || level.getFluidState(pos).is(FluidTags.WATER));
++                && (EntitySpawnReason.isSpawner(spawnReason) || canReadBlock(level, pos) && level.getFluidState(pos).is(FluidTags.WATER));
+             if (!canMonsterSpawn || !EntitySpawnReason.isSpawner(spawnReason) && spawnReason != EntitySpawnReason.REINFORCEMENT) {
+                 return biome.is(BiomeTags.MORE_FREQUENT_DROWNED_SPAWNS)
+                     ? random.nextInt(15) == 0 && canMonsterSpawn
+@@ -157,6 +_,10 @@
+         return pos.getY() < level.getSeaLevel() - 5;
+     }
+ 
++    private static boolean canReadBlock(LevelAccessor level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public EntityDimensions getDefaultDimensions(Pose pose) {
+         return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+@@ -220,6 +_,7 @@
+     }
+ 
+     public boolean okTarget(@Nullable LivingEntity target) {
++        target = this.regionSafeTarget(target);
+         return target != null ? !this.level().isBrightOutside() || target.isInWater() : false;
+     }
+ 
+@@ -232,7 +_,7 @@
+         if (this.searchingForLand) {
+             return true;
+         } else {
+-            LivingEntity target = this.getTarget();
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
+             return target != null && target.isInWater();
+         }
+     }
+@@ -315,6 +_,10 @@
+         return itemStack.is(ItemTags.SPEARS) ? false : super.wantsToPickUp(level, itemStack);
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     private static class DrownedAttackGoal extends ZombieAttackGoal {
+         private final Drowned drowned;
+ 
+@@ -358,7 +_,9 @@
+         @Override
+         protected boolean isValidTarget(LevelReader level, BlockPos pos) {
+             BlockPos above = pos.above();
+-            return level.isEmptyBlock(above) && level.isEmptyBlock(above.above()) ? level.getBlockState(pos).entityCanStandOn(level, pos, this.drowned) : false;
++            return this.canReadBlock(pos) && this.canReadBlock(above) && this.canReadBlock(above.above())
++                ? level.isEmptyBlock(above) && level.isEmptyBlock(above.above()) && level.getBlockState(pos).entityCanStandOn(level, pos, this.drowned)
++                : false;
+         }
+ 
+         @Override
+@@ -423,7 +_,8 @@
+ 
+             for (int i = 0; i < 10; i++) {
+                 BlockPos randomPos = pos.offset(random.nextInt(20) - 10, 2 - random.nextInt(8), random.nextInt(20) - 10);
+-                if (this.level.getBlockState(randomPos).is(Blocks.WATER)) {
++                if (RegionizedWorldGuard.shouldLoadChunk(this.level, randomPos.getX() >> 4, randomPos.getZ() >> 4)
++                    && this.level.getBlockState(randomPos).is(Blocks.WATER)) {
+                     return Vec3.atBottomCenterOf(randomPos);
+                 }
+             }
+@@ -442,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = this.drowned.getTarget();
++            LivingEntity target = this.drowned.regionSafeTarget(this.drowned.getTarget());
+             if (this.drowned.wantsToSwim() && this.drowned.isInWater()) {
+                 if (target != null && target.getY() > this.drowned.getY() || this.drowned.searchingForLand) {
+                     this.drowned.setDeltaMovement(this.drowned.getDeltaMovement().add(0.0, 0.002, 0.0));

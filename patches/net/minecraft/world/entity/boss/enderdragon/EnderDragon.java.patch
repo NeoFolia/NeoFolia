@@ -1,0 +1,241 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
++++ b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+@@ -48,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -100,17 +_,25 @@
+         this.setHealth(this.getMaxHealth());
+         this.noPhysics = true;
+         this.phaseManager = new EnderDragonPhaseManager(this);
+-    }
+-
+-    public void setDragonFight(EnderDragonFight fight) {
++        this.setId(ENTITY_COUNTER.getAndAdd(this.subEntities.length + 1) + 1); // Forge: Fix MC-158205: Make sure part ids are successors of parent mob id
++    }
++
++    @Override
++    public void setId(int id) {
++        super.setId(id);
++        for (int i = 0; i < this.subEntities.length; i++) // Forge: Fix MC-158205: Set part ids to successors of parent mob id
++            this.subEntities[i].setId(id + i + 1);
++    }
++
++    public synchronized void setDragonFight(EnderDragonFight fight) {
+         this.dragonFight = fight;
+     }
+ 
+-    public void setFightOrigin(BlockPos fightOrigin) {
++    public synchronized void setFightOrigin(BlockPos fightOrigin) {
+         this.fightOrigin = fightOrigin;
+     }
+ 
+-    public BlockPos getFightOrigin() {
++    public synchronized BlockPos getFightOrigin() {
+         return this.fightOrigin;
+     }
+ 
+@@ -148,8 +_,19 @@
+         entityData.define(DATA_PHASE, EnderDragonPhase.HOVERING.getId());
+     }
+ 
++    private net.minecraft.world.entity.@Nullable EntityReference<Player> unlimitedLastHurtByPlayer = null;
++
+     @Override
+     public void aiStep() {
++        // lastHurtByPlayer is cleared after 100 ticks, capture it indefinitely in unlimitedLastHurtByPlayer for LivingExperienceDropEvent
++        if (this.lastHurtByPlayer != null) this.unlimitedLastHurtByPlayer = lastHurtByPlayer;
++        if (this.unlimitedLastHurtByPlayer != null) {
++            Player p = this.unlimitedLastHurtByPlayer.getEntity(this.level(), Player.class);
++            if (p == null || p.isRemoved()) {
++                this.unlimitedLastHurtByPlayer = null;
++            }
++        }
++
+         this.processFlappingMovement();
+         if (this.level().isClientSide()) {
+             this.setHealth(this.getHealth());
+@@ -280,18 +_,18 @@
+                 if (this.level() instanceof ServerLevel serverLevelx && this.hurtTime == 0) {
+                     this.knockBack(
+                         serverLevelx,
+-                        serverLevelx.getEntities(
+-                            this, this.wing1.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR
++                        this.getEntitiesInCurrentRegion(
++                            serverLevelx, this.wing1.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0)
+                         )
+                     );
+                     this.knockBack(
+                         serverLevelx,
+-                        serverLevelx.getEntities(
+-                            this, this.wing2.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR
++                        this.getEntitiesInCurrentRegion(
++                            serverLevelx, this.wing2.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0)
+                         )
+                     );
+-                    this.hurt(serverLevelx, serverLevelx.getEntities(this, this.head.getBoundingBox().inflate(1.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR));
+-                    this.hurt(serverLevelx, serverLevelx.getEntities(this, this.neck.getBoundingBox().inflate(1.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    this.hurt(serverLevelx, this.getEntitiesInCurrentRegion(serverLevelx, this.head.getBoundingBox().inflate(1.0)));
++                    this.hurt(serverLevelx, this.getEntitiesInCurrentRegion(serverLevelx, this.neck.getBoundingBox().inflate(1.0)));
+                 }
+ 
+                 float ss2 = Mth.sin(this.getYRot() * (float) (Math.PI / 180.0) - this.yRotA * 0.01F);
+@@ -369,7 +_,8 @@
+         }
+ 
+         if (this.random.nextInt(10) == 0) {
+-            List<EndCrystal> crystals = this.level().getEntitiesOfClass(EndCrystal.class, this.getBoundingBox().inflate(32.0));
++            AABB crystalBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(32.0));
++            List<EndCrystal> crystals = crystalBox == null ? List.of() : this.level().getEntitiesOfClass(EndCrystal.class, crystalBox);
+             EndCrystal nearest = null;
+             double distance = Double.MAX_VALUE;
+ 
+@@ -385,6 +_,11 @@
+         }
+     }
+ 
++    private List<Entity> getEntitiesInCurrentRegion(ServerLevel level, AABB box) {
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, box);
++        return regionBox == null ? List.of() : level.getEntities(this, regionBox, EntitySelector.NO_CREATIVE_OR_SPECTATOR);
++    }
++
+     private void knockBack(ServerLevel serverLevel, List<Entity> entities) {
+         double xm = (this.body.getBoundingBox().minX + this.body.getBoundingBox().maxX) / 2.0;
+         double zm = (this.body.getBoundingBox().minZ + this.body.getBoundingBox().maxZ) / 2.0;
+@@ -432,9 +_,13 @@
+             for (int y = y0; y <= y1; y++) {
+                 for (int z = z0; z <= z1; z++) {
+                     BlockPos blockPos = new BlockPos(x, y, z);
++                    if (!RegionizedWorldGuard.shouldLoadChunk(level, blockPos.getX() >> 4, blockPos.getZ() >> 4)) {
++                        continue;
++                    }
++
+                     BlockState state = level.getBlockState(blockPos);
+                     if (!state.isAir() && !state.is(BlockTags.DRAGON_TRANSPARENT)) {
+-                        if (level.getGameRules().get(GameRules.MOB_GRIEFING) && !state.is(BlockTags.DRAGON_IMMUNE)) {
++                        if (net.neoforged.neoforge.common.CommonHooks.canEntityDestroy(level, blockPos, this) && !state.is(BlockTags.DRAGON_IMMUNE)) {
+                             destroyedBlock = level.removeBlock(blockPos, false) || destroyedBlock;
+                         } else {
+                             hitWall = true;
+@@ -466,7 +_,8 @@
+             if (damage < 0.01F) {
+                 return false;
+             } else {
+-                if (source.getEntity() instanceof Player || source.is(DamageTypeTags.ALWAYS_HURTS_ENDER_DRAGONS)) {
++                Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++                if (sourceEntity instanceof Player || source.is(DamageTypeTags.ALWAYS_HURTS_ENDER_DRAGONS)) {
+                     float healthBefore = this.getHealth();
+                     this.reallyHurt(level, source, damage);
+                     if (this.isDeadOrDying() && !this.phaseManager.getCurrentPhase().isSitting()) {
+@@ -535,7 +_,12 @@
+ 
+         if (this.level() instanceof ServerLevel level) {
+             if (this.dragonDeathTime > 150 && this.dragonDeathTime % 5 == 0 && level.getGameRules().get(GameRules.MOB_DROPS)) {
+-                ExperienceOrb.award(level, this.position(), Mth.floor(xpCount * 0.08F));
++                Player lastHurtByPlayer = RegionizedWorldGuard.restrictEntityToCurrentRegion(
++                    level,
++                    net.minecraft.world.entity.EntityReference.get(this.unlimitedLastHurtByPlayer, level, Player.class)
++                );
++                int award = net.neoforged.neoforge.event.EventHooks.getExperienceDrop(this, lastHurtByPlayer, Mth.floor((float)xpCount * 0.08F));
++                ExperienceOrb.award((ServerLevel) this.level(), this.position(), award);
+             }
+ 
+             if (this.dragonDeathTime == 1 && !this.isSilent()) {
+@@ -553,7 +_,12 @@
+ 
+         if (this.dragonDeathTime >= 200 && this.level() instanceof ServerLevel level) {
+             if (level.getGameRules().get(GameRules.MOB_DROPS)) {
+-                ExperienceOrb.award(level, this.position(), Mth.floor(xpCount * 0.2F));
++                Player lastHurtByPlayer = RegionizedWorldGuard.restrictEntityToCurrentRegion(
++                    level,
++                    net.minecraft.world.entity.EntityReference.get(this.unlimitedLastHurtByPlayer, level, Player.class)
++                );
++                int award = net.neoforged.neoforge.event.EventHooks.getExperienceDrop(this, lastHurtByPlayer, Mth.floor((float)xpCount * 0.2F));
++                ExperienceOrb.award((ServerLevel) this.level(), this.position(), award);
+             }
+ 
+             if (this.dragonFight != null) {
+@@ -565,7 +_,7 @@
+         }
+     }
+ 
+-    public int findClosestNode() {
++    public synchronized int findClosestNode() {
+         if (this.nodes[0] == null) {
+             for (int i = 0; i < 24; i++) {
+                 int yAdjustment = 5;
+@@ -620,7 +_,7 @@
+         return this.findClosestNode(this.getX(), this.getY(), this.getZ());
+     }
+ 
+-    public int findClosestNode(double tX, double tY, double tZ) {
++    public synchronized int findClosestNode(double tX, double tY, double tZ) {
+         float closestDist = 10000.0F;
+         int closestIndex = 0;
+         Node currentPos = new Node(Mth.floor(tX), Mth.floor(tY), Mth.floor(tZ));
+@@ -642,7 +_,7 @@
+         return closestIndex;
+     }
+ 
+-    public @Nullable Path findPath(int startIndex, int endIndex, @Nullable Node finalNode) {
++    public synchronized @Nullable Path findPath(int startIndex, int endIndex, @Nullable Node finalNode) {
+         for (int i = 0; i < 24; i++) {
+             Node node = this.nodes[i];
+             node.closed = false;
+@@ -725,7 +_,7 @@
+         }
+     }
+ 
+-    private Path reconstructPath(Node from, Node to) {
++    private synchronized Path reconstructPath(Node from, Node to) {
+         List<Node> nodes = Lists.newArrayList();
+         Node node = to;
+         nodes.add(0, to);
+@@ -813,7 +_,8 @@
+ 
+     public void onCrystalDestroyed(ServerLevel level, EndCrystal crystal, BlockPos pos, DamageSource source) {
+         Player player;
+-        if (source.getEntity() instanceof Player playerSource) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        if (sourceEntity instanceof Player playerSource) {
+             player = playerSource;
+         } else {
+             player = level.getNearestPlayer(CRYSTAL_DESTROY_TARGETING, pos.getX(), pos.getY(), pos.getZ());
+@@ -835,11 +_,11 @@
+         super.onSyncedDataUpdated(accessor);
+     }
+ 
+-    public EnderDragonPhaseManager getPhaseManager() {
++    public synchronized EnderDragonPhaseManager getPhaseManager() {
+         return this.phaseManager;
+     }
+ 
+-    public @Nullable EnderDragonFight getDragonFight() {
++    public synchronized @Nullable EnderDragonFight getDragonFight() {
+         return this.dragonFight;
+     }
+ 
+@@ -859,8 +_,19 @@
+     }
+ 
+     @Override
++    public boolean isMultipartEntity() {
++        return true;
++    }
++
++    @Override
++    public net.neoforged.neoforge.entity.PartEntity<?>[] getParts() {
++        return this.subEntities;
++    }
++
++    @Override
+     public void recreateFromPacket(ClientboundAddEntityPacket packet) {
+         super.recreateFromPacket(packet);
++        if (true) return; // Forge: Fix MC-158205: Moved into setId()
+         EnderDragonPart[] subEntities = this.getSubEntities();
+ 
+         for (int i = 0; i < subEntities.length; i++) {

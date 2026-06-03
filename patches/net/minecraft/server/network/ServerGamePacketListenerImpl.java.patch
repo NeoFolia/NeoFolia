@@ -1,0 +1,2943 @@
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -25,6 +_,7 @@
+ import java.util.concurrent.TimeUnit;
+ import java.util.function.BiFunction;
+ import java.util.function.Consumer;
++import java.util.function.Supplier;
+ import java.util.stream.Collectors;
+ import java.util.stream.Stream;
+ import net.minecraft.ChatFormatting;
+@@ -177,7 +_,9 @@
+ import net.minecraft.world.entity.player.ProfilePublicKey;
+ import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+ import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
++import net.minecraft.world.entity.vehicle.minecart.MinecartCommandBlock;
+ import net.minecraft.world.inventory.AnvilMenu;
++import net.minecraft.world.inventory.AbstractContainerMenu;
+ import net.minecraft.world.inventory.BeaconMenu;
+ import net.minecraft.world.inventory.CrafterMenu;
+ import net.minecraft.world.inventory.MerchantMenu;
+@@ -218,6 +_,9 @@
+ import net.minecraft.world.phys.shapes.BooleanOp;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -271,9 +_,10 @@
+     private int nextChatIndex;
+     private final MessageSignatureCache messageSignatureCache = MessageSignatureCache.createDefault();
+     private final FutureChain chatMessageChain;
+-    private boolean waitingForSwitchToConfig;
++    private volatile boolean waitingForSwitchToConfig;
+     private boolean waitingForRespawn;
+     private int clientLoadedTimeoutTimer;
++    private boolean regionizedTickQueued;
+ 
+     public ServerGamePacketListenerImpl(MinecraftServer server, Connection connection, ServerPlayer player, CommonListenerCookie cookie) {
+         super(server, connection, cookie);
+@@ -288,9 +_,45 @@
+ 
+     @Override
+     public void tick() {
+-        if (this.ackBlockChangesUpTo > -1) {
+-            this.send(new ClientboundBlockChangedAckPacket(this.ackBlockChangesUpTo));
+-            this.ackBlockChangesUpTo = -1;
++        if (this.scheduleTickOnPlayerRegion()) {
++            return;
++        }
++
++        this.tickOnPlayerRegion();
++    }
++
++    private boolean scheduleTickOnPlayerRegion() {
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            return false;
++        }
++
++        RegionKey region = RegionizedWorldGuard.regionFor(this.player.level(), this.player.blockPosition());
++        if (RegionizedTickContext.currentRegion().map(region::equals).orElse(false)) {
++            return false;
++        }
++
++        if (this.regionizedTickQueued) {
++            return true;
++        }
++
++        this.regionizedTickQueued = true;
++        if (!this.server.regionizedTaskDispatcher().tryExecute(region, () -> {
++            synchronized (this) {
++                this.regionizedTickQueued = false;
++            }
++            this.tick();
++        })) {
++            this.regionizedTickQueued = false;
++            return false;
++        }
++
++        return true;
++    }
++
++    private void tickOnPlayerRegion() {
++        int ackBlockChangesUpTo = this.takeAckBlockChangesUpTo();
++        if (ackBlockChangesUpTo > -1) {
++            this.send(new ClientboundBlockChangedAckPacket(ackBlockChangesUpTo));
+         }
+ 
+         if (this.server.isPaused() || !this.tickPlayer()) {
+@@ -306,6 +_,12 @@
+         }
+     }
+ 
++    private synchronized int takeAckBlockChangesUpTo() {
++        int result = this.ackBlockChangesUpTo;
++        this.ackBlockChangesUpTo = -1;
++        return result;
++    }
++
+     private boolean tickPlayer() {
+         this.resetPosition();
+         this.player.xo = this.player.getX();
+@@ -363,12 +_,12 @@
+         }
+     }
+ 
+-    public void resetFlyingTicks() {
++    public synchronized void resetFlyingTicks() {
+         this.aboveGroundTickCount = 0;
+         this.aboveGroundVehicleTickCount = 0;
+     }
+ 
+-    public void resetPosition() {
++    public synchronized void resetPosition() {
+         this.firstGoodX = this.player.getX();
+         this.firstGoodY = this.player.getY();
+         this.firstGoodZ = this.player.getZ();
+@@ -390,11 +_,11 @@
+     }
+ 
+     @Override
+-    protected GameProfile playerProfile() {
++    protected synchronized GameProfile playerProfile() {
+         return this.player.getGameProfile();
+     }
+ 
+-    private <T, R> CompletableFuture<R> filterTextPacket(T message, BiFunction<TextFilter, T, CompletableFuture<R>> action) {
++    private synchronized <T, R> CompletableFuture<R> filterTextPacket(T message, BiFunction<TextFilter, T, CompletableFuture<R>> action) {
+         return action.apply(this.player.getTextFilter(), message).thenApply(result -> {
+             if (!this.isAcceptingMessages()) {
+                 LOGGER.debug("Ignoring packet due to disconnection");
+@@ -405,22 +_,24 @@
+         });
+     }
+ 
+-    private CompletableFuture<FilteredText> filterTextPacket(String message) {
++    private synchronized CompletableFuture<FilteredText> filterTextPacket(String message) {
+         return this.filterTextPacket(message, TextFilter::processStreamMessage);
+     }
+ 
+-    private CompletableFuture<List<FilteredText>> filterTextPacket(List<String> message) {
++    private synchronized CompletableFuture<List<FilteredText>> filterTextPacket(List<String> message) {
+         return this.filterTextPacket(message, TextFilter::processMessageBundle);
+     }
+ 
+     @Override
+-    public void handlePlayerInput(ServerboundPlayerInputPacket packet) {
++    public synchronized void handlePlayerInput(ServerboundPlayerInputPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.setLastClientInput(packet.input());
+-        if (this.hasClientLoaded()) {
+-            this.player.resetLastActionTime();
+-            this.player.setShiftKeyDown(packet.input().shift());
+-        }
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            this.player.setLastClientInput(packet.input());
++            if (this.hasClientLoaded()) {
++                this.player.resetLastActionTime();
++                this.player.setShiftKeyDown(packet.input().shift());
++            }
++        });
+     }
+ 
+     private static boolean containsInvalidValues(double x, double y, double z, float yRot, float xRot) {
+@@ -436,11 +_,17 @@
+     }
+ 
+     @Override
+-    public void handleMoveVehicle(ServerboundMoveVehiclePacket packet) {
++    public synchronized void handleMoveVehicle(ServerboundMoveVehiclePacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         if (containsInvalidValues(packet.position().x(), packet.position().y(), packet.position().z(), packet.yRot(), packet.xRot())) {
+             this.disconnect(Component.translatable("multiplayer.disconnect.invalid_vehicle_movement"));
+-        } else if (!this.updateAwaitingTeleport() && this.hasClientLoaded()) {
++        } else {
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleMoveVehicleOnPlayerRegion(packet));
++        }
++    }
++
++    private void handleMoveVehicleOnPlayerRegion(ServerboundMoveVehiclePacket packet) {
++        if (!this.updateAwaitingTeleport() && this.hasClientLoaded()) {
+             Entity vehicle = this.player.getRootVehicle();
+             if (vehicle != this.player && vehicle.getControllingPassenger() == this.player && vehicle == this.lastVehicle) {
+                 ServerLevel level = this.player.level();
+@@ -492,18 +_,21 @@
+ 
+                 if (fail && level.noCollision(vehicle, oldAABB) || this.isEntityCollidingWithAnythingNew(level, vehicle, oldAABB, targetX, targetY, targetZ)) {
+                     vehicle.absSnapTo(oldX, oldY, oldZ, targetYRot, targetXRot);
++                    resyncPlayerWithVehicle(vehicle); // Neo - Resync player position on vehicle moving
+                     this.send(ClientboundMoveVehiclePacket.fromEntity(vehicle));
+                     vehicle.removeLatestMovementRecording();
+                     return;
+                 }
+ 
+                 vehicle.absSnapTo(targetX, targetY, targetZ, targetYRot, targetXRot);
++                resyncPlayerWithVehicle(vehicle); // Neo - Resync player position on vehicle moving
+                 this.player.level().getChunkSource().move(this.player);
+                 Vec3 clientDeltaMovement = new Vec3(vehicle.getX() - oldX, vehicle.getY() - oldY, vehicle.getZ() - oldZ);
+                 this.handlePlayerKnownMovement(clientDeltaMovement);
+                 vehicle.setOnGroundWithMovement(packet.onGround(), clientDeltaMovement);
+                 vehicle.doCheckFallDamage(clientDeltaMovement.x, clientDeltaMovement.y, clientDeltaMovement.z, packet.onGround());
+                 this.player.checkMovementStatistics(clientDeltaMovement.x, clientDeltaMovement.y, clientDeltaMovement.z);
++                this.player.checkRidingStatistics(clientDeltaMovement.x, clientDeltaMovement.y, clientDeltaMovement.z); // Neo: check riding stats too as vanilla checks them in rideTick based on the assumption that Entity#rideTick will move the entity, which we break
+                 this.clientVehicleIsFloating = oyDist >= -0.03125
+                     && !vehicleRestsOnSomething
+                     && !this.server.allowFlight()
+@@ -517,6 +_,23 @@
+         }
+     }
+ 
++    private synchronized void resyncPlayerWithVehicle(Entity vehicle) {
++        Vec3 oldPos = this.player.position();
++        float yRot = this.player.getYRot();
++        float xRot = this.player.getXRot();
++        float yHeadRot = this.player.getYHeadRot();
++
++        vehicle.positionRider(this.player);
++
++        // preserve old rotation and store old position in xo/yo/zo
++        this.player.setYRot(yRot);
++        this.player.setXRot(xRot);
++        this.player.setYHeadRot(yHeadRot);
++        this.player.xo = oldPos.x;
++        this.player.yo = oldPos.y;
++        this.player.zo = oldPos.z;
++    }
++
+     private boolean noBlocksAround(Entity entity) {
+         return entity.level()
+             .getBlockStates(entity.getBoundingBox().inflate(0.0625).expandTowards(0.0, -0.55, 0.0))
+@@ -524,8 +_,12 @@
+     }
+ 
+     @Override
+-    public void handleAcceptTeleportPacket(ServerboundAcceptTeleportationPacket packet) {
++    public synchronized void handleAcceptTeleportPacket(ServerboundAcceptTeleportationPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleAcceptTeleportOnPlayerRegion(packet));
++    }
++
++    private void handleAcceptTeleportOnPlayerRegion(ServerboundAcceptTeleportationPacket packet) {
+         if (packet.getId() == this.awaitingTeleport) {
+             if (this.awaitingPositionFromClient == null) {
+                 this.disconnect(Component.translatable("multiplayer.disconnect.invalid_player_movement"));
+@@ -549,68 +_,90 @@
+     }
+ 
+     @Override
+-    public void handleAcceptPlayerLoad(ServerboundPlayerLoadedPacket packet) {
++    public synchronized void handleAcceptPlayerLoad(ServerboundPlayerLoadedPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         this.markClientLoaded();
+     }
+ 
+     @Override
+-    public void handleRecipeBookSeenRecipePacket(ServerboundRecipeBookSeenRecipePacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        RecipeManager.ServerDisplayInfo entry = this.server.getRecipeManager().getRecipeFromDisplay(packet.recipe());
+-        if (entry != null) {
+-            this.player.getRecipeBook().removeHighlight(entry.parent().id());
+-        }
+-    }
+-
+-    @Override
+-    public void handleBundleItemSelectedPacket(ServerboundSelectBundleItemPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.containerMenu.setSelectedBundleItemIndex(packet.slotId(), packet.selectedItemIndex());
+-    }
+-
+-    @Override
+-    public void handleRecipeBookChangeSettingsPacket(ServerboundRecipeBookChangeSettingsPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.getRecipeBook().setBookSetting(packet.getBookType(), packet.isOpen(), packet.isFiltering());
+-    }
+-
+-    @Override
+-    public void handleSeenAdvancements(ServerboundSeenAdvancementsPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (packet.getAction() == ServerboundSeenAdvancementsPacket.Action.OPENED_TAB) {
+-            Identifier id = Objects.requireNonNull(packet.getTab());
+-            AdvancementHolder advancement = this.server.getAdvancements().get(id);
+-            if (advancement != null) {
+-                this.player.getAdvancements().setSelectedTab(advancement);
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleCustomCommandSuggestions(ServerboundCommandSuggestionPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        StringReader command = new StringReader(packet.getCommand());
+-        if (command.canRead() && command.peek() == '/') {
+-            command.skip();
+-        }
+-
+-        ParseResults<CommandSourceStack> parse = this.server.getCommands().getDispatcher().parse(command, this.player.createCommandSourceStack());
+-        this.server.getCommands().getDispatcher().getCompletionSuggestions(parse).thenAccept(results -> {
+-            Suggestions suggestions = results.getList().size() <= 1000 ? results : new Suggestions(results.getRange(), results.getList().subList(0, 1000));
+-            this.send(new ClientboundCommandSuggestionsPacket(packet.getId(), suggestions));
+-        });
+-    }
+-
+-    @Override
+-    public void handleSetCommandBlock(ServerboundSetCommandBlockPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++    public synchronized void handleRecipeBookSeenRecipePacket(ServerboundRecipeBookSeenRecipePacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            RecipeManager.ServerDisplayInfo entry = this.server.getRecipeManager().getRecipeFromDisplay(packet.recipe());
++            if (entry != null) {
++                this.player.getRecipeBook().removeHighlight(entry.parent().id());
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleBundleItemSelectedPacket(ServerboundSelectBundleItemPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            containerMenu.setSelectedBundleItemIndex(packet.slotId(), packet.selectedItemIndex());
++        });
++    }
++
++    @Override
++    public synchronized void handleRecipeBookChangeSettingsPacket(ServerboundRecipeBookChangeSettingsPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.getRecipeBook().setBookSetting(packet.getBookType(), packet.isOpen(), packet.isFiltering()));
++    }
++
++    @Override
++    public synchronized void handleSeenAdvancements(ServerboundSeenAdvancementsPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (packet.getAction() == ServerboundSeenAdvancementsPacket.Action.OPENED_TAB) {
++                Identifier id = Objects.requireNonNull(packet.getTab());
++                AdvancementHolder advancement = this.server.getAdvancements().get(id);
++                if (advancement != null) {
++                    this.player.getAdvancements().setSelectedTab(advancement);
++                }
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleCustomCommandSuggestions(ServerboundCommandSuggestionPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            StringReader command = new StringReader(packet.getCommand());
++            if (command.canRead() && command.peek() == '/') {
++                command.skip();
++            }
++
++            ParseResults<CommandSourceStack> parse = this.server.getCommands().getDispatcher().parse(command, this.player.createCommandSourceStack());
++            this.server.getCommands().getDispatcher().getCompletionSuggestions(parse).thenAccept(results -> {
++                Suggestions suggestions = results.getList().size() <= 1000 ? results : new Suggestions(results.getRange(), results.getList().subList(0, 1000));
++                RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundCommandSuggestionsPacket(packet.getId(), suggestions));
++            });
++        });
++    }
++
++    @Override
++    public synchronized void handleSetCommandBlock(ServerboundSetCommandBlockPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSetCommandBlockOnPlayerRegion(packet));
++    }
++
++    private void handleSetCommandBlockOnPlayerRegion(ServerboundSetCommandBlockPacket packet) {
++        this.handleSetCommandBlockOnPlayerRegion(packet, true);
++    }
++
++    private void handleSetCommandBlockOnPlayerRegion(ServerboundSetCommandBlockPacket packet, boolean routeToOwningRegions) {
+         if (!this.player.canUseGameMasterBlocks()) {
+             this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
+         } else {
+             BaseCommandBlock commandBlock = null;
+             CommandBlockEntity autoCommandBlock = null;
+             BlockPos blockPos = packet.getPos();
++            if (routeToOwningRegions
++                && this.executeOnPlayerAndBlockRegions(this.player.level(), blockPos, "Set command block", () -> this.handleSetCommandBlockOnPlayerRegion(packet, false))) {
++                return;
++            }
++
+             BlockEntity blockEntity = this.player.level().getBlockEntity(blockPos);
+             if (blockEntity instanceof CommandBlockEntity commandBlockEntity) {
+                 autoCommandBlock = commandBlockEntity;
+@@ -652,61 +_,110 @@
+                 }
+ 
+                 if (!StringUtil.isNullOrEmpty(command)) {
+-                    this.player
+-                        .sendSystemMessage(
+-                            Component.translatable(
+-                                this.player.level().isCommandBlockEnabled() ? "advMode.setCommand.success" : "advMode.setCommand.disabled", command
+-                            )
+-                        );
++                    this.sendSystemMessageOnPlayerRegion(
++                        Component.translatable(this.player.level().isCommandBlockEnabled() ? "advMode.setCommand.success" : "advMode.setCommand.disabled", command)
++                    );
+                 }
+             }
+         }
+     }
+ 
+     @Override
+-    public void handleSetCommandMinecart(ServerboundSetCommandMinecartPacket packet) {
++    public synchronized void handleSetCommandMinecart(ServerboundSetCommandMinecartPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSetCommandMinecartOnPlayerRegion(packet));
++    }
++
++    private void handleSetCommandMinecartOnPlayerRegion(ServerboundSetCommandMinecartPacket packet) {
+         if (!this.player.canUseGameMasterBlocks()) {
+             this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
+         } else {
+-            BaseCommandBlock commandBlock = packet.getCommandBlock(this.player.level());
+-            if (commandBlock != null) {
+-                String command = packet.getCommand();
+-                commandBlock.setCommand(command);
+-                commandBlock.setTrackOutput(packet.isTrackOutput());
+-                if (!packet.isTrackOutput()) {
+-                    commandBlock.setLastOutput(null);
+-                }
+-
+-                boolean commandBlockEnabled = this.player.level().isCommandBlockEnabled();
+-                if (commandBlockEnabled) {
+-                    commandBlock.onUpdated(this.player.level());
+-                }
+-
+-                if (!StringUtil.isNullOrEmpty(command)) {
+-                    this.player
+-                        .sendSystemMessage(Component.translatable(commandBlockEnabled ? "advMode.setCommand.success" : "advMode.setCommand.disabled", command));
+-                }
+-            }
++            ServerLevel level = this.player.level();
++            Entity entity = level.getEntity(packet.getEntityId());
++            if (entity == null && RegionizedTickContext.isRegionThread()) {
++                this.executeGlobalOrCurrent(() -> this.handleSetCommandMinecartOnGlobal(packet));
++                return;
++            }
++
++            if (entity instanceof MinecartCommandBlock minecart) {
++                if (RegionizedWorldGuard.scheduleEntityIfRegionized(level, minecart, "Set command minecart", () -> this.applySetCommandMinecart(packet, level, minecart))) {
++                    return;
++                }
++
++                this.applySetCommandMinecart(packet, level, minecart);
++            }
++        }
++    }
++
++    private void handleSetCommandMinecartOnGlobal(ServerboundSetCommandMinecartPacket packet) {
++        if (!this.player.canUseGameMasterBlocks()) {
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.sendSystemMessage(Component.translatable("advMode.notAllowed")));
++            return;
++        }
++
++        ServerLevel level = this.player.level();
++        Entity entity = level.getEntity(packet.getEntityId());
++        if (entity instanceof MinecartCommandBlock minecart) {
++            RegionizedWorldGuard.callOnEntityRegionAndWait(minecart, "set command minecart", () -> {
++                this.applySetCommandMinecart(packet, level, minecart);
++                return Boolean.TRUE;
++            });
++        }
++    }
++
++    private void applySetCommandMinecart(ServerboundSetCommandMinecartPacket packet, ServerLevel level, MinecartCommandBlock minecart) {
++        if (minecart.level() != level || minecart.getId() != packet.getEntityId()) {
++            return;
++        }
++
++        BaseCommandBlock commandBlock = minecart.getCommandBlock();
++        String command = packet.getCommand();
++        commandBlock.setCommand(command);
++        commandBlock.setTrackOutput(packet.isTrackOutput());
++        if (!packet.isTrackOutput()) {
++            commandBlock.setLastOutput(null);
++        }
++
++        boolean commandBlockEnabled = level.isCommandBlockEnabled();
++        if (commandBlockEnabled) {
++            commandBlock.onUpdated(level);
++        }
++
++        if (!StringUtil.isNullOrEmpty(command)) {
++            Component message = Component.translatable(commandBlockEnabled ? "advMode.setCommand.success" : "advMode.setCommand.disabled", command);
++            this.sendSystemMessageOnPlayerRegion(message);
+         }
+     }
+ 
+     @Override
+-    public void handlePickItemFromBlock(ServerboundPickItemFromBlockPacket packet) {
++    public synchronized void handlePickItemFromBlock(ServerboundPickItemFromBlockPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handlePickItemFromBlockOnPlayerRegion(packet));
++    }
++
++    private void handlePickItemFromBlockOnPlayerRegion(ServerboundPickItemFromBlockPacket packet) {
++        this.handlePickItemFromBlockOnPlayerRegion(packet, true);
++    }
++
++    private void handlePickItemFromBlockOnPlayerRegion(ServerboundPickItemFromBlockPacket packet, boolean routeToOwningRegions) {
+         ServerLevel level = this.player.level();
+-        PacketUtils.ensureRunningOnSameThread(packet, this, level);
+         BlockPos pos = packet.pos();
++        if (routeToOwningRegions
++            && this.executeOnPlayerAndBlockRegions(level, pos, "Pick block item", () -> this.handlePickItemFromBlockOnPlayerRegion(packet, false))) {
++            return;
++        }
++
+         if (this.player.isWithinBlockInteractionRange(pos, 1.0)) {
+             if (level.isLoaded(pos)) {
+                 BlockState blockState = level.getBlockState(pos);
+                 boolean includeData = this.player.hasInfiniteMaterials() && packet.includeData();
+-                ItemStack itemStack = blockState.getCloneItemStack(level, pos, includeData);
++                ItemStack itemStack = blockState.getCloneItemStack(pos, level, includeData, player);
+                 if (!itemStack.isEmpty()) {
+                     if (includeData) {
+                         addBlockDataToItem(blockState, level, pos, itemStack);
+                     }
+ 
+-                    this.tryPickItem(itemStack);
++                    RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.tryPickItem(itemStack));
+                 }
+             }
+         }
+@@ -726,23 +_,62 @@
+     }
+ 
+     @Override
+-    public void handlePickItemFromEntity(ServerboundPickItemFromEntityPacket packet) {
+-        ServerLevel level = this.player.level();
+-        PacketUtils.ensureRunningOnSameThread(packet, this, level);
+-        Entity entity = level.getEntityOrPart(packet.id());
+-        if (entity != null && this.player.isWithinEntityInteractionRange(entity, 3.0)) {
++    public synchronized void handlePickItemFromEntity(ServerboundPickItemFromEntityPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handlePickItemFromEntityOnPlayerRegion(packet));
++    }
++
++    private void handlePickItemFromEntityOnPlayerRegion(ServerboundPickItemFromEntityPacket packet) {
++        ServerLevel level = this.player.level();
++        Entity entity = level.getEntityOrPart(packet.id());
++        if (entity == null && RegionizedTickContext.isRegionThread()) {
++            this.executeGlobalOrCurrent(() -> this.handlePickItemFromEntityOnGlobal(packet));
++            return;
++        }
++
++        if (entity != null) {
++            this.applyPickItemFromEntitySnapshot(packet, PickEntitySnapshot.from(entity));
++        }
++    }
++
++    private void handlePickItemFromEntityOnGlobal(ServerboundPickItemFromEntityPacket packet) {
++        ServerLevel level = this.player.level();
++        Entity entity = level.getEntityOrPart(packet.id());
++        if (entity == null) {
++            return;
++        }
++
++        PickEntitySnapshot snapshot = RegionizedWorldGuard.callOnEntityRegionAndWait(entity, "pick entity snapshot", () -> PickEntitySnapshot.from(entity));
++        if (snapshot != null) {
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.applyPickItemFromEntitySnapshot(packet, snapshot));
++        }
++    }
++
++    private void applyPickItemFromEntitySnapshot(ServerboundPickItemFromEntityPacket packet, PickEntitySnapshot snapshot) {
++        if (this.player.isWithinEntityInteractionRange(snapshot.boundingBox(), 3.0)) {
++            if (!snapshot.itemStack().isEmpty()) {
++                this.tryPickItem(snapshot.itemStack());
++            }
++
++            if (packet.includeData() && this.player.canUseGameMasterBlocks() && snapshot.avatar() != null) {
++                CommandSourceStack source = this.player.createCommandSourceStack();
++                this.executeGlobalOrCurrent(() -> FetchProfileCommand.printForAvatar(source, snapshot.avatar()));
++            }
++        }
++    }
++
++    private record PickEntitySnapshot(AABB boundingBox, ItemStack itemStack, @Nullable Avatar avatar) {
++        private static PickEntitySnapshot from(Entity entity) {
+             ItemStack itemStack = entity.getPickResult();
+-            if (itemStack != null && !itemStack.isEmpty()) {
+-                this.tryPickItem(itemStack);
+-            }
+-
+-            if (packet.includeData() && this.player.canUseGameMasterBlocks() && entity instanceof Avatar avatar) {
+-                FetchProfileCommand.printForAvatar(this.player.createCommandSourceStack(), avatar);
+-            }
++            return new PickEntitySnapshot(
++                entity.getBoundingBox(),
++                itemStack == null ? ItemStack.EMPTY : itemStack.copy(),
++                entity instanceof Avatar avatar ? avatar : null
++            );
+         }
+     }
+ 
+-    private void tryPickItem(ItemStack itemStack) {
++    private synchronized void tryPickItem(ItemStack itemStack) {
+         if (itemStack.isItemEnabled(this.player.level().enabledFeatures())) {
+             Inventory inventory = this.player.getInventory();
+             int slotWithExistingItem = inventory.findSlotMatchingItem(itemStack);
+@@ -762,68 +_,110 @@
+     }
+ 
+     @Override
+-    public void handleRenameItem(ServerboundRenameItemPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.containerMenu instanceof AnvilMenu menu) {
+-            if (!menu.stillValid(this.player)) {
+-                LOGGER.debug("Player {} interacted with invalid menu {}", this.player, menu);
+-                return;
+-            }
+-
+-            menu.setItemName(packet.getName());
+-        }
+-    }
+-
+-    @Override
+-    public void handleSetBeaconPacket(ServerboundSetBeaconPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.containerMenu instanceof BeaconMenu menu) {
+-            if (!this.player.containerMenu.stillValid(this.player)) {
+-                LOGGER.debug("Player {} interacted with invalid menu {}", this.player, this.player.containerMenu);
+-                return;
+-            }
+-
+-            menu.updateEffects(packet.primary(), packet.secondary());
+-        }
+-    }
+-
+-    @Override
+-    public void handleSetGameRule(ServerboundSetGameRulePacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++    public synchronized void handleRenameItem(ServerboundRenameItemPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (containerMenu instanceof AnvilMenu menu) {
++                if (!menu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, menu);
++                    return;
++                }
++
++                menu.setItemName(packet.getName());
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleSetBeaconPacket(ServerboundSetBeaconPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (containerMenu instanceof BeaconMenu menu) {
++                if (!containerMenu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, containerMenu);
++                    return;
++                }
++
++                menu.updateEffects(packet.primary(), packet.secondary());
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleSetGameRule(ServerboundSetGameRulePacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSetGameRuleOnPlayerRegion(packet));
++    }
++
++    private void handleSetGameRuleOnPlayerRegion(ServerboundSetGameRulePacket packet) {
+         if (!this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+             LOGGER.warn("Player {} tried to set game rule values without required permissions", this.player.getGameProfile().name());
+         } else {
+-            GameRules gameRules = this.player.level().getGameRules();
+-
+-            for (ServerboundSetGameRulePacket.Entry entry : packet.entries()) {
+-                GameRule<?> rule = BuiltInRegistries.GAME_RULE.getValue(entry.gameRuleKey());
+-                if (rule != null) {
+-                    this.setGameRuleValue(gameRules, rule, entry.value());
+-                } else {
+-                    LOGGER.warn("Received request to set unknown game rule: {}", entry.gameRuleKey());
+-                }
++            this.executeGlobalOrCurrent(() -> this.handleSetGameRuleOnGlobal(packet));
++        }
++    }
++
++    private void handleSetGameRuleOnGlobal(ServerboundSetGameRulePacket packet) {
++        GameRules gameRules = this.server.getGlobalGameRules();
++
++        for (ServerboundSetGameRulePacket.Entry entry : packet.entries()) {
++            GameRule<?> rule = BuiltInRegistries.GAME_RULE.getValue(entry.gameRuleKey());
++            if (rule != null) {
++                this.setGameRuleValue(gameRules, rule, entry.value());
++            } else {
++                LOGGER.warn("Received request to set unknown game rule: {}", entry.gameRuleKey());
+             }
+         }
+     }
+ 
+-    private <T> void setGameRuleValue(GameRules gameRules, GameRule<T> rule, String value) {
++    private synchronized <T> void setGameRuleValue(GameRules gameRules, GameRule<T> rule, String value) {
+         rule.deserialize(value).result().ifPresent(parsedValue -> {
+             gameRules.set(rule, (T)parsedValue, this.server);
+             this.broadcastGameRuleChangeToOperators(rule, (T)parsedValue);
+         });
+     }
+ 
+-    private <T> void broadcastGameRuleChangeToOperators(GameRule<T> rule, T value) {
++    private synchronized <T> void broadcastGameRuleChangeToOperators(GameRule<T> rule, T value) {
++        if (RegionizedTickContext.isRegionThread()) {
++            if (!this.server.regionizedTaskDispatcher().tryExecuteGlobal(() -> this.broadcastGameRuleChangeToOperators(rule, value))) {
++                throw new IllegalStateException("Cannot broadcast game rule change from region worker while region dispatcher is not running");
++            }
++            return;
++        }
++
+         Component message = Component.translatable("commands.gamerule.set", rule.id(), rule.serialize(value));
+         PlayerList playerList = this.server.getPlayerList();
+-        playerList.getPlayers().stream().filter(op -> playerList.isOp(op.nameAndId())).forEach(op -> op.sendSystemMessage(message));
++        playerList.getAllPlayers()
++            .stream()
++            .filter(op -> playerList.isOp(op.nameAndId()))
++            .forEach(op -> RegionizedWorldGuard.executeOnPlayerRegion(op, () -> op.sendSystemMessage(message)));
+     }
+ 
+     @Override
+-    public void handleSetStructureBlock(ServerboundSetStructureBlockPacket packet) {
++    public synchronized void handleSetStructureBlock(ServerboundSetStructureBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSetStructureBlockOnPlayerRegion(packet));
++    }
++
++    private void handleSetStructureBlockOnPlayerRegion(ServerboundSetStructureBlockPacket packet) {
++        this.handleSetStructureBlockOnPlayerRegion(packet, true);
++    }
++
++    private void handleSetStructureBlockOnPlayerRegion(ServerboundSetStructureBlockPacket packet, boolean routeToOwningRegions) {
+         if (this.player.canUseGameMasterBlocks()) {
+             BlockPos blockPos = packet.getPos();
++            if (routeToOwningRegions
++                && this.executeOnPlayerAndBlockRegions(
++                    this.player.level(),
++                    blockPos,
++                    "Set structure block",
++                    () -> this.handleSetStructureBlockOnPlayerRegion(packet, false)
++                )) {
++                return;
++            }
++
+             BlockState state = this.player.level().getBlockState(blockPos);
+             if (this.player.level().getBlockEntity(blockPos) instanceof StructureBlockEntity structure) {
+                 structure.setMode(packet.getMode());
+@@ -843,27 +_,27 @@
+                     String actualStructureName = structure.getStructureName();
+                     if (packet.getUpdateType() == StructureBlockEntity.UpdateType.SAVE_AREA) {
+                         if (structure.saveStructure()) {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.save_success", actualStructureName));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.save_success", actualStructureName));
+                         } else {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.save_failure", actualStructureName));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.save_failure", actualStructureName));
+                         }
+                     } else if (packet.getUpdateType() == StructureBlockEntity.UpdateType.LOAD_AREA) {
+                         if (!structure.isStructureLoadable()) {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.load_not_found", actualStructureName));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.load_not_found", actualStructureName));
+                         } else if (structure.placeStructureIfSameSize(this.player.level())) {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.load_success", actualStructureName));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.load_success", actualStructureName));
+                         } else {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.load_prepare", actualStructureName));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.load_prepare", actualStructureName));
+                         }
+                     } else if (packet.getUpdateType() == StructureBlockEntity.UpdateType.SCAN_AREA) {
+                         if (structure.detectSize()) {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.size_success", actualStructureName));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.size_success", actualStructureName));
+                         } else {
+-                            this.player.sendSystemMessage(Component.translatable("structure_block.size_failure"));
++                            this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.size_failure"));
+                         }
+                     }
+                 } else {
+-                    this.player.sendSystemMessage(Component.translatable("structure_block.invalid_structure_name", packet.getName()));
++                    this.sendSystemMessageOnPlayerRegion(Component.translatable("structure_block.invalid_structure_name", packet.getName()));
+                 }
+ 
+                 structure.setChanged();
+@@ -873,10 +_,23 @@
+     }
+ 
+     @Override
+-    public void handleSetTestBlock(ServerboundSetTestBlockPacket packet) {
++    public synchronized void handleSetTestBlock(ServerboundSetTestBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSetTestBlockOnPlayerRegion(packet));
++    }
++
++    private void handleSetTestBlockOnPlayerRegion(ServerboundSetTestBlockPacket packet) {
++        this.handleSetTestBlockOnPlayerRegion(packet, true);
++    }
++
++    private void handleSetTestBlockOnPlayerRegion(ServerboundSetTestBlockPacket packet, boolean routeToOwningRegions) {
+         if (this.player.canUseGameMasterBlocks()) {
+             BlockPos blockPos = packet.position();
++            if (routeToOwningRegions
++                && this.executeOnPlayerAndBlockRegions(this.player.level(), blockPos, "Set test block", () -> this.handleSetTestBlockOnPlayerRegion(packet, false))) {
++                return;
++            }
++
+             BlockState initialState = this.player.level().getBlockState(blockPos);
+             if (this.player.level().getBlockEntity(blockPos) instanceof TestBlockEntity testBlock) {
+                 testBlock.setMode(packet.mode());
+@@ -888,21 +_,39 @@
+     }
+ 
+     @Override
+-    public void handleTestInstanceBlockAction(ServerboundTestInstanceBlockActionPacket packet) {
++    public synchronized void handleTestInstanceBlockAction(ServerboundTestInstanceBlockActionPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleTestInstanceBlockActionOnPlayerRegion(packet));
++    }
++
++    private void handleTestInstanceBlockActionOnPlayerRegion(ServerboundTestInstanceBlockActionPacket packet) {
++        this.handleTestInstanceBlockActionOnPlayerRegion(packet, true);
++    }
++
++    private void handleTestInstanceBlockActionOnPlayerRegion(ServerboundTestInstanceBlockActionPacket packet, boolean routeToOwningRegions) {
+         BlockPos pos = packet.pos();
++        if (routeToOwningRegions
++            && this.executeOnPlayerAndBlockRegions(
++                this.player.level(),
++                pos,
++                "Test instance block action",
++                () -> this.handleTestInstanceBlockActionOnPlayerRegion(packet, false)
++            )) {
++            return;
++        }
++
+         if (this.player.canUseGameMasterBlocks() && this.player.level().getBlockEntity(pos) instanceof TestInstanceBlockEntity blockEntity) {
+             if (packet.action() != ServerboundTestInstanceBlockActionPacket.Action.QUERY
+                 && packet.action() != ServerboundTestInstanceBlockActionPacket.Action.INIT) {
+                 blockEntity.set(packet.data());
+                 if (packet.action() == ServerboundTestInstanceBlockActionPacket.Action.RESET) {
+-                    blockEntity.resetTest(this.player::sendSystemMessage);
++                    blockEntity.resetTest(this::sendSystemMessageOnPlayerRegion);
+                 } else if (packet.action() == ServerboundTestInstanceBlockActionPacket.Action.SAVE) {
+-                    blockEntity.saveTest(this.player::sendSystemMessage);
++                    blockEntity.saveTest(this::sendSystemMessageOnPlayerRegion);
+                 } else if (packet.action() == ServerboundTestInstanceBlockActionPacket.Action.EXPORT) {
+-                    blockEntity.exportTest(this.player::sendSystemMessage);
++                    blockEntity.exportTest(this::sendSystemMessageOnPlayerRegion);
+                 } else if (packet.action() == ServerboundTestInstanceBlockActionPacket.Action.RUN) {
+-                    blockEntity.runTest(this.player::sendSystemMessage);
++                    blockEntity.runTest(this::sendSystemMessageOnPlayerRegion);
+                 }
+ 
+                 BlockState state = this.player.level().getBlockState(pos);
+@@ -926,16 +_,29 @@
+                     size = Optional.empty();
+                 }
+ 
+-                this.connection.send(new ClientboundTestInstanceBlockStatus(status, size));
++                RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundTestInstanceBlockStatus(status, size));
+             }
+         }
+     }
+ 
+     @Override
+-    public void handleSetJigsawBlock(ServerboundSetJigsawBlockPacket packet) {
++    public synchronized void handleSetJigsawBlock(ServerboundSetJigsawBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSetJigsawBlockOnPlayerRegion(packet));
++    }
++
++    private void handleSetJigsawBlockOnPlayerRegion(ServerboundSetJigsawBlockPacket packet) {
++        this.handleSetJigsawBlockOnPlayerRegion(packet, true);
++    }
++
++    private void handleSetJigsawBlockOnPlayerRegion(ServerboundSetJigsawBlockPacket packet, boolean routeToOwningRegions) {
+         if (this.player.canUseGameMasterBlocks()) {
+             BlockPos blockPos = packet.getPos();
++            if (routeToOwningRegions
++                && this.executeOnPlayerAndBlockRegions(this.player.level(), blockPos, "Set jigsaw block", () -> this.handleSetJigsawBlockOnPlayerRegion(packet, false))) {
++                return;
++            }
++
+             BlockState state = this.player.level().getBlockState(blockPos);
+             if (this.player.level().getBlockEntity(blockPos) instanceof JigsawBlockEntity jigsaw) {
+                 jigsaw.setName(packet.getName());
+@@ -952,10 +_,23 @@
+     }
+ 
+     @Override
+-    public void handleJigsawGenerate(ServerboundJigsawGeneratePacket packet) {
++    public synchronized void handleJigsawGenerate(ServerboundJigsawGeneratePacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleJigsawGenerateOnPlayerRegion(packet));
++    }
++
++    private void handleJigsawGenerateOnPlayerRegion(ServerboundJigsawGeneratePacket packet) {
++        this.handleJigsawGenerateOnPlayerRegion(packet, true);
++    }
++
++    private void handleJigsawGenerateOnPlayerRegion(ServerboundJigsawGeneratePacket packet, boolean routeToOwningRegions) {
+         if (this.player.canUseGameMasterBlocks()) {
+             BlockPos blockPos = packet.getPos();
++            if (routeToOwningRegions
++                && this.executeOnPlayerAndBlockRegions(this.player.level(), blockPos, "Jigsaw generate", () -> this.handleJigsawGenerateOnPlayerRegion(packet, false))) {
++                return;
++            }
++
+             if (this.player.level().getBlockEntity(blockPos) instanceof JigsawBlockEntity jigsaw) {
+                 jigsaw.generate(this.player.level(), packet.levels(), packet.keepJigsaws());
+             }
+@@ -963,22 +_,25 @@
+     }
+ 
+     @Override
+-    public void handleSelectTrade(ServerboundSelectTradePacket packet) {
++    public synchronized void handleSelectTrade(ServerboundSelectTradePacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        int selection = packet.getItem();
+-        if (this.player.containerMenu instanceof MerchantMenu menu) {
+-            if (!menu.stillValid(this.player)) {
+-                LOGGER.debug("Player {} interacted with invalid menu {}", this.player, menu);
+-                return;
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            int selection = packet.getItem();
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (containerMenu instanceof MerchantMenu menu) {
++                if (!menu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, menu);
++                    return;
++                }
++
++                menu.setSelectionHint(selection);
++                menu.tryMoveItems(selection);
+             }
+-
+-            menu.setSelectionHint(selection);
+-            menu.tryMoveItems(selection);
+-        }
++        });
+     }
+ 
+     @Override
+-    public void handleEditBook(ServerboundEditBookPacket packet) {
++    public synchronized void handleEditBook(ServerboundEditBookPacket packet) {
+         int slot = packet.slot();
+         if (Inventory.isHotbarSlot(slot) || slot == 40) {
+             List<String> contents = Lists.newArrayList();
+@@ -992,206 +_,259 @@
+         }
+     }
+ 
+-    private void updateBookContents(List<FilteredText> contents, int slot) {
+-        ItemStack carried = this.player.getInventory().getItem(slot);
+-        if (carried.has(DataComponents.WRITABLE_BOOK_CONTENT)) {
+-            List<Filterable<String>> pages = contents.stream().map(this::filterableFromOutgoing).toList();
+-            carried.set(DataComponents.WRITABLE_BOOK_CONTENT, new WritableBookContent(pages));
+-        }
+-    }
+-
+-    private void signBook(FilteredText title, List<FilteredText> contents, int slot) {
+-        ItemStack carried = this.player.getInventory().getItem(slot);
+-        if (carried.has(DataComponents.WRITABLE_BOOK_CONTENT)) {
+-            ItemStack writtenBook = carried.transmuteCopy(Items.WRITTEN_BOOK);
+-            writtenBook.remove(DataComponents.WRITABLE_BOOK_CONTENT);
+-            List<Filterable<Component>> pages = contents.stream().map(page -> this.filterableFromOutgoing(page).<Component>map(Component::literal)).toList();
+-            writtenBook.set(
+-                DataComponents.WRITTEN_BOOK_CONTENT, new WrittenBookContent(this.filterableFromOutgoing(title), this.player.getPlainTextName(), 0, pages, true)
+-            );
+-            this.player.getInventory().setItem(slot, writtenBook);
+-        }
+-    }
+-
+-    private Filterable<String> filterableFromOutgoing(FilteredText text) {
++    private synchronized void updateBookContents(List<FilteredText> contents, int slot) {
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            ItemStack carried = this.player.getInventory().getItem(slot);
++            if (carried.has(DataComponents.WRITABLE_BOOK_CONTENT)) {
++                List<Filterable<String>> pages = contents.stream().map(this::filterableFromOutgoing).toList();
++                carried.set(DataComponents.WRITABLE_BOOK_CONTENT, new WritableBookContent(pages));
++            }
++        });
++    }
++
++    private synchronized void signBook(FilteredText title, List<FilteredText> contents, int slot) {
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            ItemStack carried = this.player.getInventory().getItem(slot);
++            if (carried.has(DataComponents.WRITABLE_BOOK_CONTENT)) {
++                ItemStack writtenBook = carried.transmuteCopy(Items.WRITTEN_BOOK);
++                writtenBook.remove(DataComponents.WRITABLE_BOOK_CONTENT);
++                List<Filterable<Component>> pages = contents.stream().map(page -> this.filterableFromOutgoing(page).<Component>map(Component::literal)).toList();
++                writtenBook.set(
++                    DataComponents.WRITTEN_BOOK_CONTENT, new WrittenBookContent(this.filterableFromOutgoing(title), this.player.getPlainTextName(), 0, pages, true)
++                );
++                this.player.getInventory().setItem(slot, writtenBook);
++            }
++        });
++    }
++
++    private synchronized Filterable<String> filterableFromOutgoing(FilteredText text) {
+         return this.player.isTextFilteringEnabled() ? Filterable.passThrough(text.filteredOrEmpty()) : Filterable.from(text);
+     }
+ 
+     @Override
+-    public void handleEntityTagQuery(ServerboundEntityTagQueryPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+-            Entity entity = this.player.level().getEntity(packet.getEntityId());
+-            if (entity != null) {
+-                try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(entity.problemPath(), LOGGER)) {
+-                    TagValueOutput output = TagValueOutput.createWithContext(reporter, entity.registryAccess());
+-                    entity.saveWithoutId(output);
+-                    CompoundTag result = output.buildResult();
+-                    this.send(new ClientboundTagQueryPacket(packet.getTransactionId(), result));
+-                }
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleContainerSlotStateChanged(ServerboundContainerSlotStateChangedPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (!this.player.isSpectator() && packet.containerId() == this.player.containerMenu.containerId) {
+-            if (this.player.containerMenu instanceof CrafterMenu crafterMenu && crafterMenu.getContainer() instanceof CrafterBlockEntity crafterBlockEntity) {
+-                crafterBlockEntity.setSlotState(packet.slotId(), packet.newState());
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleBlockEntityTagQuery(ServerboundBlockEntityTagQueryPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+-            BlockEntity blockEntity = this.player.level().getBlockEntity(packet.getPos());
+-            CompoundTag tag = blockEntity != null ? blockEntity.saveWithoutMetadata(this.player.registryAccess()) : null;
+-            this.send(new ClientboundTagQueryPacket(packet.getTransactionId(), tag));
+-        }
+-    }
+-
+-    @Override
+-    public void handleMovePlayer(ServerboundMovePlayerPacket packet) {
++    public synchronized void handleEntityTagQuery(ServerboundEntityTagQueryPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (!this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
++                return;
++            }
++
++            ServerLevel level = this.player.level();
++            this.executeGlobalOrCurrent(() -> {
++                Entity entity = level.getEntity(packet.getEntityId());
++                if (entity != null) {
++                    CompoundTag result = this.readEntityTag(entity);
++                    RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundTagQueryPacket(packet.getTransactionId(), result));
++                }
++            });
++        });
++    }
++
++    private CompoundTag readEntityTag(Entity entity) {
++        if (!(entity.level() instanceof ServerLevel level) || !this.server.regionizedTaskDispatcher().isRunning()) {
++            return saveEntityTag(entity);
++        }
++
++        return RegionizedWorldGuard.callOnEntityRegionAndWait(entity, "entity tag query", () -> saveEntityTag(entity));
++    }
++
++    private static CompoundTag saveEntityTag(Entity entity) {
++        try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(entity.problemPath(), LOGGER)) {
++            TagValueOutput output = TagValueOutput.createWithContext(reporter, entity.registryAccess());
++            entity.saveWithoutId(output);
++            return output.buildResult();
++        }
++    }
++
++    @Override
++    public synchronized void handleContainerSlotStateChanged(ServerboundContainerSlotStateChangedPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (!this.player.isSpectator() && packet.containerId() == containerMenu.containerId) {
++                if (!containerMenu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, containerMenu);
++                    return;
++                }
++
++                if (containerMenu instanceof CrafterMenu crafterMenu && crafterMenu.getContainer() instanceof CrafterBlockEntity crafterBlockEntity) {
++                    crafterBlockEntity.setSlotState(packet.slotId(), packet.newState());
++                }
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleBlockEntityTagQuery(ServerboundBlockEntityTagQueryPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (!this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
++                return;
++            }
++
++            ServerLevel level = this.player.level();
++            this.executeGlobalOrCurrent(() -> {
++                CompoundTag tag = this.readBlockEntityTag(level, packet.getPos());
++                RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundTagQueryPacket(packet.getTransactionId(), tag));
++            });
++        });
++    }
++
++    private CompoundTag readBlockEntityTag(ServerLevel level, BlockPos pos) {
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            BlockEntity blockEntity = level.getBlockEntity(pos);
++            return blockEntity != null ? blockEntity.saveWithoutMetadata(this.player.registryAccess()) : null;
++        }
++
++        return this.callOnRegionAndWait(level, pos, "block entity tag query", () -> {
++            BlockEntity blockEntity = level.getBlockEntity(pos);
++            return blockEntity != null ? blockEntity.saveWithoutMetadata(this.player.registryAccess()) : null;
++        });
++    }
++
++    @Override
++    public synchronized void handleMovePlayer(ServerboundMovePlayerPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         if (containsInvalidValues(packet.getX(0.0), packet.getY(0.0), packet.getZ(0.0), packet.getYRot(0.0F), packet.getXRot(0.0F))) {
+             this.disconnect(Component.translatable("multiplayer.disconnect.invalid_player_movement"));
+         } else {
+-            ServerLevel level = this.player.level();
+-            if (!this.player.wonGame) {
+-                if (this.tickCount == 0) {
+-                    this.resetPosition();
+-                }
+-
+-                if (this.hasClientLoaded()) {
+-                    float targetYRot = Mth.wrapDegrees(packet.getYRot(this.player.getYRot()));
+-                    float targetXRot = Mth.wrapDegrees(packet.getXRot(this.player.getXRot()));
+-                    if (this.updateAwaitingTeleport()) {
+-                        this.player.absSnapRotationTo(targetYRot, targetXRot);
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleMovePlayerOnPlayerRegion(packet));
++        }
++    }
++
++    private void handleMovePlayerOnPlayerRegion(ServerboundMovePlayerPacket packet) {
++        ServerLevel level = this.player.level();
++        if (!this.player.wonGame) {
++            if (this.tickCount == 0) {
++                this.resetPosition();
++            }
++
++            if (this.hasClientLoaded()) {
++                float targetYRot = Mth.wrapDegrees(packet.getYRot(this.player.getYRot()));
++                float targetXRot = Mth.wrapDegrees(packet.getXRot(this.player.getXRot()));
++                if (this.updateAwaitingTeleport()) {
++                    this.player.absSnapRotationTo(targetYRot, targetXRot);
++                } else {
++                    double targetX = clampHorizontal(packet.getX(this.player.getX()));
++                    double targetY = clampVertical(packet.getY(this.player.getY()));
++                    double targetZ = clampHorizontal(packet.getZ(this.player.getZ()));
++                    if (this.player.isPassenger()) {
++                        this.player.absSnapTo(this.player.getX(), this.player.getY(), this.player.getZ(), targetYRot, targetXRot);
++                        this.player.level().getChunkSource().move(this.player);
+                     } else {
+-                        double targetX = clampHorizontal(packet.getX(this.player.getX()));
+-                        double targetY = clampVertical(packet.getY(this.player.getY()));
+-                        double targetZ = clampHorizontal(packet.getZ(this.player.getZ()));
+-                        if (this.player.isPassenger()) {
+-                            this.player.absSnapTo(this.player.getX(), this.player.getY(), this.player.getZ(), targetYRot, targetXRot);
+-                            this.player.level().getChunkSource().move(this.player);
++                        double startX = this.player.getX();
++                        double startY = this.player.getY();
++                        double startZ = this.player.getZ();
++                        double xDist = targetX - this.firstGoodX;
++                        double yDist = targetY - this.firstGoodY;
++                        double zDist = targetZ - this.firstGoodZ;
++                        double expectedDist = this.player.getDeltaMovement().lengthSqr();
++                        double movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
++                        if (this.player.isSleeping()) {
++                            if (movedDist > 1.0) {
++                                this.teleport(this.player.getX(), this.player.getY(), this.player.getZ(), targetYRot, targetXRot);
++                            }
+                         } else {
+-                            double startX = this.player.getX();
+-                            double startY = this.player.getY();
+-                            double startZ = this.player.getZ();
+-                            double xDist = targetX - this.firstGoodX;
+-                            double yDist = targetY - this.firstGoodY;
+-                            double zDist = targetZ - this.firstGoodZ;
+-                            double expectedDist = this.player.getDeltaMovement().lengthSqr();
+-                            double movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
+-                            if (this.player.isSleeping()) {
+-                                if (movedDist > 1.0) {
+-                                    this.teleport(this.player.getX(), this.player.getY(), this.player.getZ(), targetYRot, targetXRot);
++                            boolean isFallFlying = this.player.isFallFlying();
++                            if (level.tickRateManager().runsNormally()) {
++                                this.receivedMovePacketCount++;
++                                int deltaPackets = this.receivedMovePacketCount - this.knownMovePacketCount;
++                                if (deltaPackets > 5) {
++                                    LOGGER.debug(
++                                        "{} is sending move packets too frequently ({} packets since last tick)",
++                                        this.player.getPlainTextName(),
++                                        deltaPackets
++                                    );
++                                    deltaPackets = 1;
+                                 }
+-                            } else {
+-                                boolean isFallFlying = this.player.isFallFlying();
+-                                if (level.tickRateManager().runsNormally()) {
+-                                    this.receivedMovePacketCount++;
+-                                    int deltaPackets = this.receivedMovePacketCount - this.knownMovePacketCount;
+-                                    if (deltaPackets > 5) {
+-                                        LOGGER.debug(
+-                                            "{} is sending move packets too frequently ({} packets since last tick)",
+-                                            this.player.getPlainTextName(),
+-                                            deltaPackets
++
++                                if (this.shouldCheckPlayerMovement(isFallFlying)) {
++                                    float metersPerTick = isFallFlying ? 300.0F : 100.0F;
++                                    if (movedDist - expectedDist > metersPerTick * deltaPackets) {
++                                        LOGGER.warn("{} moved too quickly! {},{},{}", this.player.getPlainTextName(), xDist, yDist, zDist);
++                                        this.teleport(
++                                            this.player.getX(), this.player.getY(), this.player.getZ(), this.player.getYRot(), this.player.getXRot()
+                                         );
+-                                        deltaPackets = 1;
+-                                    }
+-
+-                                    if (this.shouldCheckPlayerMovement(isFallFlying)) {
+-                                        float metersPerTick = isFallFlying ? 300.0F : 100.0F;
+-                                        if (movedDist - expectedDist > metersPerTick * deltaPackets) {
+-                                            LOGGER.warn("{} moved too quickly! {},{},{}", this.player.getPlainTextName(), xDist, yDist, zDist);
+-                                            this.teleport(
+-                                                this.player.getX(), this.player.getY(), this.player.getZ(), this.player.getYRot(), this.player.getXRot()
+-                                            );
+-                                            return;
+-                                        }
+-                                    }
+-                                }
+-
+-                                AABB oldAABB = this.player.getBoundingBox();
+-                                xDist = targetX - this.lastGoodX;
+-                                yDist = targetY - this.lastGoodY;
+-                                zDist = targetZ - this.lastGoodZ;
+-                                boolean movedUpwards = yDist > 0.0;
+-                                if (this.player.onGround() && !packet.isOnGround() && movedUpwards) {
+-                                    this.player.jumpFromGround();
+-                                }
+-
+-                                boolean playerStandsOnSomething = this.player.verticalCollisionBelow;
+-                                this.player.move(MoverType.PLAYER, new Vec3(xDist, yDist, zDist));
+-                                double oyDist = yDist;
+-                                xDist = targetX - this.player.getX();
+-                                yDist = targetY - this.player.getY();
+-                                if (yDist > -0.5 || yDist < 0.5) {
+-                                    yDist = 0.0;
+-                                }
+-
+-                                zDist = targetZ - this.player.getZ();
+-                                movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
+-                                boolean fail = false;
+-                                if (!this.player.isChangingDimension()
+-                                    && movedDist > 0.0625
+-                                    && !this.player.isSleeping()
+-                                    && !this.player.isCreative()
++                                        return;
++                                    }
++                                }
++                            }
++
++                            AABB oldAABB = this.player.getBoundingBox();
++                            xDist = targetX - this.lastGoodX;
++                            yDist = targetY - this.lastGoodY;
++                            zDist = targetZ - this.lastGoodZ;
++                            boolean movedUpwards = yDist > 0.0;
++                            if (this.player.onGround() && !packet.isOnGround() && movedUpwards) {
++                                this.player.jumpFromGround();
++                            }
++
++                            boolean playerStandsOnSomething = this.player.verticalCollisionBelow;
++                            this.player.move(MoverType.PLAYER, new Vec3(xDist, yDist, zDist));
++                            double oyDist = yDist;
++                            xDist = targetX - this.player.getX();
++                            yDist = targetY - this.player.getY();
++                            if (yDist > -0.5 || yDist < 0.5) {
++                                yDist = 0.0;
++                            }
++
++                            zDist = targetZ - this.player.getZ();
++                            movedDist = xDist * xDist + yDist * yDist + zDist * zDist;
++                            boolean fail = false;
++                            if (!this.player.isChangingDimension()
++                                && movedDist > 0.0625
++                                && !this.player.isSleeping()
++                                && !this.player.isCreative()
++                                && !this.player.isSpectator()
++                                && !this.player.isInPostImpulseGraceTime()) {
++                                fail = true;
++                                LOGGER.warn("{} moved wrongly!", this.player.getPlainTextName());
++                            }
++
++                            if (this.player.noPhysics
++                                || this.player.isSleeping()
++                                || (!fail || !level.noCollision(this.player, oldAABB))
++                                    && !this.isEntityCollidingWithAnythingNew(level, this.player, oldAABB, targetX, targetY, targetZ)) {
++                                this.player.absSnapTo(targetX, targetY, targetZ, targetYRot, targetXRot);
++                                boolean isAutoSpinAttack = this.player.isAutoSpinAttack();
++                                this.clientIsFloating = oyDist >= -0.03125
++                                    && !playerStandsOnSomething
+                                     && !this.player.isSpectator()
+-                                    && !this.player.isInPostImpulseGraceTime()) {
+-                                    fail = true;
+-                                    LOGGER.warn("{} moved wrongly!", this.player.getPlainTextName());
+-                                }
+-
+-                                if (this.player.noPhysics
+-                                    || this.player.isSleeping()
+-                                    || (!fail || !level.noCollision(this.player, oldAABB))
+-                                        && !this.isEntityCollidingWithAnythingNew(level, this.player, oldAABB, targetX, targetY, targetZ)) {
+-                                    this.player.absSnapTo(targetX, targetY, targetZ, targetYRot, targetXRot);
+-                                    boolean isAutoSpinAttack = this.player.isAutoSpinAttack();
+-                                    this.clientIsFloating = oyDist >= -0.03125
+-                                        && !playerStandsOnSomething
+-                                        && !this.player.isSpectator()
+-                                        && !this.server.allowFlight()
+-                                        && !this.player.getAbilities().mayfly
+-                                        && !this.player.hasEffect(MobEffects.LEVITATION)
+-                                        && !isFallFlying
+-                                        && !isAutoSpinAttack
+-                                        && this.noBlocksAround(this.player);
+-                                    this.player.level().getChunkSource().move(this.player);
+-                                    Vec3 clientDeltaMovement = new Vec3(this.player.getX() - startX, this.player.getY() - startY, this.player.getZ() - startZ);
+-                                    this.player.setOnGroundWithMovement(packet.isOnGround(), packet.horizontalCollision(), clientDeltaMovement);
+-                                    this.player.doCheckFallDamage(clientDeltaMovement.x, clientDeltaMovement.y, clientDeltaMovement.z, packet.isOnGround());
+-                                    this.handlePlayerKnownMovement(clientDeltaMovement);
+-                                    if (movedUpwards) {
+-                                        this.player.resetFallDistance();
+-                                    }
+-
+-                                    if (packet.isOnGround()
+-                                        || this.player.hasLandedInLiquid()
+-                                        || this.player.onClimbable()
+-                                        || this.player.isSpectator()
+-                                        || isFallFlying
+-                                        || isAutoSpinAttack) {
+-                                        this.player.tryResetCurrentImpulseContext();
+-                                    }
+-
+-                                    this.player.checkMovementStatistics(this.player.getX() - startX, this.player.getY() - startY, this.player.getZ() - startZ);
+-                                    this.lastGoodX = this.player.getX();
+-                                    this.lastGoodY = this.player.getY();
+-                                    this.lastGoodZ = this.player.getZ();
+-                                } else {
+-                                    this.teleport(startX, startY, startZ, targetYRot, targetXRot);
+-                                    this.player
+-                                        .doCheckFallDamage(
+-                                            this.player.getX() - startX, this.player.getY() - startY, this.player.getZ() - startZ, packet.isOnGround()
+-                                        );
+-                                    this.player.removeLatestMovementRecording();
+-                                }
++                                    && !this.server.allowFlight()
++                                    && !this.player.mayFly()
++                                    && !this.player.hasEffect(MobEffects.LEVITATION)
++                                    && !isFallFlying
++                                    && !isAutoSpinAttack
++                                    && this.noBlocksAround(this.player);
++                                this.player.level().getChunkSource().move(this.player);
++                                Vec3 clientDeltaMovement = new Vec3(this.player.getX() - startX, this.player.getY() - startY, this.player.getZ() - startZ);
++                                this.player.setOnGroundWithMovement(packet.isOnGround(), packet.horizontalCollision(), clientDeltaMovement);
++                                this.player.doCheckFallDamage(clientDeltaMovement.x, clientDeltaMovement.y, clientDeltaMovement.z, packet.isOnGround());
++                                this.handlePlayerKnownMovement(clientDeltaMovement);
++                                if (movedUpwards) {
++                                    this.player.resetFallDistance();
++                                }
++
++                                if (packet.isOnGround()
++                                    || this.player.hasLandedInLiquid()
++                                    || this.player.onClimbable()
++                                    || this.player.isSpectator()
++                                    || isFallFlying
++                                    || isAutoSpinAttack) {
++                                    this.player.tryResetCurrentImpulseContext();
++                                }
++
++                                this.player.checkMovementStatistics(this.player.getX() - startX, this.player.getY() - startY, this.player.getZ() - startZ);
++                                this.lastGoodX = this.player.getX();
++                                this.lastGoodY = this.player.getY();
++                                this.lastGoodZ = this.player.getZ();
++                            } else {
++                                this.teleport(startX, startY, startZ, targetYRot, targetXRot);
++                                this.player
++                                    .doCheckFallDamage(
++                                        this.player.getX() - startX, this.player.getY() - startY, this.player.getZ() - startZ, packet.isOnGround()
++                                    );
++                                this.player.removeLatestMovementRecording();
+                             }
+                         }
+                     }
+@@ -1200,7 +_,7 @@
+         }
+     }
+ 
+-    private boolean shouldCheckPlayerMovement(boolean isFallFlying) {
++    private synchronized boolean shouldCheckPlayerMovement(boolean isFallFlying) {
+         if (this.isSingleplayerOwner()) {
+             return false;
+         } else if (this.player.isChangingDimension()) {
+@@ -1211,7 +_,7 @@
+         }
+     }
+ 
+-    private boolean updateAwaitingTeleport() {
++    private synchronized boolean updateAwaitingTeleport() {
+         if (this.awaitingPositionFromClient != null) {
+             if (this.tickCount - this.awaitingTeleportTime > 20) {
+                 this.awaitingTeleportTime = this.tickCount;
+@@ -1245,11 +_,11 @@
+         return false;
+     }
+ 
+-    public void teleport(double x, double y, double z, float yRot, float xRot) {
++    public synchronized void teleport(double x, double y, double z, float yRot, float xRot) {
+         this.teleport(new PositionMoveRotation(new Vec3(x, y, z), Vec3.ZERO, yRot, xRot), Collections.emptySet());
+     }
+ 
+-    public void teleport(PositionMoveRotation destination, Set<Relative> relatives) {
++    public synchronized void teleport(PositionMoveRotation destination, Set<Relative> relatives) {
+         this.awaitingTeleportTime = this.tickCount;
+         if (++this.awaitingTeleport == Integer.MAX_VALUE) {
+             this.awaitingTeleport = 0;
+@@ -1260,9 +_,25 @@
+         this.send(ClientboundPlayerPositionPacket.of(this.awaitingTeleport, destination, relatives));
+     }
+ 
++    private synchronized boolean hasAwaitingPositionFromClient() {
++        return this.awaitingPositionFromClient != null;
++    }
++
++    private synchronized void markAwaitingPositionFromPlayer() {
++        this.awaitingPositionFromClient = this.player.position();
++    }
++
+     @Override
+-    public void handlePlayerAction(ServerboundPlayerActionPacket packet) {
++    public synchronized void handlePlayerAction(ServerboundPlayerActionPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handlePlayerActionOnPlayerRegion(packet));
++    }
++
++    private void handlePlayerActionOnPlayerRegion(ServerboundPlayerActionPacket packet) {
++        this.handlePlayerActionOnPlayerRegion(packet, true);
++    }
++
++    private void handlePlayerActionOnPlayerRegion(ServerboundPlayerActionPacket packet, boolean routeToOwningRegions) {
+         if (this.hasClientLoaded()) {
+             BlockPos pos = packet.getPos();
+             this.player.resetLastActionTime();
+@@ -1286,9 +_,10 @@
+                     }
+                 case SWAP_ITEM_WITH_OFFHAND:
+                     if (!this.player.isSpectator()) {
+-                        ItemStack swap = this.player.getItemInHand(InteractionHand.OFF_HAND);
+-                        this.player.setItemInHand(InteractionHand.OFF_HAND, this.player.getItemInHand(InteractionHand.MAIN_HAND));
+-                        this.player.setItemInHand(InteractionHand.MAIN_HAND, swap);
++                        var event = net.neoforged.neoforge.common.CommonHooks.onLivingSwapHandItems(this.player);
++                        if (event.isCanceled()) return;
++                        this.player.setItemInHand(InteractionHand.OFF_HAND, event.getItemSwappedToOffHand());
++                        this.player.setItemInHand(InteractionHand.MAIN_HAND, event.getItemSwappedToMainHand());
+                         this.player.stopUsingItem();
+                     }
+ 
+@@ -1311,6 +_,11 @@
+                 case START_DESTROY_BLOCK:
+                 case ABORT_DESTROY_BLOCK:
+                 case STOP_DESTROY_BLOCK:
++                    if (routeToOwningRegions
++                        && this.executeOnPlayerAndBlockRegions(this.player.level(), pos, "Player block action", () -> this.handlePlayerActionOnPlayerRegion(packet, false))) {
++                        return;
++                    }
++
+                     this.player.gameMode.handleBlockBreakAction(pos, action, packet.getDirection(), this.player.level().getMaxY(), packet.getSequence());
+                     this.ackBlockChangesUpTo(packet.getSequence());
+                     return;
+@@ -1331,8 +_,16 @@
+     }
+ 
+     @Override
+-    public void handleUseItemOn(ServerboundUseItemOnPacket packet) {
++    public synchronized void handleUseItemOn(ServerboundUseItemOnPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleUseItemOnPlayerRegion(packet));
++    }
++
++    private void handleUseItemOnPlayerRegion(ServerboundUseItemOnPacket packet) {
++        this.handleUseItemOnPlayerRegion(packet, true);
++    }
++
++    private void handleUseItemOnPlayerRegion(ServerboundUseItemOnPacket packet, boolean routeToOwningRegions) {
+         if (this.hasClientLoaded()) {
+             this.ackBlockChangesUpTo(packet.getSequence());
+             ServerLevel level = this.player.level();
+@@ -1342,6 +_,11 @@
+                 BlockHitResult blockHit = packet.getHitResult();
+                 Vec3 location = blockHit.getLocation();
+                 BlockPos pos = blockHit.getBlockPos();
++                if (routeToOwningRegions
++                    && this.executeOnPlayerAndBlockRegions(level, pos, "Player block interaction", () -> this.handleUseItemOnPlayerRegion(packet, false))) {
++                    return;
++                }
++
+                 if (this.player.isWithinBlockInteractionRange(pos, 1.0)) {
+                     Vec3 distance = location.subtract(Vec3.atCenterOf(pos));
+                     double limit = 1.0000001;
+@@ -1357,7 +_,7 @@
+                         } else {
+                             if (this.server.isUnderSpawnProtection(level, pos, this.player)) {
+                                 this.player.sendSpawnProtectionMessage(pos);
+-                            } else if (this.awaitingPositionFromClient == null && level.mayInteract(this.player, pos)) {
++                            } else if (!this.hasAwaitingPositionFromClient() && level.mayInteract(this.player, pos)) {
+                                 InteractionResult interactionResult = this.player.gameMode.useItemOn(this.player, level, itemStack, hand, blockHit);
+                                 if (interactionResult.consumesAction()) {
+                                     CriteriaTriggers.ANY_BLOCK_USE.trigger(this.player, blockHit.getBlockPos(), itemStack);
+@@ -1404,8 +_,12 @@
+     }
+ 
+     @Override
+-    public void handleUseItem(ServerboundUseItemPacket packet) {
++    public synchronized void handleUseItem(ServerboundUseItemPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleUseItemOnPlayerRegion(packet));
++    }
++
++    private void handleUseItemOnPlayerRegion(ServerboundUseItemPacket packet) {
+         if (this.hasClientLoaded()) {
+             this.ackBlockChangesUpTo(packet.getSequence());
+             ServerLevel level = this.player.level();
+@@ -1428,25 +_,72 @@
+     }
+ 
+     @Override
+-    public void handleTeleportToEntityPacket(ServerboundTeleportToEntityPacket packet) {
++    public synchronized void handleTeleportToEntityPacket(ServerboundTeleportToEntityPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (!this.player.isSpectator()) {
++                return;
++            }
++
++            this.executeGlobalOrCurrent(() -> {
++                for (ServerLevel level : this.server.getAllLevels()) {
++                    Entity entity = packet.getEntity(level);
++                    if (entity != null) {
++                        SpectatorEntityTarget target = this.snapshotSpectatorTarget(entity);
++                        if (target != null) {
++                            this.teleportSpectatorToTarget(target);
++                        }
++                        return;
++                    }
++                }
++            });
++        });
++    }
++
++    private void teleportSpectatorToTarget(SpectatorEntityTarget target) {
++        if (this.player.level() == target.level() && this.server.regionizedTaskDispatcher().isRunning()) {
++            RegionKey playerRegion = RegionizedWorldGuard.regionFor(target.level(), this.player.blockPosition());
++            RegionKey targetRegion = RegionizedWorldGuard.regionFor(target.level(), target.blockPos());
++            if (!playerRegion.equals(targetRegion)) {
++                if (RegionizedTickContext.isRegionThread()) {
++                    this.executeGlobalOrCurrent(() -> this.teleportSpectatorToTarget(target));
++                    return;
++                }
++
++                this.server.regionizedTaskDispatcher().awaitRegions("spectator entity teleport", List.of(playerRegion, targetRegion), playerRegion, () -> {
++                    if (this.player.level() != target.level()) {
++                        return;
++                    }
++
++                    RegionKey currentPlayerRegion = RegionizedWorldGuard.regionFor(target.level(), this.player.blockPosition());
++                    if (!playerRegion.equals(currentPlayerRegion)) {
++                        this.executeGlobalOrCurrent(() -> this.teleportSpectatorToTarget(target));
++                        return;
++                    }
++
++                    this.teleportSpectatorToTargetOnPlayerRegion(target);
++                });
++                return;
++            }
++        }
++
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.teleportSpectatorToTargetOnPlayerRegion(target));
++    }
++
++    private void teleportSpectatorToTargetOnPlayerRegion(SpectatorEntityTarget target) {
+         if (this.player.isSpectator()) {
+-            for (ServerLevel level : this.server.getAllLevels()) {
+-                Entity entity = packet.getEntity(level);
+-                if (entity != null) {
+-                    this.player.teleportTo(level, entity.getX(), entity.getY(), entity.getZ(), Set.of(), entity.getYRot(), entity.getXRot(), true);
+-                    return;
+-                }
+-            }
++            this.player.teleportTo(target.level(), target.position().x, target.position().y, target.position().z, Set.of(), target.yRot(), target.xRot(), true);
+         }
+     }
+ 
+     @Override
+-    public void handlePaddleBoat(ServerboundPaddleBoatPacket packet) {
++    public synchronized void handlePaddleBoat(ServerboundPaddleBoatPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.getControlledVehicle() instanceof AbstractBoat boat) {
+-            boat.setPaddleState(packet.getLeft(), packet.getRight());
+-        }
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (this.player.getControlledVehicle() instanceof AbstractBoat boat) {
++                boat.setPaddleState(packet.getLeft(), packet.getRight());
++            }
++        });
+     }
+ 
+     @Override
+@@ -1459,15 +_,18 @@
+     private void removePlayerFromWorld() {
+         this.chatMessageChain.close();
+         this.server.invalidateStatus();
++        Component playerDisplayName = RegionizedWorldGuard.callOnPlayerRegionAndWait(
++            this.player, "player disconnect display name", this.player::getDisplayName
++        );
+         this.server
+             .getPlayerList()
+-            .broadcastSystemMessage(Component.translatable("multiplayer.player.left", this.player.getDisplayName()).withStyle(ChatFormatting.YELLOW), false);
+-        this.player.disconnect();
++            .broadcastSystemMessage(Component.translatable("multiplayer.player.left", playerDisplayName).withStyle(ChatFormatting.YELLOW), false);
++        RegionizedWorldGuard.executeOnPlayerRegionAndWait(this.player, "player disconnect state", this.player::disconnect);
+         this.server.getPlayerList().remove(this.player);
+         this.player.getTextFilter().leave();
+     }
+ 
+-    public void ackBlockChangesUpTo(int packetSequenceNr) {
++    public synchronized void ackBlockChangesUpTo(int packetSequenceNr) {
+         if (packetSequenceNr < 0) {
+             throw new IllegalArgumentException("Expected packet sequence nr >= 0");
+         } else {
+@@ -1476,22 +_,24 @@
+     }
+ 
+     @Override
+-    public void handleSetCarriedItem(ServerboundSetCarriedItemPacket packet) {
++    public synchronized void handleSetCarriedItem(ServerboundSetCarriedItemPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (packet.getSlot() >= 0 && packet.getSlot() < Inventory.getSelectionSize()) {
+-            if (this.player.getInventory().getSelectedSlot() != packet.getSlot() && this.player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
+-                this.player.stopUsingItem();
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (packet.getSlot() >= 0 && packet.getSlot() < Inventory.getSelectionSize()) {
++                if (this.player.getInventory().getSelectedSlot() != packet.getSlot() && this.player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
++                    this.player.stopUsingItem();
++                }
++
++                this.player.getInventory().setSelectedSlot(packet.getSlot());
++                this.player.resetLastActionTime();
++            } else {
++                LOGGER.warn("{} tried to set an invalid carried item", this.player.getPlainTextName());
+             }
+-
+-            this.player.getInventory().setSelectedSlot(packet.getSlot());
+-            this.player.resetLastActionTime();
+-        } else {
+-            LOGGER.warn("{} tried to set an invalid carried item", this.player.getPlainTextName());
+-        }
++        });
+     }
+ 
+     @Override
+-    public void handleChat(ServerboundChatPacket packet) {
++    public synchronized void handleChat(ServerboundChatPacket packet) {
+         Optional<LastSeenMessages> unpackedLastSeen = this.unpackAndApplyLastSeen(packet.lastSeenMessages());
+         if (!unpackedLastSeen.isEmpty()) {
+             this.tryHandleChat(packet.message(), false, () -> {
+@@ -1504,8 +_,9 @@
+                 }
+ 
+                 CompletableFuture<FilteredText> filteredFuture = this.filterTextPacket(signedMessage.signedContent());
+-                Component decorated = this.server.getChatDecorator().decorate(this.player, signedMessage.decoratedContent());
++                Component decorated = net.neoforged.neoforge.common.CommonHooks.getServerChatSubmittedDecorator().decorate(this.player, signedMessage.decoratedContent());
+                 this.chatMessageChain.append(filteredFuture, filtered -> {
++                    if (decorated == null) return; // Forge: ServerChatEvent was canceled if this is null.
+                     PlayerChatMessage filteredMessage = signedMessage.withUnsignedContent(decorated).filter(filtered.mask());
+                     this.broadcastChatMessage(filteredMessage);
+                 });
+@@ -1514,27 +_,27 @@
+     }
+ 
+     @Override
+-    public void handleChatCommand(ServerboundChatCommandPacket packet) {
++    public synchronized void handleChatCommand(ServerboundChatCommandPacket packet) {
+         this.tryHandleChat(packet.command(), true, () -> {
+             this.performUnsignedChatCommand(packet.command());
+             this.detectRateSpam();
+         });
+     }
+ 
+-    private void performUnsignedChatCommand(String command) {
++    private synchronized void performUnsignedChatCommand(String command) {
+         ParseResults<CommandSourceStack> parsed = this.parseCommand(command);
+         if (this.server.enforceSecureProfile() && SignableCommand.hasSignableArguments(parsed)) {
+             LOGGER.error(
+                 "Received unsigned command packet from {}, but the command requires signable arguments: {}", this.player.getGameProfile().name(), command
+             );
+-            this.player.sendSystemMessage(INVALID_COMMAND_SIGNATURE);
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.sendSystemMessage(INVALID_COMMAND_SIGNATURE));
+         } else {
+             this.server.getCommands().performCommand(parsed, command);
+         }
+     }
+ 
+     @Override
+-    public void handleSignedChatCommand(ServerboundChatCommandSignedPacket packet) {
++    public synchronized void handleSignedChatCommand(ServerboundChatCommandSignedPacket packet) {
+         Optional<LastSeenMessages> unpackedLastSeen = this.unpackAndApplyLastSeen(packet.lastSeenMessages());
+         if (!unpackedLastSeen.isEmpty()) {
+             this.tryHandleChat(packet.command(), true, () -> {
+@@ -1544,7 +_,7 @@
+         }
+     }
+ 
+-    private void performSignedChatCommand(ServerboundChatCommandSignedPacket packet, LastSeenMessages lastSeenMessages) {
++    private synchronized void performSignedChatCommand(ServerboundChatCommandSignedPacket packet, LastSeenMessages lastSeenMessages) {
+         ParseResults<CommandSourceStack> command = this.parseCommand(packet.command());
+ 
+         Map<String, PlayerChatMessage> signedArguments;
+@@ -1560,12 +_,12 @@
+         this.server.getCommands().performCommand(command, packet.command());
+     }
+ 
+-    private void handleMessageDecodeFailure(SignedMessageChain.DecodeException e) {
++    private synchronized void handleMessageDecodeFailure(SignedMessageChain.DecodeException e) {
+         LOGGER.warn("Failed to update secure chat state for {}: '{}'", this.player.getGameProfile().name(), e.getComponent().getString());
+-        this.player.sendSystemMessage(e.getComponent().copy().withStyle(ChatFormatting.RED));
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.sendSystemMessage(e.getComponent().copy().withStyle(ChatFormatting.RED)));
+     }
+ 
+-    private <S> Map<String, PlayerChatMessage> collectSignedArguments(
++    private synchronized <S> Map<String, PlayerChatMessage> collectSignedArguments(
+         ServerboundChatCommandSignedPacket packet, SignableCommand<S> command, LastSeenMessages lastSeenMessages
+     ) throws SignedMessageChain.DecodeException {
+         List<ArgumentSignatures.Entry> argumentSignatures = packet.argumentSignatures().entries();
+@@ -1596,7 +_,7 @@
+         }
+     }
+ 
+-    private <S> Map<String, PlayerChatMessage> collectUnsignedArguments(List<SignableCommand.Argument<S>> parsedArguments) throws SignedMessageChain.DecodeException {
++    private synchronized <S> Map<String, PlayerChatMessage> collectUnsignedArguments(List<SignableCommand.Argument<S>> parsedArguments) throws SignedMessageChain.DecodeException {
+         Map<String, PlayerChatMessage> arguments = new HashMap<>();
+ 
+         for (SignableCommand.Argument<S> parsedArgument : parsedArguments) {
+@@ -1616,23 +_,37 @@
+         return new SignedMessageChain.DecodeException(INVALID_COMMAND_SIGNATURE);
+     }
+ 
+-    private ParseResults<CommandSourceStack> parseCommand(String command) {
++    private synchronized ParseResults<CommandSourceStack> parseCommand(String command) {
+         CommandDispatcher<CommandSourceStack> commands = this.server.getCommands().getDispatcher();
+         return commands.parse(command, this.player.createCommandSourceStack());
+     }
+ 
+-    private void tryHandleChat(String message, boolean isCommand, Runnable chatHandler) {
++    private synchronized void tryHandleChat(String message, boolean isCommand, Runnable chatHandler) {
++        if (this.server.regionizedTaskDispatcher().isRunning() && !RegionizedWorldGuard.isOnPlayerRegion(this.player)) {
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.tryHandleChat(message, isCommand, chatHandler));
++            return;
++        }
++
+         if (isChatMessageIllegal(message)) {
+             this.disconnect(Component.translatable("multiplayer.disconnect.illegal_characters"));
+         } else if (!isCommand && this.player.getChatVisibility() == ChatVisiblity.HIDDEN) {
+             this.send(new ClientboundSystemChatPacket(Component.translatable("chat.disabled.options").withStyle(ChatFormatting.RED), false));
+         } else {
+             this.player.resetLastActionTime();
+-            this.server.execute(chatHandler);
+-        }
+-    }
+-
+-    private Optional<LastSeenMessages> unpackAndApplyLastSeen(LastSeenMessages.Update update) {
++            this.executeChatHandler(chatHandler);
++        }
++    }
++
++    private void executeChatHandler(Runnable chatHandler) {
++        if (this.server.regionizedTaskDispatcher().isRunning()) {
++            RegionizedWorldGuard.executeOnPlayerRegion(this.player, chatHandler);
++            return;
++        }
++
++        this.server.execute(chatHandler);
++    }
++
++    private synchronized Optional<LastSeenMessages> unpackAndApplyLastSeen(LastSeenMessages.Update update) {
+         synchronized (this.lastSeenMessages) {
+             Optional var10000;
+             try {
+@@ -1658,17 +_,17 @@
+         return false;
+     }
+ 
+-    private PlayerChatMessage getSignedMessage(ServerboundChatPacket packet, LastSeenMessages lastSeenMessages) throws SignedMessageChain.DecodeException {
++    private synchronized PlayerChatMessage getSignedMessage(ServerboundChatPacket packet, LastSeenMessages lastSeenMessages) throws SignedMessageChain.DecodeException {
+         SignedMessageBody body = new SignedMessageBody(packet.message(), packet.timeStamp(), packet.salt(), lastSeenMessages);
+         return this.signedMessageDecoder.unpack(packet.signature(), body);
+     }
+ 
+-    private void broadcastChatMessage(PlayerChatMessage message) {
++    private synchronized void broadcastChatMessage(PlayerChatMessage message) {
+         this.server.getPlayerList().broadcastChatMessage(message, this.player, ChatType.bind(ChatType.CHAT, this.player));
+         this.detectRateSpam();
+     }
+ 
+-    private void detectRateSpam() {
++    private synchronized void detectRateSpam() {
+         this.chatSpamThrottler.increment();
+         if (!this.chatSpamThrottler.isUnderThreshold()
+             && !this.server.getPlayerList().isOp(this.player.nameAndId())
+@@ -1678,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void handleChatAck(ServerboundChatAckPacket packet) {
++    public synchronized void handleChatAck(ServerboundChatAckPacket packet) {
+         synchronized (this.lastSeenMessages) {
+             try {
+                 this.lastSeenMessages.applyOffset(packet.offset());
+@@ -1690,60 +_,64 @@
+     }
+ 
+     @Override
+-    public void handleAnimate(ServerboundSwingPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.resetLastActionTime();
+-        this.player.swing(packet.getHand());
+-    }
+-
+-    @Override
+-    public void handlePlayerCommand(ServerboundPlayerCommandPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.hasClientLoaded()) {
++    public synchronized void handleAnimate(ServerboundSwingPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
+             this.player.resetLastActionTime();
+-            switch (packet.getAction()) {
+-                case START_SPRINTING:
+-                    this.player.setSprinting(true);
+-                    break;
+-                case STOP_SPRINTING:
+-                    this.player.setSprinting(false);
+-                    break;
+-                case STOP_SLEEPING:
+-                    if (this.player.isSleeping()) {
+-                        this.player.stopSleepInBed(false, true);
+-                        this.awaitingPositionFromClient = this.player.position();
+-                    }
+-                    break;
+-                case START_RIDING_JUMP:
+-                    if (this.player.getControlledVehicle() instanceof PlayerRideableJumping vehicle) {
+-                        int data = packet.getData();
+-                        if (vehicle.canJump() && data > 0) {
+-                            vehicle.handleStartJump(data);
+-                        }
+-                    }
+-                    break;
+-                case STOP_RIDING_JUMP:
+-                    if (this.player.getControlledVehicle() instanceof PlayerRideableJumping vehicle) {
+-                        vehicle.handleStopJump();
+-                    }
+-                    break;
+-                case OPEN_INVENTORY:
+-                    if (this.player.getVehicle() instanceof HasCustomInventoryScreen vehicleWithInventory) {
+-                        vehicleWithInventory.openCustomInventoryScreen(this.player);
+-                    }
+-                    break;
+-                case START_FALL_FLYING:
+-                    if (!this.player.tryToStartFallFlying()) {
+-                        this.player.stopFallFlying();
+-                    }
+-                    break;
+-                default:
+-                    throw new IllegalArgumentException("Invalid client command!");
++            this.player.swing(packet.getHand());
++        });
++    }
++
++    @Override
++    public synchronized void handlePlayerCommand(ServerboundPlayerCommandPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (this.hasClientLoaded()) {
++                this.player.resetLastActionTime();
++                switch (packet.getAction()) {
++                    case START_SPRINTING:
++                        this.player.setSprinting(true);
++                        break;
++                    case STOP_SPRINTING:
++                        this.player.setSprinting(false);
++                        break;
++                    case STOP_SLEEPING:
++                        if (this.player.isSleeping()) {
++                            this.player.stopSleepInBed(false, true);
++                            this.markAwaitingPositionFromPlayer();
++                        }
++                        break;
++                    case START_RIDING_JUMP:
++                        if (this.player.getControlledVehicle() instanceof PlayerRideableJumping vehicle) {
++                            int data = packet.getData();
++                            if (vehicle.canJump() && data > 0) {
++                                vehicle.handleStartJump(data);
++                            }
++                        }
++                        break;
++                    case STOP_RIDING_JUMP:
++                        if (this.player.getControlledVehicle() instanceof PlayerRideableJumping vehicle) {
++                            vehicle.handleStopJump();
++                        }
++                        break;
++                    case OPEN_INVENTORY:
++                        if (this.player.getVehicle() instanceof HasCustomInventoryScreen vehicleWithInventory) {
++                            vehicleWithInventory.openCustomInventoryScreen(this.player);
++                        }
++                        break;
++                    case START_FALL_FLYING:
++                        if (!this.player.tryToStartFallFlying()) {
++                            this.player.stopFallFlying();
++                        }
++                        break;
++                    default:
++                        throw new IllegalArgumentException("Invalid client command!");
++                }
+             }
+-        }
++        });
+     }
+ 
+-    public void sendPlayerChatMessage(PlayerChatMessage message, ChatType.Bound chatType) {
++    public synchronized void sendPlayerChatMessage(PlayerChatMessage message, ChatType.Bound chatType) {
+         this.send(
+             new ClientboundPlayerChatPacket(
+                 this.nextChatIndex++,
+@@ -1771,15 +_,15 @@
+         }
+     }
+ 
+-    public void sendDisguisedChatMessage(Component content, ChatType.Bound chatType) {
++    public synchronized void sendDisguisedChatMessage(Component content, ChatType.Bound chatType) {
+         this.send(new ClientboundDisguisedChatPacket(content, chatType));
+     }
+ 
+-    public SocketAddress getRemoteAddress() {
++    public synchronized SocketAddress getRemoteAddress() {
+         return this.connection.getRemoteAddress();
+     }
+ 
+-    public void switchToConfig() {
++    public synchronized void switchToConfig() {
+         this.waitingForSwitchToConfig = true;
+         this.removePlayerFromWorld();
+         this.send(ClientboundStartConfigurationPacket.INSTANCE);
+@@ -1787,32 +_,82 @@
+     }
+ 
+     @Override
+-    public void handlePingRequest(ServerboundPingRequestPacket packet) {
+-        this.connection.send(new ClientboundPongResponsePacket(packet.getTime()));
++    public synchronized void handlePingRequest(ServerboundPingRequestPacket packet) {
++        RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundPongResponsePacket(packet.getTime()));
+     }
+ 
+     @Override
+-    public void handleAttack(ServerboundAttackPacket packet) {
++    public synchronized void handleAttack(ServerboundAttackPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleAttackOnPlayerRegion(packet));
++    }
++
++    private void handleAttackOnPlayerRegion(ServerboundAttackPacket packet) {
+         if (this.hasClientLoaded() && !this.player.isSpectator()) {
+             ServerLevel level = this.player.level();
+             Entity target = level.getEntityOrPart(packet.entityId());
+-            this.player.resetLastActionTime();
+-            if (target != null && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
+-                AABB targetBounds = target.getBoundingBox();
+-                ItemStack mainHandItem = this.player.getMainHandItem();
+-                if (this.player.isWithinAttackRange(mainHandItem, targetBounds, 3.0)) {
+-                    if (!mainHandItem.has(DataComponents.PIERCING_WEAPON)) {
+-                        if (target instanceof ItemEntity
+-                            || target instanceof ExperienceOrb
+-                            || target == this.player
+-                            || target instanceof AbstractArrow abstractArrow && !abstractArrow.isAttackable()) {
+-                            this.disconnect(Component.translatable("multiplayer.disconnect.invalid_entity_attacked"));
+-                            LOGGER.warn("Player {} tried to attack an invalid entity", this.player.getPlainTextName());
+-                        } else if (mainHandItem.isItemEnabled(level.enabledFeatures())) {
+-                            if (!this.player.cannotAttackWithItem(mainHandItem, 5)) {
+-                                this.player.attack(target);
+-                            }
++            if (target == null && RegionizedTickContext.isRegionThread()) {
++                this.executeGlobalOrCurrent(() -> this.handleAttackOnGlobal(packet));
++                return;
++            }
++
++            if (target != null) {
++                if (RegionizedTickContext.isRegionThread() && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, target) == null) {
++                    this.executeGlobalOrCurrent(() -> this.handleAttackOnGlobal(packet));
++                    return;
++                }
++
++                this.handleAttackTargetOnPlayerRegion(packet, target);
++            }
++        }
++    }
++
++    private void handleAttackOnGlobal(ServerboundAttackPacket packet) {
++        if (!this.hasClientLoaded() || this.player.isSpectator()) {
++            return;
++        }
++
++        ServerLevel level = this.player.level();
++        Entity target = level.getEntityOrPart(packet.entityId());
++        if (target == null || target.level() != level) {
++            return;
++        }
++
++        RegionKey playerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++        RegionKey targetRegion = RegionizedWorldGuard.regionFor(level, target.blockPosition());
++        this.server.regionizedTaskDispatcher().awaitRegions("player entity attack", List.of(playerRegion, targetRegion), playerRegion, () -> {
++            if (this.player.level() != level || target.level() != level) {
++                return;
++            }
++
++            RegionKey currentPlayerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++            RegionKey currentTargetRegion = RegionizedWorldGuard.regionFor(level, target.blockPosition());
++            if (!playerRegion.equals(currentPlayerRegion) || !targetRegion.equals(currentTargetRegion)) {
++                this.executeGlobalOrCurrent(() -> this.handleAttackOnGlobal(packet));
++                return;
++            }
++
++            this.handleAttackTargetOnPlayerRegion(packet, target);
++        });
++    }
++
++    private void handleAttackTargetOnPlayerRegion(ServerboundAttackPacket packet, Entity target) {
++        ServerLevel level = this.player.level();
++        this.player.resetLastActionTime();
++        if (target.level() == level && target.getId() == packet.entityId() && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
++            AABB targetBounds = target.getBoundingBox();
++            ItemStack mainHandItem = this.player.getMainHandItem();
++            if (this.player.isWithinAttackRange(mainHandItem, targetBounds, 3.0)) {
++                if (!mainHandItem.has(DataComponents.PIERCING_WEAPON)) {
++                    if (target instanceof ItemEntity
++                        || target instanceof ExperienceOrb
++                        || target == this.player
++                        || target instanceof AbstractArrow abstractArrow && !abstractArrow.isAttackable()) {
++                        this.disconnect(Component.translatable("multiplayer.disconnect.invalid_entity_attacked"));
++                        LOGGER.warn("Player {} tried to attack an invalid entity", this.player.getPlainTextName());
++                    } else if (mainHandItem.isItemEnabled(level.enabledFeatures())) {
++                        if (!this.player.cannotAttackWithItem(mainHandItem, 5)) {
++                            this.player.attack(target);
+                         }
+                     }
+                 }
+@@ -1821,95 +_,303 @@
+     }
+ 
+     @Override
+-    public void handleInteract(ServerboundInteractPacket packet) {
++    public synchronized void handleInteract(ServerboundInteractPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleInteractOnPlayerRegion(packet));
++    }
++
++    private void handleInteractOnPlayerRegion(ServerboundInteractPacket packet) {
+         if (this.hasClientLoaded()) {
+             ServerLevel level = this.player.level();
+-            Entity target = level.getEntityOrPart(packet.entityId());
+             this.player.resetLastActionTime();
+             this.player.setShiftKeyDown(packet.usingSecondaryAction());
+-            if (target != null && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
+-                AABB targetBounds = target.getBoundingBox();
+-                if (this.player.isWithinEntityInteractionRange(targetBounds, 3.0)) {
+-                    InteractionHand hand = packet.hand();
+-                    Vec3 location = packet.location();
+-                    ItemStack tool = this.player.getItemInHand(hand);
+-                    if (tool.isItemEnabled(level.enabledFeatures())) {
+-                        ItemStack usedItemStack = tool.copy();
+-                        if (this.player.interactOn(target, hand, location) instanceof InteractionResult.Success success) {
+-                            ItemStack awardedForStack = success.wasItemInteraction() ? usedItemStack : ItemStack.EMPTY;
+-                            CriteriaTriggers.PLAYER_INTERACTED_WITH_ENTITY.trigger(this.player, awardedForStack, target);
+-                            if (success.swingSource() == InteractionResult.SwingSource.SERVER) {
+-                                this.player.swing(hand, true);
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-    }
+ 
+-    @Override
+-    public void handleSpectateEntity(ServerboundSpectateEntityPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.hasClientLoaded() && this.player.isSpectator()) {
+-            this.player.resetLastActionTime();
+-            ServerLevel level = this.player.level();
+             Entity target = level.getEntityOrPart(packet.entityId());
+-            if (target != null && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
+-                if (this.player.isWithinEntityInteractionRange(target.getBoundingBox(), 3.0)) {
+-                    if (target.isPickable()) {
+-                        this.player.setCamera(target);
+-                    }
+-                }
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleClientCommand(ServerboundClientCommandPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++            if (target == null && RegionizedTickContext.isRegionThread()) {
++                this.executeGlobalOrCurrent(() -> this.handleInteractOnGlobal(packet));
++                return;
++            }
++
++            if (target != null) {
++                if (RegionizedTickContext.isRegionThread() && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, target) == null) {
++                    this.executeGlobalOrCurrent(() -> this.handleInteractOnGlobal(packet));
++                    return;
++                }
++
++                this.handleInteractTargetOnPlayerRegion(packet, target);
++            }
++        }
++    }
++
++    private void handleInteractOnGlobal(ServerboundInteractPacket packet) {
++        if (!this.hasClientLoaded()) {
++            return;
++        }
++
++        ServerLevel level = this.player.level();
++        Entity target = level.getEntityOrPart(packet.entityId());
++        if (target == null || target.level() != level) {
++            return;
++        }
++
++        RegionKey playerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++        RegionKey targetRegion = RegionizedWorldGuard.regionFor(level, target.blockPosition());
++        this.server.regionizedTaskDispatcher().awaitRegions("player entity interaction", List.of(playerRegion, targetRegion), playerRegion, () -> {
++            if (this.player.level() != level || target.level() != level) {
++                return;
++            }
++
++            RegionKey currentPlayerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++            RegionKey currentTargetRegion = RegionizedWorldGuard.regionFor(level, target.blockPosition());
++            if (!playerRegion.equals(currentPlayerRegion) || !targetRegion.equals(currentTargetRegion)) {
++                this.executeGlobalOrCurrent(() -> this.handleInteractOnGlobal(packet));
++                return;
++            }
++
++            this.handleInteractTargetOnPlayerRegion(packet, target);
++        });
++    }
++
++    private void handleInteractTargetOnPlayerRegion(ServerboundInteractPacket packet, Entity target) {
++        ServerLevel level = this.player.level();
++        if (target.level() == level && target.getId() == packet.entityId() && level.getWorldBorder().isWithinBounds(target.blockPosition())) {
++            AABB targetBounds = target.getBoundingBox();
++            if (this.player.isWithinEntityInteractionRange(targetBounds, 3.0)) {
++                InteractionHand hand = packet.hand();
++                Vec3 location = packet.location();
++                ItemStack tool = this.player.getItemInHand(hand);
++                if (tool.isItemEnabled(level.enabledFeatures())) {
++                    ItemStack usedItemStack = tool.copy();
++                    var interactionResult = net.neoforged.neoforge.common.CommonHooks.onInteractEntityAt(player, target, location, hand);
++                    if (interactionResult == null) {
++                        interactionResult = this.player.interactOn(target, hand, location);
++                    }
++                    if (interactionResult instanceof InteractionResult.Success success) {
++                        ItemStack awardedForStack = success.wasItemInteraction() ? usedItemStack : ItemStack.EMPTY;
++                        CriteriaTriggers.PLAYER_INTERACTED_WITH_ENTITY.trigger(this.player, awardedForStack, target);
++                        if (success.swingSource() == InteractionResult.SwingSource.SERVER) {
++                            this.player.swing(hand, true);
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    @Override
++    public synchronized void handleSpectateEntity(ServerboundSpectateEntityPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        if (!this.hasClientLoaded()) {
++            return;
++        }
++
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleSpectateEntityOnPlayerRegion(packet));
++    }
++
++    private void handleSpectateEntityOnPlayerRegion(ServerboundSpectateEntityPacket packet) {
++        if (!this.player.isSpectator()) {
++            return;
++        }
++
++        this.player.resetLastActionTime();
++        ServerLevel level = this.player.level();
++        Entity target = level.getEntityOrPart(packet.entityId());
++        if (target == null && RegionizedTickContext.isRegionThread()) {
++            this.executeGlobalOrCurrent(() -> this.handleSpectateEntityOnGlobal(packet));
++            return;
++        }
++
++        if (target != null) {
++            if (RegionizedTickContext.isRegionThread() && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, target) == null) {
++                this.executeGlobalOrCurrent(() -> this.handleSpectateEntityOnGlobal(packet));
++                return;
++            }
++
++            this.handleSpectateEntityTargetOnPlayerRegion(packet, target);
++        }
++    }
++
++    private void handleSpectateEntityOnGlobal(ServerboundSpectateEntityPacket packet) {
++        if (!this.hasClientLoaded()) {
++            return;
++        }
++
++        ServerLevel level = this.player.level();
++        Entity target = level.getEntityOrPart(packet.entityId());
++        if (target == null) {
++            return;
++        }
++
++        RegionKey playerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++        RegionKey targetRegion = RegionizedWorldGuard.regionFor(level, target.blockPosition());
++        this.server.regionizedTaskDispatcher().awaitRegions("spectator camera target", List.of(playerRegion, targetRegion), playerRegion, () -> {
++            if (this.player.level() != level || target.level() != level || target.getId() != packet.entityId()) {
++                return;
++            }
++
++            RegionKey currentPlayerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++            RegionKey currentTargetRegion = RegionizedWorldGuard.regionFor(level, target.blockPosition());
++            if (!playerRegion.equals(currentPlayerRegion) || !targetRegion.equals(currentTargetRegion)) {
++                this.executeGlobalOrCurrent(() -> this.handleSpectateEntityOnGlobal(packet));
++                return;
++            }
++
++            this.handleSpectateEntityTargetOnPlayerRegion(packet, target);
++        });
++    }
++
++    private void handleSpectateEntityTargetOnPlayerRegion(ServerboundSpectateEntityPacket packet, Entity target) {
++        ServerLevel level = this.player.level();
++        SpectatorEntityTarget targetState = SpectatorEntityTarget.from(target, level);
++        if (!level.getWorldBorder().isWithinBounds(targetState.blockPos())) {
++            return;
++        }
++
++        if (this.player.isSpectator() && targetState.pickable() && this.player.isWithinEntityInteractionRange(targetState.boundingBox(), 3.0)) {
++            this.player.setCamera(target, targetState.level(), targetState.position());
++        }
++    }
++
++    private void executeGlobalOrCurrent(Runnable task) {
++        if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return;
++        }
++
++        if (RegionizedTickContext.isRegionThread()) {
++            throw new IllegalStateException("Cannot run global packet task from region worker while region dispatcher is not running");
++        }
++
++        task.run();
++    }
++
++    private boolean executeOnPlayerAndBlockRegions(ServerLevel level, BlockPos pos, String reason, Runnable task) {
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            return false;
++        }
++
++        RegionKey playerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++        RegionKey blockRegion = RegionizedWorldGuard.regionFor(level, pos);
++        if (playerRegion.equals(blockRegion) && RegionizedTickContext.currentRegion().map(playerRegion::equals).orElse(false)) {
++            return false;
++        }
++
++        if (RegionizedTickContext.isRegionThread()) {
++            this.executeGlobalOrCurrent(() -> this.executeOnPlayerAndBlockRegions(level, pos, reason, task));
++            return true;
++        }
++
++        this.server.regionizedTaskDispatcher().awaitRegions(reason, List.of(playerRegion, blockRegion), blockRegion, () -> {
++            if (this.player.level() != level) {
++                return;
++            }
++
++            RegionKey currentPlayerRegion = RegionizedWorldGuard.regionFor(level, this.player.blockPosition());
++            RegionKey currentBlockRegion = RegionizedWorldGuard.regionFor(level, pos);
++            if (!playerRegion.equals(currentPlayerRegion) || !blockRegion.equals(currentBlockRegion)) {
++                this.executeGlobalOrCurrent(() -> this.executeOnPlayerAndBlockRegions(level, pos, reason, task));
++                return;
++            }
++
++            task.run();
++        });
++        return true;
++    }
++
++    private void sendSystemMessageOnPlayerRegion(Component message) {
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.sendSystemMessage(message));
++    }
++
++    private @Nullable SpectatorEntityTarget snapshotSpectatorTarget(Entity entity) {
++        if (!(entity.level() instanceof ServerLevel level)) {
++            return null;
++        }
++
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            return SpectatorEntityTarget.from(entity, level);
++        }
++
++        return RegionizedWorldGuard.callOnEntityRegionAndWait(entity, "spectator target snapshot", () -> SpectatorEntityTarget.from(entity, level));
++    }
++
++    private <T> @Nullable T callOnRegionAndWait(ServerLevel level, BlockPos pos, String reason, Supplier<@Nullable T> supplier) {
++        return RegionizedWorldGuard.callOnRegionAndWait(level, pos, reason, supplier);
++    }
++
++    private record SpectatorEntityTarget(ServerLevel level, Vec3 position, BlockPos blockPos, AABB boundingBox, float yRot, float xRot, boolean pickable) {
++        private static SpectatorEntityTarget from(Entity entity, ServerLevel level) {
++            return new SpectatorEntityTarget(
++                level,
++                entity.position(),
++                entity.blockPosition(),
++                entity.getBoundingBox(),
++                entity.getYRot(),
++                entity.getXRot(),
++                entity.isPickable()
++            );
++        }
++    }
++
++    @Override
++    public synchronized void handleClientCommand(ServerboundClientCommandPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleClientCommandOnPlayerRegion(packet));
++    }
++
++    private void handleClientCommandOnPlayerRegion(ServerboundClientCommandPacket packet) {
+         this.player.resetLastActionTime();
+         ServerboundClientCommandPacket.Action action = packet.getAction();
+         switch (action) {
+             case PERFORM_RESPAWN:
+-                if (this.player.wonGame) {
+-                    this.player.wonGame = false;
+-                    this.player = this.server.getPlayerList().respawn(this.player, true, Entity.RemovalReason.CHANGED_DIMENSION);
+-                    this.resetPosition();
+-                    this.restartClientLoadTimerAfterRespawn();
+-                    CriteriaTriggers.CHANGED_DIMENSION.trigger(this.player, Level.END, Level.OVERWORLD);
+-                } else {
+-                    if (this.player.getHealth() > 0.0F) {
+-                        return;
+-                    }
+-
+-                    this.player = this.server.getPlayerList().respawn(this.player, false, Entity.RemovalReason.KILLED);
+-                    this.resetPosition();
+-                    this.restartClientLoadTimerAfterRespawn();
+-                    if (this.server.isHardcore()) {
+-                        this.player.setGameMode(GameType.SPECTATOR);
+-                        this.player.level().getGameRules().set(GameRules.SPECTATORS_GENERATE_CHUNKS, false, this.server);
+-                    }
+-                }
++                this.handleRespawnRequestOnPlayerRegion();
+                 break;
+             case REQUEST_STATS:
+                 this.player.getStats().sendStats(this.player);
+                 break;
+             case REQUEST_GAMERULE_VALUES:
+-                this.sendGameRuleValues();
+-        }
+-    }
+-
+-    private void sendGameRuleValues() {
++                this.sendGameRuleValuesIfPermittedOnPlayerRegion();
++        }
++    }
++
++    private void handleRespawnRequestOnPlayerRegion() {
++        boolean wonGame = this.player.wonGame;
++        if (!wonGame && this.player.getHealth() > 0.0F) {
++            return;
++        }
++
++        this.executeGlobalOrCurrent(() -> this.handleRespawnRequestOnGlobal(wonGame));
++    }
++
++    private void handleRespawnRequestOnGlobal(boolean wonGame) {
++        if (wonGame) {
++            this.player.wonGame = false;
++            this.player = this.server.getPlayerList().respawn(this.player, true, Entity.RemovalReason.CHANGED_DIMENSION);
++            this.resetPosition();
++            this.restartClientLoadTimerAfterRespawn();
++            CriteriaTriggers.CHANGED_DIMENSION.trigger(this.player, Level.END, Level.OVERWORLD);
++        } else {
++            this.player = this.server.getPlayerList().respawn(this.player, false, Entity.RemovalReason.KILLED);
++            this.resetPosition();
++            this.restartClientLoadTimerAfterRespawn();
++            if (this.server.isHardcore()) {
++                GameModeCommand.setGameMode(this.player, GameType.SPECTATOR);
++                this.player.level().getGameRules().set(GameRules.SPECTATORS_GENERATE_CHUNKS, false, this.server);
++            }
++        }
++    }
++
++    private synchronized void sendGameRuleValuesIfPermittedOnPlayerRegion() {
+         if (!this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+             LOGGER.warn("Player {} tried to request game rule values without required permissions", this.player.getGameProfile().name());
+         } else {
+-            GameRules gameRules = this.player.level().getGameRules();
+-            Map<ResourceKey<GameRule<?>>, String> values = new HashMap<>();
+-            gameRules.availableRules().forEach(rule -> addGameRuleValue(gameRules, values, (GameRule<?>)rule));
+-            this.send(new ClientboundGameRuleValuesPacket(values));
++            this.executeGlobalOrCurrent(this::sendGameRuleValuesOnGlobal);
+         }
++    }
++
++    private synchronized void sendGameRuleValuesOnGlobal() {
++        GameRules gameRules = this.server.getGlobalGameRules();
++        Map<ResourceKey<GameRule<?>>, String> values = new HashMap<>();
++        gameRules.availableRules().forEach(rule -> addGameRuleValue(gameRules, values, (GameRule<?>)rule));
++        this.send(new ClientboundGameRuleValuesPacket(values));
+     }
+ 
+     private static <T> void addGameRuleValue(GameRules gameRules, Map<ResourceKey<GameRule<?>>, String> values, GameRule<T> rule) {
+@@ -1917,134 +_,157 @@
+     }
+ 
+     @Override
+-    public void handleContainerClose(ServerboundContainerClosePacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.doCloseContainer();
+-    }
+-
+-    @Override
+-    public void handleContainerClick(ServerboundContainerClickPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.resetLastActionTime();
+-        if (this.player.containerMenu.containerId == packet.containerId()) {
+-            if (this.player.isSpectator()) {
+-                this.player.containerMenu.sendAllDataToRemote();
+-            } else if (!this.player.containerMenu.stillValid(this.player)) {
+-                LOGGER.debug("Player {} interacted with invalid menu {}", this.player, this.player.containerMenu);
+-            } else {
+-                int slotIndex = packet.slotNum();
+-                if (!this.player.containerMenu.isValidSlotIndex(slotIndex)) {
+-                    LOGGER.debug(
+-                        "Player {} clicked invalid slot index: {}, available slots: {}",
+-                        this.player.getPlainTextName(),
+-                        slotIndex,
+-                        this.player.containerMenu.slots.size()
+-                    );
+-                } else {
+-                    boolean fullResyncNeeded = packet.stateId() != this.player.containerMenu.getStateId();
+-                    this.player.containerMenu.suppressRemoteUpdates();
+-                    this.player.containerMenu.clicked(slotIndex, packet.buttonNum(), packet.containerInput(), this.player);
+-
+-                    for (Entry<HashedStack> e : Int2ObjectMaps.fastIterable(packet.changedSlots())) {
+-                        this.player.containerMenu.setRemoteSlotUnsafe(e.getIntKey(), e.getValue());
+-                    }
+-
+-                    this.player.containerMenu.setRemoteCarried(packet.carriedItem());
+-                    this.player.containerMenu.resumeRemoteUpdates();
+-                    if (fullResyncNeeded) {
+-                        this.player.containerMenu.broadcastFullState();
+-                    } else {
+-                        this.player.containerMenu.broadcastChanges();
+-                    }
+-                }
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handlePlaceRecipe(ServerboundPlaceRecipePacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.resetLastActionTime();
+-        if (!this.player.isSpectator() && this.player.containerMenu.containerId == packet.containerId()) {
+-            if (!this.player.containerMenu.stillValid(this.player)) {
+-                LOGGER.debug("Player {} interacted with invalid menu {}", this.player, this.player.containerMenu);
+-            } else {
+-                RecipeManager.ServerDisplayInfo displayInfo = this.server.getRecipeManager().getRecipeFromDisplay(packet.recipe());
+-                if (displayInfo != null) {
+-                    RecipeHolder<?> recipe = displayInfo.parent();
+-                    if (this.player.getRecipeBook().contains(recipe.id())) {
+-                        if (this.player.containerMenu instanceof RecipeBookMenu recipeBookMenu) {
+-                            if (recipe.value().placementInfo().isImpossibleToPlace()) {
+-                                LOGGER.debug("Player {} tried to place impossible recipe {}", this.player, recipe.id().identifier());
+-                                return;
+-                            }
+-
+-                            RecipeBookMenu.PostPlaceAction postPlaceAction = recipeBookMenu.handlePlacement(
+-                                packet.useMaxItems(), this.player.isCreative(), recipe, this.player.level(), this.player.getInventory()
+-                            );
+-                            if (postPlaceAction == RecipeBookMenu.PostPlaceAction.PLACE_GHOST_RECIPE) {
+-                                this.send(new ClientboundPlaceGhostRecipePacket(this.player.containerMenu.containerId, displayInfo.display().display()));
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleContainerButtonClick(ServerboundContainerButtonClickPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.resetLastActionTime();
+-        if (this.player.containerMenu.containerId == packet.containerId() && !this.player.isSpectator()) {
+-            if (!this.player.containerMenu.stillValid(this.player)) {
+-                LOGGER.debug("Player {} interacted with invalid menu {}", this.player, this.player.containerMenu);
+-            } else {
+-                boolean clickAccepted = this.player.containerMenu.clickMenuButton(this.player, packet.buttonId());
+-                if (clickAccepted) {
+-                    this.player.containerMenu.broadcastChanges();
+-                }
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleSetCreativeModeSlot(ServerboundSetCreativeModeSlotPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.hasInfiniteMaterials()) {
+-            boolean drop = packet.slotNum() < 0;
+-            ItemStack itemStack = packet.itemStack();
+-            if (!itemStack.isItemEnabled(this.player.level().enabledFeatures())) {
+-                return;
+-            }
+-
+-            boolean validSlot = packet.slotNum() >= 1 && packet.slotNum() <= 45;
+-            boolean validData = itemStack.isEmpty() || itemStack.getCount() <= itemStack.getMaxStackSize();
+-            if (validSlot && validData) {
+-                this.player.inventoryMenu.getSlot(packet.slotNum()).setByPlayer(itemStack);
+-                this.player.inventoryMenu.setRemoteSlot(packet.slotNum(), itemStack);
+-                this.player.inventoryMenu.broadcastChanges();
+-            } else if (drop && validData) {
+-                if (this.dropSpamThrottler.isUnderThreshold()) {
+-                    this.dropSpamThrottler.increment();
+-                    this.player.drop(itemStack, true);
+-                } else {
+-                    LOGGER.warn("Player {} was dropping items too fast in creative mode, ignoring.", this.player.getPlainTextName());
+-                }
+-            }
+-        }
+-    }
+-
+-    @Override
+-    public void handleSignUpdate(ServerboundSignUpdatePacket packet) {
++    public synchronized void handleContainerClose(ServerboundContainerClosePacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, this.player::doCloseContainer);
++    }
++
++    @Override
++    public synchronized void handleContainerClick(ServerboundContainerClickPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            this.player.resetLastActionTime();
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (containerMenu.containerId == packet.containerId()) {
++                if (this.player.isSpectator()) {
++                    containerMenu.sendAllDataToRemote();
++                } else if (!containerMenu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, containerMenu);
++                } else {
++                    int slotIndex = packet.slotNum();
++                    if (!containerMenu.isValidSlotIndex(slotIndex)) {
++                        LOGGER.debug(
++                            "Player {} clicked invalid slot index: {}, available slots: {}",
++                            this.player.getPlainTextName(),
++                            slotIndex,
++                            containerMenu.slots.size()
++                        );
++                    } else {
++                        boolean fullResyncNeeded = packet.stateId() != containerMenu.getStateId();
++                        containerMenu.suppressRemoteUpdates();
++                        containerMenu.clicked(slotIndex, packet.buttonNum(), packet.containerInput(), this.player);
++
++                        for (Entry<HashedStack> e : Int2ObjectMaps.fastIterable(packet.changedSlots())) {
++                            containerMenu.setRemoteSlotUnsafe(e.getIntKey(), e.getValue());
++                        }
++
++                        containerMenu.setRemoteCarried(packet.carriedItem());
++                        containerMenu.resumeRemoteUpdates();
++                        if (fullResyncNeeded) {
++                            containerMenu.broadcastFullState();
++                        } else {
++                            containerMenu.broadcastChanges();
++                        }
++                    }
++                }
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handlePlaceRecipe(ServerboundPlaceRecipePacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            this.player.resetLastActionTime();
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (!this.player.isSpectator() && containerMenu.containerId == packet.containerId()) {
++                if (!containerMenu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, containerMenu);
++                } else {
++                    RecipeManager.ServerDisplayInfo displayInfo = this.server.getRecipeManager().getRecipeFromDisplay(packet.recipe());
++                    if (displayInfo != null) {
++                        RecipeHolder<?> recipe = displayInfo.parent();
++                        if (this.player.getRecipeBook().contains(recipe.id())) {
++                            if (containerMenu instanceof RecipeBookMenu recipeBookMenu) {
++                                if (recipe.value().placementInfo().isImpossibleToPlace()) {
++                                    LOGGER.debug("Player {} tried to place impossible recipe {}", this.player, recipe.id().identifier());
++                                    return;
++                                }
++
++                                RecipeBookMenu.PostPlaceAction postPlaceAction = recipeBookMenu.handlePlacement(
++                                    packet.useMaxItems(), this.player.isCreative(), recipe, this.player.level(), this.player.getInventory()
++                                );
++                                if (postPlaceAction == RecipeBookMenu.PostPlaceAction.PLACE_GHOST_RECIPE) {
++                                    this.send(new ClientboundPlaceGhostRecipePacket(containerMenu.containerId, displayInfo.display().display()));
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleContainerButtonClick(ServerboundContainerButtonClickPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            this.player.resetLastActionTime();
++            AbstractContainerMenu containerMenu = this.player.containerMenu;
++            if (containerMenu.containerId == packet.containerId() && !this.player.isSpectator()) {
++                if (!containerMenu.stillValid(this.player)) {
++                    LOGGER.debug("Player {} interacted with invalid menu {}", this.player, containerMenu);
++                } else {
++                    boolean clickAccepted = containerMenu.clickMenuButton(this.player, packet.buttonId());
++                    if (clickAccepted) {
++                        containerMenu.broadcastChanges();
++                    }
++                }
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleSetCreativeModeSlot(ServerboundSetCreativeModeSlotPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (this.player.hasInfiniteMaterials()) {
++                boolean drop = packet.slotNum() < 0;
++                ItemStack itemStack = packet.itemStack();
++                if (!itemStack.isItemEnabled(this.player.level().enabledFeatures())) {
++                    return;
++                }
++
++                boolean validSlot = packet.slotNum() >= 1 && packet.slotNum() <= 45;
++                boolean validData = itemStack.isEmpty() || itemStack.getCount() <= itemStack.getMaxStackSize();
++                if (validSlot && validData) {
++                    this.player.inventoryMenu.getSlot(packet.slotNum()).setByPlayer(itemStack);
++                    this.player.inventoryMenu.setRemoteSlot(packet.slotNum(), itemStack);
++                    this.player.inventoryMenu.broadcastChanges();
++                } else if (drop && validData) {
++                    if (this.dropSpamThrottler.isUnderThreshold()) {
++                        this.dropSpamThrottler.increment();
++                        this.player.drop(itemStack, true);
++                    } else {
++                        LOGGER.warn("Player {} was dropping items too fast in creative mode, ignoring.", this.player.getPlainTextName());
++                    }
++                }
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleSignUpdate(ServerboundSignUpdatePacket packet) {
+         List<String> lines = Stream.of(packet.getLines()).map(ChatFormatting::stripFormatting).collect(Collectors.toList());
+         this.filterTextPacket(lines).thenAcceptAsync(filteredLines -> this.updateSignText(packet, (List<FilteredText>)filteredLines), this.server);
+     }
+ 
+-    private void updateSignText(ServerboundSignUpdatePacket packet, List<FilteredText> lines) {
+-        this.player.resetLastActionTime();
++    private synchronized void updateSignText(ServerboundSignUpdatePacket packet, List<FilteredText> lines) {
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.updateSignTextOnRegion(packet, lines));
++    }
++
++    private void updateSignTextOnRegion(ServerboundSignUpdatePacket packet, List<FilteredText> lines) {
++        this.updateSignTextOnRegion(packet, lines, true);
++    }
++
++    private void updateSignTextOnRegion(ServerboundSignUpdatePacket packet, List<FilteredText> lines, boolean routeToOwningRegions) {
+         ServerLevel level = this.player.level();
+         BlockPos pos = packet.getPos();
++        if (routeToOwningRegions && this.executeOnPlayerAndBlockRegions(level, pos, "Sign update", () -> this.updateSignTextOnRegion(packet, lines, false))) {
++            return;
++        }
++
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, this.player::resetLastActionTime);
+         if (level.hasChunkAt(pos)) {
+             if (!(level.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
+                 return;
+@@ -2055,24 +_,32 @@
+     }
+ 
+     @Override
+-    public void handlePlayerAbilities(ServerboundPlayerAbilitiesPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.getAbilities().flying = packet.isFlying() && this.player.getAbilities().mayfly;
+-    }
+-
+-    @Override
+-    public void handleClientInformation(ServerboundClientInformationPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        boolean wasHatShown = this.player.isModelPartShown(PlayerModelPart.HAT);
+-        this.player.updateOptions(packet.information());
+-        if (this.player.isModelPartShown(PlayerModelPart.HAT) != wasHatShown) {
+-            this.server.getPlayerList().broadcastAll(new ClientboundPlayerInfoUpdatePacket(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_HAT, this.player));
+-        }
+-    }
+-
+-    @Override
+-    public void handleChangeDifficulty(ServerboundChangeDifficultyPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++    public synchronized void handlePlayerAbilities(ServerboundPlayerAbilitiesPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.getAbilities().flying = packet.isFlying() && this.player.mayFly());
++    }
++
++    @Override
++    public synchronized void handleClientInformation(ServerboundClientInformationPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            boolean wasHatShown = this.player.isModelPartShown(PlayerModelPart.HAT);
++            net.minecraft.server.level.ClientInformation oldInfo = this.player.clientInformation();
++            this.player.updateOptions(packet.information());
++            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.entity.player.ClientInformationUpdatedEvent(this.player, oldInfo, packet.information()));
++            if (this.player.isModelPartShown(PlayerModelPart.HAT) != wasHatShown) {
++                this.server.getPlayerList().broadcastAll(new ClientboundPlayerInfoUpdatePacket(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_HAT, this.player));
++            }
++        });
++    }
++
++    @Override
++    public synchronized void handleChangeDifficulty(ServerboundChangeDifficultyPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleChangeDifficultyOnPlayerRegion(packet));
++    }
++
++    private void handleChangeDifficultyOnPlayerRegion(ServerboundChangeDifficultyPacket packet) {
+         if (!this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER) && !this.isSingleplayerOwner()) {
+             LOGGER.warn(
+                 "Player {} tried to change difficulty to {} without required permissions",
+@@ -2080,13 +_,17 @@
+                 packet.difficulty().getDisplayName()
+             );
+         } else {
+-            this.server.setDifficulty(packet.difficulty(), false);
++            this.executeGlobalOrCurrent(() -> this.server.setDifficulty(packet.difficulty(), false));
+         }
+     }
+ 
+     @Override
+-    public void handleChangeGameMode(ServerboundChangeGameModePacket packet) {
++    public synchronized void handleChangeGameMode(ServerboundChangeGameModePacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleChangeGameModeOnPlayerRegion(packet));
++    }
++
++    private void handleChangeGameModeOnPlayerRegion(ServerboundChangeGameModePacket packet) {
+         if (!GameModeCommand.PERMISSION_CHECK.check(this.player.permissions())) {
+             LOGGER.warn(
+                 "Player {} tried to change game mode to {} without required permissions",
+@@ -2099,15 +_,19 @@
+     }
+ 
+     @Override
+-    public void handleLockDifficulty(ServerboundLockDifficultyPacket packet) {
++    public synchronized void handleLockDifficulty(ServerboundLockDifficultyPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.handleLockDifficultyOnPlayerRegion(packet));
++    }
++
++    private void handleLockDifficultyOnPlayerRegion(ServerboundLockDifficultyPacket packet) {
+         if (this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER) || this.isSingleplayerOwner()) {
+-            this.server.setDifficultyLocked(packet.isLocked());
++            this.executeGlobalOrCurrent(() -> this.server.setDifficultyLocked(packet.isLocked()));
+         }
+     }
+ 
+     @Override
+-    public void handleChatSessionUpdate(ServerboundChatSessionUpdatePacket packet) {
++    public synchronized void handleChatSessionUpdate(ServerboundChatSessionUpdatePacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         RemoteChatSession.Data newChatSession = packet.chatSession();
+         ProfilePublicKey.Data oldProfileKey = this.chatSession != null ? this.chatSession.profilePublicKey().data() : null;
+@@ -2133,61 +_,68 @@
+     }
+ 
+     @Override
+-    public void handleConfigurationAcknowledged(ServerboundConfigurationAcknowledgedPacket packet) {
++    public synchronized void handleConfigurationAcknowledged(ServerboundConfigurationAcknowledgedPacket packet) {
+         if (!this.waitingForSwitchToConfig) {
+             throw new IllegalStateException("Client acknowledged config, but none was requested");
+         } else {
+             this.connection
+                 .setupInboundProtocol(
+                     ConfigurationProtocols.SERVERBOUND,
+-                    new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation()))
++                    new ServerConfigurationPacketListenerImpl(this.server, this.connection, this.createCookie(this.player.clientInformation(), this.connectionType))
+                 );
+         }
+     }
+ 
+     @Override
+-    public void handleChunkBatchReceived(ServerboundChunkBatchReceivedPacket packet) {
++    public synchronized void handleChunkBatchReceived(ServerboundChunkBatchReceivedPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         this.chunkSender.onChunkBatchReceivedByClient(packet.desiredChunksPerTick());
+     }
+ 
+     @Override
+-    public void handleDebugSubscriptionRequest(ServerboundDebugSubscriptionRequestPacket packet) {
++    public synchronized void handleDebugSubscriptionRequest(ServerboundDebugSubscriptionRequestPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        this.player.requestDebugSubscriptions(packet.subscriptions());
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.player.requestDebugSubscriptions(packet.subscriptions()));
+     }
+ 
+-    private void resetPlayerChatState(RemoteChatSession chatSession) {
++    private synchronized void resetPlayerChatState(RemoteChatSession chatSession) {
+         this.chatSession = chatSession;
+         this.signedMessageDecoder = chatSession.createMessageDecoder(this.player.getUUID());
+         this.chatMessageChain
+             .append(
+                 () -> {
+-                    this.player.setChatSession(chatSession);
+-                    this.server
+-                        .getPlayerList()
+-                        .broadcastAll(
+-                            new ClientboundPlayerInfoUpdatePacket(EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.INITIALIZE_CHAT), List.of(this.player))
+-                        );
++                    synchronized (this) {
++                        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++                            this.player.setChatSession(chatSession);
++                            this.server
++                                .getPlayerList()
++                                .broadcastAll(
++                                    new ClientboundPlayerInfoUpdatePacket(EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.INITIALIZE_CHAT), List.of(this.player))
++                                );
++                        });
++                    }
+                 }
+             );
+     }
+ 
+     @Override
+-    public void handleCustomPayload(ServerboundCustomPayloadPacket packet) {
++    public synchronized void handleCustomPayload(ServerboundCustomPayloadPacket packet) {
++        super.handleCustomPayload(packet); // Neo: Call super to invoke modded payload handling.
+     }
+ 
+     @Override
+-    public void handleClientTickEnd(ServerboundClientTickEndPacket packet) {
++    public synchronized void handleClientTickEnd(ServerboundClientTickEndPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (!this.receivedMovementThisTick) {
+-            this.player.setKnownMovement(Vec3.ZERO);
+-        }
++        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
++            if (!this.receivedMovementThisTick) {
++                this.player.setKnownMovement(Vec3.ZERO);
++            }
+ 
+-        this.receivedMovementThisTick = false;
++            this.receivedMovementThisTick = false;
++        });
+     }
+ 
+-    private void handlePlayerKnownMovement(Vec3 movement) {
++    private synchronized void handlePlayerKnownMovement(Vec3 movement) {
+         if (movement.lengthSqr() > 1.0E-5F) {
+             this.player.resetLastActionTime();
+         }
+@@ -2198,7 +_,7 @@
+ 
+     @Override
+     public boolean hasInfiniteMaterials() {
+-        return this.player.hasInfiniteMaterials();
++        return RegionizedWorldGuard.callOnPlayerRegionAndWait(this.player, "packet creative state lookup", this.player::hasInfiniteMaterials);
+     }
+ 
+     @Override
+@@ -2210,21 +_,21 @@
+         return !this.waitingForRespawn && this.clientLoadedTimeoutTimer <= 0;
+     }
+ 
+-    public void tickClientLoadTimeout() {
++    public synchronized void tickClientLoadTimeout() {
+         if (this.clientLoadedTimeoutTimer > 0) {
+             this.clientLoadedTimeoutTimer--;
+         }
+     }
+ 
+-    public void markClientLoaded() {
++    public synchronized void markClientLoaded() {
+         this.clientLoadedTimeoutTimer = 0;
+     }
+ 
+-    public void markClientUnloadedAfterDeath() {
++    public synchronized void markClientUnloadedAfterDeath() {
+         this.waitingForRespawn = true;
+     }
+ 
+-    private void restartClientLoadTimerAfterRespawn() {
++    private synchronized void restartClientLoadTimerAfterRespawn() {
+         this.waitingForRespawn = false;
+         this.clientLoadedTimeoutTimer = 60;
+     }

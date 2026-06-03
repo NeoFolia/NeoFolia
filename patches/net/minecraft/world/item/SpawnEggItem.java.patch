@@ -1,0 +1,61 @@
+--- a/net/minecraft/world/item/SpawnEggItem.java
++++ b/net/minecraft/world/item/SpawnEggItem.java
+@@ -12,6 +_,8 @@
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.permissions.Permissions;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -55,12 +_,12 @@
+                     return InteractionResult.FAIL;
+                 } else if (!serverLevel.isSpawnerBlockEnabled()) {
+                     if (context.getPlayer() instanceof ServerPlayer serverPlayer) {
+-                        serverPlayer.sendSystemMessage(Component.translatable("advMode.notEnabled.spawner"));
++                        RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> serverPlayer.sendSystemMessage(Component.translatable("advMode.notEnabled.spawner")));
+                     }
+ 
+                     return InteractionResult.FAIL;
+                 } else {
+-                    spawnerHolder.setEntityId(type, level.getRandom());
++                    spawnerHolder.setEntityId(type, RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()));
+                     level.sendBlockUpdated(pos, blockState, blockState, 3);
+                     level.gameEvent(context.getPlayer(), GameEvent.BLOCK_CHANGE, pos);
+                     itemStack.shrink(1);
+@@ -110,7 +_,7 @@
+             } else if (level.mayInteract(player, pos) && player.mayUseItemAt(pos, hitResult.getDirection(), itemStack)) {
+                 InteractionResult result = spawnMob(player, itemStack, level, pos, false, false);
+                 if (result == InteractionResult.SUCCESS) {
+-                    player.awardStat(Stats.ITEM_USED.get(this));
++                    RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+                 }
+ 
+                 return result;
+@@ -175,5 +_,25 @@
+         }
+ 
+         return false;
++    }
++
++    /**
++     * {@return the dispense behavior to register or null to register the default}
++     */
++    protected net.minecraft.core.dispenser.@Nullable DispenseItemBehavior createDispenseBehavior() {
++        return null;
++    }
++
++    // TODO 26.1: It's questionable that this is even needed anymore
++    @net.neoforged.bus.api.SubscribeEvent(priority = net.neoforged.bus.api.EventPriority.LOWEST)
++    private static void registerDispenseBehavior(final net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent event) {
++        event.enqueueWork(() -> BuiltInRegistries.ITEM.forEach(item -> {
++            if (item instanceof SpawnEggItem egg && !net.minecraft.world.level.block.DispenserBlock.DISPENSER_REGISTRY.containsKey(egg)) {
++                var beh = egg.createDispenseBehavior();
++                if (beh != null) {
++                    net.minecraft.world.level.block.DispenserBlock.registerBehavior(egg, beh);
++                }
++            }
++        }));
+     }
+ }

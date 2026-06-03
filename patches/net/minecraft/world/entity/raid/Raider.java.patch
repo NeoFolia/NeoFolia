@@ -1,0 +1,138 @@
+--- a/net/minecraft/world/entity/raid/Raider.java
++++ b/net/minecraft/world/entity/raid/Raider.java
+@@ -38,7 +_,9 @@
+ import net.minecraft.world.level.pathfinder.Path;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class Raider extends PatrollingMonster {
+@@ -95,7 +_,7 @@
+                         }
+                     }
+                 } else {
+-                    LivingEntity target = this.getTarget();
++                    LivingEntity target = this.regionSafeTarget(this.getTarget());
+                     if (target != null && (target.is(EntityType.PLAYER) || target.is(EntityType.IRON_GOLEM))) {
+                         this.noActionTime = 0;
+                     }
+@@ -114,7 +_,7 @@
+     @Override
+     public void die(DamageSource source) {
+         if (this.level() instanceof ServerLevel serverLevel) {
+-            Entity killer = source.getEntity();
++            Entity killer = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+             Raid raidWhenKilled = this.getCurrentRaid();
+             if (raidWhenKilled != null) {
+                 if (this.isPatrolLeader()) {
+@@ -269,6 +_,10 @@
+ 
+     public abstract SoundEvent getCelebrateSound();
+ 
++    protected @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     protected static class HoldGroundAttackGoal extends Goal {
+         private final Raider mob;
+         private final float hostileRadiusSqr;
+@@ -282,10 +_,11 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity lastHurtByMob = this.mob.getLastHurtByMob();
++            LivingEntity lastHurtByMob = this.mob.regionSafeTarget(this.mob.getLastHurtByMob());
++            LivingEntity target = this.mob.regionSafeTarget(this.mob.getTarget());
+             return this.mob.getCurrentRaid() == null
+                 && this.mob.isPatrolling()
+-                && this.mob.getTarget() != null
++                && target != null
+                 && !this.mob.isAggressive()
+                 && (lastHurtByMob == null || !lastHurtByMob.is(EntityType.PLAYER));
+         }
+@@ -294,20 +_,29 @@
+         public void start() {
+             super.start();
+             this.mob.getNavigation().stop();
++            AABB shoutBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(8.0, 8.0, 8.0));
++            if (shoutBox == null) {
++                return;
++            }
+ 
+             for (Raider entity : getServerLevel(this.mob)
+-                .getNearbyEntities(Raider.class, this.shoutTargeting, this.mob, this.mob.getBoundingBox().inflate(8.0, 8.0, 8.0))) {
+-                entity.setTarget(this.mob.getTarget());
++                .getNearbyEntities(Raider.class, this.shoutTargeting, this.mob, shoutBox)) {
++                entity.setTarget(this.mob.regionSafeTarget(this.mob.getTarget()));
+             }
+         }
+ 
+         @Override
+         public void stop() {
+             super.stop();
+-            LivingEntity target = this.mob.getTarget();
++            LivingEntity target = this.mob.regionSafeTarget(this.mob.getTarget());
+             if (target != null) {
++                AABB shoutBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(8.0, 8.0, 8.0));
++                if (shoutBox == null) {
++                    return;
++                }
++
+                 for (Raider entity : getServerLevel(this.mob)
+-                    .getNearbyEntities(Raider.class, this.shoutTargeting, this.mob, this.mob.getBoundingBox().inflate(8.0, 8.0, 8.0))) {
++                    .getNearbyEntities(Raider.class, this.shoutTargeting, this.mob, shoutBox)) {
+                     entity.setTarget(target);
+                     entity.setAggressive(true);
+                 }
+@@ -323,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = this.mob.getTarget();
++            LivingEntity target = this.mob.regionSafeTarget(this.mob.getTarget());
+             if (target != null) {
+                 if (this.mob.distanceToSqr(target) > this.hostileRadiusSqr) {
+                     this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+@@ -360,10 +_,9 @@
+             } else {
+                 Int2LongOpenHashMap tempCache = new Int2LongOpenHashMap();
+                 double followRange = Raider.this.getAttributeValue(Attributes.FOLLOW_RANGE);
++                AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(followRange, 8.0, followRange));
+ 
+-                for (ItemEntity banner : this.mob
+-                    .level()
+-                    .getEntitiesOfClass(ItemEntity.class, this.mob.getBoundingBox().inflate(followRange, 8.0, followRange), Raider.ALLOWED_ITEMS)) {
++                for (ItemEntity banner : searchBox == null ? List.<ItemEntity>of() : this.mob.level().getEntitiesOfClass(ItemEntity.class, searchBox, Raider.ALLOWED_ITEMS)) {
+                     long unreachableUntilTime = this.unreachableBannerCache.getOrDefault(banner.getId(), Long.MIN_VALUE);
+                     if (Raider.this.level().getGameTime() < unreachableUntilTime) {
+                         tempCache.put(banner.getId(), unreachableUntilTime);
+@@ -444,7 +_,7 @@
+         @Override
+         public boolean canUse() {
+             Raid currentRaid = this.mob.getCurrentRaid();
+-            return this.mob.isAlive() && this.mob.getTarget() == null && currentRaid != null && currentRaid.isLoss();
++            return this.mob.isAlive() && this.mob.regionSafeTarget(this.mob.getTarget()) == null && currentRaid != null && currentRaid.isLoss();
+         }
+ 
+         @Override
+@@ -491,7 +_,7 @@
+         @Override
+         public boolean canUse() {
+             this.updateVisited();
+-            return this.isValidRaid() && this.hasSuitablePoi() && this.raider.getTarget() == null;
++            return this.isValidRaid() && this.hasSuitablePoi() && this.raider.regionSafeTarget(this.raider.getTarget()) == null;
+         }
+ 
+         private boolean isValidRaid() {
+@@ -515,7 +_,7 @@
+         public boolean canContinueToUse() {
+             return this.raider.getNavigation().isDone()
+                 ? false
+-                : this.raider.getTarget() == null
++                : this.raider.regionSafeTarget(this.raider.getTarget()) == null
+                     && !this.poiPos.closerToCenterThan(this.raider.position(), this.raider.getBbWidth() + this.distanceToPoi)
+                     && !this.stuck;
+         }

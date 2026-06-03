@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/EndCrystal.java
++++ b/net/minecraft/world/entity/boss/enderdragon/EndCrystal.java
+@@ -17,6 +_,7 @@
+ import net.minecraft.world.level.dimension.end.EnderDragonFight;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class EndCrystal extends Entity {
+@@ -56,7 +_,9 @@
+         this.handlePortal();
+         if (this.level() instanceof ServerLevel) {
+             BlockPos pos = this.blockPosition();
+-            if (((ServerLevel)this.level()).getDragonFight() != null && this.level().getBlockState(pos).isAir()) {
++            if (((ServerLevel)this.level()).getDragonFight() != null
++                && RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4)
++                && this.level().getBlockState(pos).isAir()) {
+                 this.level().setBlockAndUpdate(pos, BaseFireBlock.getState(this.level(), pos));
+             }
+         }
+@@ -81,20 +_,22 @@
+ 
+     @Override
+     public final boolean hurtClient(DamageSource source) {
+-        return this.isInvulnerableToBase(source) ? false : !(source.getEntity() instanceof EnderDragon);
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        return this.isInvulnerableToBase(source) ? false : !(sourceEntity instanceof EnderDragon);
+     }
+ 
+     @Override
+     public final boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+         if (this.isInvulnerableToBase(source)) {
+             return false;
+-        } else if (source.getEntity() instanceof EnderDragon) {
++        } else if (sourceEntity instanceof EnderDragon) {
+             return false;
+         } else {
+             if (!this.isRemoved()) {
+                 this.remove(Entity.RemovalReason.KILLED);
+                 if (!source.is(DamageTypeTags.IS_EXPLOSION)) {
+-                    DamageSource damageSource = source.getEntity() != null ? this.damageSources().explosion(this, source.getEntity()) : null;
++                    DamageSource damageSource = sourceEntity != null ? this.damageSources().explosion(this, sourceEntity) : null;
+                     level.explode(this, damageSource, null, this.getX(), this.getY(), this.getZ(), 6.0F, false, Level.ExplosionInteraction.BLOCK);
+                 }
+ 

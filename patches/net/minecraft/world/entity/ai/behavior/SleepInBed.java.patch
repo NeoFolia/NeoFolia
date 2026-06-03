@@ -1,0 +1,115 @@
+--- a/net/minecraft/world/entity/ai/behavior/SleepInBed.java
++++ b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+@@ -15,6 +_,7 @@
+ import net.minecraft.world.entity.schedule.Activity;
+ import net.minecraft.world.level.block.BedBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class SleepInBed extends Behavior<LivingEntity> {
+     public static final int COOLDOWN_AFTER_BEING_WOKEN = 100;
+@@ -38,23 +_,33 @@
+     }
+ 
+     @Override
+-    protected boolean checkExtraStartConditions(ServerLevel level, LivingEntity body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, LivingEntity body) {
+         if (body.isPassenger()) {
+             return false;
+         } else {
+             Brain<?> brain = body.getBrain();
+-            GlobalPos target = brain.getMemory(MemoryModuleType.HOME).get();
++            Optional<GlobalPos> homeMemory = brain.getMemory(MemoryModuleType.HOME);
++            if (homeMemory.isEmpty()) {
++                return false;
++            }
++
++            GlobalPos target = homeMemory.orElseThrow();
+             if (level.dimension() != target.dimension()) {
+                 return false;
+             } else {
+                 Optional<Long> lastWokenMemory = brain.getMemory(MemoryModuleType.LAST_WOKEN);
+-                if (lastWokenMemory.isPresent()) {
+-                    long timeSinceLastWoken = level.getGameTime() - lastWokenMemory.get();
++                Long lastWoken = lastWokenMemory.orElse(null);
++                if (lastWoken != null) {
++                    long timeSinceLastWoken = level.getGameTime() - lastWoken;
+                     if (timeSinceLastWoken > 0L && timeSinceLastWoken < 100L) {
+                         return false;
+                     }
+                 }
+ 
++                if (!RegionizedWorldGuard.shouldLoadChunk(level, target.pos().getX() >> 4, target.pos().getZ() >> 4)) {
++                    return false;
++                }
++
+                 BlockState blockState = level.getBlockState(target.pos());
+                 return target.pos().closerToCenterThan(body.position(), 2.0) && blockState.is(BlockTags.BEDS) && !blockState.getValue(BedBlock.OCCUPIED);
+             }
+@@ -62,25 +_,26 @@
+     }
+ 
+     @Override
+-    protected boolean canStillUse(ServerLevel level, LivingEntity body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, LivingEntity body, long timestamp) {
+         Optional<GlobalPos> memory = body.getBrain().getMemory(MemoryModuleType.HOME);
+         if (memory.isEmpty()) {
+             return false;
+         } else {
+-            BlockPos bedPos = memory.get().pos();
++            BlockPos bedPos = memory.orElseThrow().pos();
+             return body.getBrain().isActive(Activity.REST) && body.getY() > bedPos.getY() + 0.4 && bedPos.closerToCenterThan(body.position(), 1.14);
+         }
+     }
+ 
+     @Override
+-    protected void start(ServerLevel level, LivingEntity body, long timestamp) {
++    protected synchronized void start(ServerLevel level, LivingEntity body, long timestamp) {
+         if (timestamp > this.nextOkStartTime) {
+             Brain<?> brain = body.getBrain();
+-            if (brain.hasMemoryValue(MemoryModuleType.DOORS_TO_CLOSE)) {
+-                Set<GlobalPos> doors = brain.getMemory(MemoryModuleType.DOORS_TO_CLOSE).get();
++            Optional<Set<GlobalPos>> doorsMemory = brain.getMemory(MemoryModuleType.DOORS_TO_CLOSE).map(Set::copyOf);
++            if (doorsMemory.isPresent()) {
++                Set<GlobalPos> doors = doorsMemory.orElseThrow();
+                 Optional<List<LivingEntity>> nearestEntities;
+                 if (brain.hasMemoryValue(MemoryModuleType.NEAREST_LIVING_ENTITIES)) {
+-                    nearestEntities = brain.getMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES);
++                    nearestEntities = brain.getMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES).map(List::copyOf);
+                 } else {
+                     nearestEntities = Optional.empty();
+                 }
+@@ -88,7 +_,17 @@
+                 InteractWithDoor.closeDoorsThatIHaveOpenedOrPassedThrough(level, body, null, null, doors, nearestEntities);
+             }
+ 
+-            body.startSleeping(body.getBrain().getMemory(MemoryModuleType.HOME).get().pos());
++            Optional<GlobalPos> homeMemory = body.getBrain().getMemory(MemoryModuleType.HOME);
++            if (homeMemory.isEmpty()) {
++                return;
++            }
++
++            BlockPos homePos = homeMemory.orElseThrow().pos();
++            if (!RegionizedWorldGuard.shouldLoadChunk(level, homePos.getX() >> 4, homePos.getZ() >> 4)) {
++                return;
++            }
++
++            body.startSleeping(homePos);
+             brain.setMemory(MemoryModuleType.LAST_SLEPT, timestamp);
+             brain.eraseMemory(MemoryModuleType.WALK_TARGET);
+             brain.eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+@@ -96,12 +_,12 @@
+     }
+ 
+     @Override
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return false;
+     }
+ 
+     @Override
+-    protected void stop(ServerLevel level, LivingEntity body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, LivingEntity body, long timestamp) {
+         if (body.isSleeping()) {
+             body.stopSleeping();
+             this.nextOkStartTime = timestamp + 40L;

@@ -1,0 +1,26 @@
+--- a/net/minecraft/world/entity/ai/behavior/Swim.java
++++ b/net/minecraft/world/entity/ai/behavior/Swim.java
+@@ -13,19 +_,19 @@
+         this.chance = chance;
+     }
+ 
+-    public static <T extends Mob> boolean shouldSwim(T mob) {
++    public static synchronized <T extends Mob> boolean shouldSwim(T mob) {
+         return mob.isInWater() && mob.getFluidHeight(FluidTags.WATER) > mob.getFluidJumpThreshold() || mob.isInLava();
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Mob body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Mob body) {
+         return shouldSwim(body);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
+         return this.checkExtraStartConditions(level, body);
+     }
+ 
+-    protected void tick(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Mob body, long timestamp) {
+         if (body.getRandom().nextFloat() < this.chance) {
+             body.getJumpControl().jump();
+         }

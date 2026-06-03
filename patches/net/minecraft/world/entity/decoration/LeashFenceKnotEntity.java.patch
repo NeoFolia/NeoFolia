@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/entity/decoration/LeashFenceKnotEntity.java
++++ b/net/minecraft/world/entity/decoration/LeashFenceKnotEntity.java
+@@ -24,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class LeashFenceKnotEntity extends BlockAttachedEntity {
+@@ -75,7 +_,7 @@
+         if (this.level().isClientSide()) {
+             return InteractionResult.SUCCESS;
+         } else {
+-            if (player.getItemInHand(hand).is(Items.SHEARS)) {
++            if (player.getItemInHand(hand).canPerformAction(net.neoforged.neoforge.common.ItemAbilities.SHEARS_HARVEST)) {
+                 InteractionResult result = super.interact(player, hand, location);
+                 if (result instanceof InteractionResult.Success success && success.wasItemInteraction()) {
+                     return result;
+@@ -120,7 +_,8 @@
+ 
+     @Override
+     public boolean survives() {
+-        return this.level().getBlockState(this.pos).is(BlockTags.FENCES);
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), this.pos.getX() >> 4, this.pos.getZ() >> 4)
++            && this.level().getBlockState(this.pos).is(BlockTags.FENCES);
+     }
+ 
+     public static LeashFenceKnotEntity getOrCreateKnot(Level level, BlockPos pos) {
+@@ -131,8 +_,12 @@
+         int x = pos.getX();
+         int y = pos.getY();
+         int z = pos.getZ();
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, new AABB(x - 1.0, y - 1.0, z - 1.0, x + 1.0, y + 1.0, z + 1.0));
++        if (searchBox == null) {
++            return Optional.empty();
++        }
+ 
+-        for (LeashFenceKnotEntity knot : level.getEntitiesOfClass(LeashFenceKnotEntity.class, new AABB(x - 1.0, y - 1.0, z - 1.0, x + 1.0, y + 1.0, z + 1.0))) {
++        for (LeashFenceKnotEntity knot : level.getEntitiesOfClass(LeashFenceKnotEntity.class, searchBox)) {
+             if (knot.getPos().equals(pos)) {
+                 return Optional.of(knot);
+             }

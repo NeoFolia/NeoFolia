@@ -1,0 +1,127 @@
+--- a/net/minecraft/world/entity/ai/goal/TemptGoal.java
++++ b/net/minecraft/world/entity/ai/goal/TemptGoal.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class TemptGoal extends Goal {
+@@ -49,23 +_,28 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.calmDown > 0) {
+             this.calmDown--;
+             return false;
+         } else {
+             this.player = getServerLevel(this.mob)
+                 .getNearestPlayer(this.targetingConditions.range(this.mob.getAttributeValue(Attributes.TEMPT_RANGE)), this.mob);
++            this.player = this.regionSafePlayer(this.player);
+             return this.player != null;
+         }
+     }
+ 
+-    private boolean shouldFollow(LivingEntity player) {
++    private synchronized boolean shouldFollow(LivingEntity player) {
+         return this.items.test(player.getMainHandItem()) || this.items.test(player.getOffhandItem());
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
++        this.player = this.regionSafePlayer(this.player);
++        if (this.player == null) {
++            return false;
++        }
+         if (this.canScare()) {
+             if (this.mob.distanceToSqr(this.player) < 36.0) {
+                 if (this.player.distanceToSqr(this.px, this.py, this.pz) > 0.010000000000000002) {
+@@ -88,12 +_,16 @@
+         return this.canUse();
+     }
+ 
+-    protected boolean canScare() {
++    protected synchronized boolean canScare() {
+         return this.canScare;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
++        this.player = this.regionSafePlayer(this.player);
++        if (this.player == null) {
++            return;
++        }
+         this.px = this.player.getX();
+         this.py = this.player.getY();
+         this.pz = this.player.getZ();
+@@ -101,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.player = null;
+         this.stopNavigation();
+         this.calmDown = reducedTickDelay(100);
+@@ -109,39 +_,47 @@
+     }
+ 
+     @Override
+-    public void tick() {
+-        this.mob.getLookControl().setLookAt(this.player, this.mob.getMaxHeadYRot() + 20, this.mob.getMaxHeadXRot());
+-        if (this.mob.distanceToSqr(this.player) < this.stopDistance * this.stopDistance) {
++    public synchronized void tick() {
++        Player target = this.regionSafePlayer(this.player);
++        if (target == null) {
++            return;
++        }
++        this.mob.getLookControl().setLookAt(target, this.mob.getMaxHeadYRot() + 20, this.mob.getMaxHeadXRot());
++        if (this.mob.distanceToSqr(target) < this.stopDistance * this.stopDistance) {
+             this.stopNavigation();
+         } else {
+-            this.navigateTowards(this.player);
++            this.navigateTowards(target);
+         }
+     }
+ 
+-    protected void stopNavigation() {
++    protected synchronized void stopNavigation() {
+         this.mob.getNavigation().stop();
+     }
+ 
+-    protected void navigateTowards(Player player) {
++    protected synchronized void navigateTowards(Player player) {
+         this.mob.getNavigation().moveTo(player, this.speedModifier);
+     }
+ 
+-    public boolean isRunning() {
++    public synchronized boolean isRunning() {
+         return this.isRunning;
+     }
+ 
++    protected synchronized @Nullable Player regionSafePlayer(@Nullable Player player) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), player);
++    }
++
+     public static class ForNonPathfinders extends TemptGoal {
+         public ForNonPathfinders(Mob mob, double speedModifier, Predicate<ItemStack> items, boolean canScare, double stopDistance) {
+             super(mob, speedModifier, items, canScare, stopDistance);
+         }
+ 
+         @Override
+-        protected void stopNavigation() {
++        protected synchronized void stopNavigation() {
+             this.mob.getMoveControl().setWait();
+         }
+ 
+         @Override
+-        protected void navigateTowards(Player player) {
++        protected synchronized void navigateTowards(Player player) {
+             Vec3 target = player.getEyePosition().subtract(this.mob.position()).scale(this.mob.getRandom().nextDouble()).add(this.mob.position());
+             this.mob.getMoveControl().setWantedPosition(target.x, target.y, target.z, this.speedModifier);
+         }

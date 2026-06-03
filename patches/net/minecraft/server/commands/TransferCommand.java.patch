@@ -1,0 +1,93 @@
+--- a/net/minecraft/server/commands/TransferCommand.java
++++ b/net/minecraft/server/commands/TransferCommand.java
+@@ -3,6 +_,7 @@
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
+ import com.mojang.brigadier.arguments.StringArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.Collection;
+@@ -13,6 +_,7 @@
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.network.protocol.common.ClientboundTransferPacket;
+ import net.minecraft.server.level.ServerPlayer;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TransferCommand {
+     private static final SimpleCommandExceptionType ERROR_NO_PLAYERS = new SimpleCommandExceptionType(
+@@ -25,46 +_,53 @@
+                 .requires(Commands.hasPermission(Commands.LEVEL_ADMINS))
+                 .then(
+                     Commands.argument("hostname", StringArgumentType.string())
+-                        .executes(
+-                            c -> transfer(c.getSource(), StringArgumentType.getString(c, "hostname"), 25565, List.of(c.getSource().getPlayerOrException()))
+-                        )
++                        .executes(c -> transferSelf(c, 25565))
+                         .then(
+                             Commands.argument("port", IntegerArgumentType.integer(1, 65535))
+-                                .executes(
+-                                    c -> transfer(
+-                                        c.getSource(),
+-                                        StringArgumentType.getString(c, "hostname"),
+-                                        IntegerArgumentType.getInteger(c, "port"),
+-                                        List.of(c.getSource().getPlayerOrException())
+-                                    )
+-                                )
++                                .executes(c -> transferSelf(c, IntegerArgumentType.getInteger(c, "port")))
+                                 .then(
+                                     Commands.argument("players", EntityArgument.players())
+-                                        .executes(
+-                                            c -> transfer(
+-                                                c.getSource(),
+-                                                StringArgumentType.getString(c, "hostname"),
+-                                                IntegerArgumentType.getInteger(c, "port"),
+-                                                EntityArgument.getPlayers(c, "players")
+-                                            )
+-                                        )
++                                        .executes(c -> transferPlayers(c, IntegerArgumentType.getInteger(c, "port")))
+                                 )
+                         )
+                 )
+         );
+     }
+ 
++    private static int transferSelf(CommandContext<CommandSourceStack> context, int port) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> transferSelf(context, port))) {
++            return 0;
++        }
++
++        return transfer(source, StringArgumentType.getString(context, "hostname"), port, List.of(source.getPlayerOrException()));
++    }
++
++    private static int transferPlayers(CommandContext<CommandSourceStack> context, int port) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> transferPlayers(context, port))) {
++            return 0;
++        }
++
++        return transfer(source, StringArgumentType.getString(context, "hostname"), port, EntityArgument.getPlayers(context, "players"));
++    }
++
+     private static int transfer(CommandSourceStack source, String hostname, int port, Collection<ServerPlayer> players) throws CommandSyntaxException {
+         if (players.isEmpty()) {
+             throw ERROR_NO_PLAYERS.create();
+         } else {
++            Component singlePlayerName = null;
+             for (ServerPlayer player : players) {
+-                player.connection.send(new ClientboundTransferPacket(hostname, port));
++                singlePlayerName = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                    RegionizedWorldGuard.sendToPlayer(player, new ClientboundTransferPacket(hostname, port));
++                    return player.getDisplayName();
++                });
+             }
+ 
+             if (players.size() == 1) {
++                Component finalSinglePlayerName = singlePlayerName;
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.transfer.success.single", players.iterator().next().getDisplayName(), hostname, port), true
++                    () -> Component.translatable("commands.transfer.success.single", finalSinglePlayerName, hostname, port), true
+                 );
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.transfer.success.multiple", players.size(), hostname, port), true);

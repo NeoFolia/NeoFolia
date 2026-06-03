@@ -1,0 +1,37 @@
+--- a/net/minecraft/advancements/CriterionProgress.java
++++ b/net/minecraft/advancements/CriterionProgress.java
+@@ -14,28 +_,28 @@
+         this.obtained = obtained;
+     }
+ 
+-    public boolean isDone() {
++    public synchronized boolean isDone() {
+         return this.obtained != null;
+     }
+ 
+-    public void grant() {
++    public synchronized void grant() {
+         this.obtained = Instant.now();
+     }
+ 
+-    public void revoke() {
++    public synchronized void revoke() {
+         this.obtained = null;
+     }
+ 
+-    public @Nullable Instant getObtained() {
++    public synchronized @Nullable Instant getObtained() {
+         return this.obtained;
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return "CriterionProgress{obtained=" + (this.obtained == null ? "false" : this.obtained) + "}";
+     }
+ 
+-    public void serializeToNetwork(FriendlyByteBuf output) {
++    public synchronized void serializeToNetwork(FriendlyByteBuf output) {
+         output.writeNullable(this.obtained, FriendlyByteBuf::writeInstant);
+     }
+ 

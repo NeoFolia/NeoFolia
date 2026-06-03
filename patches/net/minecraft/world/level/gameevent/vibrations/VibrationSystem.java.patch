@@ -1,0 +1,44 @@
+--- a/net/minecraft/world/level/gameevent/vibrations/VibrationSystem.java
++++ b/net/minecraft/world/level/gameevent/vibrations/VibrationSystem.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.level.gameevent.PositionSource;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface VibrationSystem {
+@@ -50,6 +_,8 @@
+         GameEvent.RESONATE_15.key()
+     );
+     int NO_VIBRATION_FREQUENCY = 0;
++    /** @deprecated Neo: use the {@link net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps#VIBRATION_FREQUENCIES data map} instead. */
++    @Deprecated
+     ToIntFunction<ResourceKey<GameEvent>> VIBRATION_FREQUENCY_FOR_EVENT = Util.make(new Reference2IntOpenHashMap<>(), map -> {
+         map.defaultReturnValue(0);
+         map.put(GameEvent.STEP.key(), 1);
+@@ -103,11 +_,13 @@
+     VibrationSystem.User getVibrationUser();
+ 
+     static int getGameEventFrequency(Holder<GameEvent> event) {
+-        return event.unwrapKey().map(VibrationSystem::getGameEventFrequency).orElse(0);
++        var data = event.getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.VIBRATION_FREQUENCIES);
++        return data != null ? data.frequency() : 0;
+     }
+ 
+     static int getGameEventFrequency(ResourceKey<GameEvent> event) {
+-        return VIBRATION_FREQUENCY_FOR_EVENT.applyAsInt(event);
++        var holder = net.minecraft.core.registries.BuiltInRegistries.GAME_EVENT.get(event);
++        return holder.map(VibrationSystem::getGameEventFrequency).orElse(0);
+     }
+ 
+     static ResourceKey<GameEvent> getResonanceEventByFrequency(int vibrationFrequency) {
+@@ -403,7 +_,7 @@
+ 
+                     if (sourceEntity.isSteppingCarefully() && event.is(GameEventTags.IGNORE_VIBRATIONS_SNEAKING)) {
+                         if (this.canTriggerAvoidVibration() && sourceEntity instanceof ServerPlayer player) {
+-                            CriteriaTriggers.AVOID_VIBRATION.trigger(player);
++                            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.AVOID_VIBRATION.trigger(player));
+                         }
+ 
+                         return false;

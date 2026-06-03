@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/vehicle/VehicleEntity.java
++++ b/net/minecraft/world/entity/vehicle/VehicleEntity.java
+@@ -16,6 +_,7 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class VehicleEntity extends Entity {
+     protected static final EntityDataAccessor<Integer> DATA_ID_HURT = SynchedEntityData.defineId(VehicleEntity.class, EntityDataSerializers.INT);
+@@ -33,6 +_,7 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
+         if (this.isRemoved()) {
+             return true;
+         } else if (this.isInvulnerableToBase(source)) {
+@@ -42,8 +_,8 @@
+             this.setHurtTime(10);
+             this.markHurt();
+             this.setDamage(this.getDamage() + damage * 10.0F);
+-            this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
+-            boolean creativePlayer = source.getEntity() instanceof Player player && player.getAbilities().instabuild;
++            this.gameEvent(GameEvent.ENTITY_DAMAGE, sourceEntity);
++            boolean creativePlayer = sourceEntity instanceof Player player && player.getAbilities().instabuild;
+             if ((creativePlayer || !(this.getDamage() > 40.0F)) && !this.shouldSourceDestroy(source)) {
+                 if (creativePlayer) {
+                     this.discard();

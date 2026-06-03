@@ -1,0 +1,34 @@
+--- a/net/minecraft/world/entity/ai/behavior/StayCloseToTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/StayCloseToTarget.java
+@@ -9,7 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
+ 
+ public class StayCloseToTarget {
+-    public static BehaviorControl<LivingEntity> create(
++    public static synchronized BehaviorControl<LivingEntity> create(
+         Function<LivingEntity, Optional<PositionTracker>> targetPositionGetter,
+         Predicate<LivingEntity> shouldRunPredicate,
+         int closeEnough,
+@@ -20,14 +_,17 @@
+             i -> i.group(i.registered(MemoryModuleType.LOOK_TARGET), i.registered(MemoryModuleType.WALK_TARGET))
+                 .apply(i, (lookTarget, walkTarget) -> (level, body, timestamp) -> {
+                     Optional<PositionTracker> targetPosition = targetPositionGetter.apply(body);
+-                    if (!targetPosition.isEmpty() && shouldRunPredicate.test(body)) {
+-                        PositionTracker positionTracker = targetPosition.get();
++                    if (targetPosition.isPresent() && shouldRunPredicate.test(body)) {
++                        PositionTracker positionTracker = targetPosition.orElseThrow();
++                        if (!positionTracker.isRegionSafeFor(body)) {
++                            return false;
++                        }
++
+                         if (body.position().closerThan(positionTracker.currentPosition(), tooFar)) {
+                             return false;
+                         } else {
+-                            PositionTracker target = targetPosition.get();
+-                            lookTarget.set(target);
+-                            walkTarget.set(new WalkTarget(target, speedModifier, closeEnough));
++                            lookTarget.set(positionTracker);
++                            walkTarget.set(new WalkTarget(positionTracker, speedModifier, closeEnough));
+                             return true;
+                         }
+                     } else {

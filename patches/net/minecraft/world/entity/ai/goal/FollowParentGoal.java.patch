@@ -1,0 +1,79 @@
+--- a/net/minecraft/world/entity/ai/goal/FollowParentGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowParentGoal.java
+@@ -2,6 +_,8 @@
+ 
+ import java.util.List;
+ import net.minecraft.world.entity.animal.Animal;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FollowParentGoal extends Goal {
+@@ -19,13 +_,14 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.animal.getAge() >= 0) {
+             return false;
+         } else {
+-            List<? extends Animal> parents = this.animal
+-                .level()
+-                .getEntitiesOfClass((Class<? extends Animal>)this.animal.getClass(), this.animal.getBoundingBox().inflate(8.0, 4.0, 8.0));
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.animal.level(), this.animal.getBoundingBox().inflate(8.0, 4.0, 8.0));
++            List<? extends Animal> parents = searchBox == null
++                ? List.of()
++                : List.copyOf(this.animal.level().getEntitiesOfClass((Class<? extends Animal>)this.animal.getClass(), searchBox));
+             Animal closest = null;
+             double closestDistSqr = Double.MAX_VALUE;
+ 
+@@ -51,32 +_,41 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
++        Animal target = this.regionSafeParent(this.parent);
+         if (this.animal.getAge() >= 0) {
+             return false;
+-        } else if (!this.parent.isAlive()) {
++        } else if (target == null || !target.isAlive()) {
+             return false;
+         } else {
+-            double distSqr = this.animal.distanceToSqr(this.parent);
++            double distSqr = this.animal.distanceToSqr(target);
+             return !(distSqr < 9.0) && !(distSqr > 256.0);
+         }
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.timeToRecalcPath = 0;
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.parent = null;
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
++        Animal target = this.regionSafeParent(this.parent);
++        if (target == null) {
++            return;
++        }
+         if (--this.timeToRecalcPath <= 0) {
+             this.timeToRecalcPath = this.adjustedTickDelay(10);
+-            this.animal.getNavigation().moveTo(this.parent, this.speedModifier);
++            this.animal.getNavigation().moveTo(target, this.speedModifier);
+         }
++    }
++
++    private synchronized @Nullable Animal regionSafeParent(@Nullable Animal parent) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.animal.level(), parent);
+     }
+ }

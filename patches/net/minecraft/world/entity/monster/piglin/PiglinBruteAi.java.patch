@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/entity/monster/piglin/PiglinBruteAi.java
++++ b/net/minecraft/world/entity/monster/piglin/PiglinBruteAi.java
+@@ -131,8 +_,12 @@
+         if (angryAt.isPresent() && Sensor.isEntityAttackableIgnoringLineOfSight(level, body, angryAt.get())) {
+             return angryAt;
+         } else {
+-            Optional<? extends LivingEntity> player = body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_ATTACKABLE_PLAYER);
+-            return player.isPresent() ? player : body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_NEMESIS);
++            Optional<? extends LivingEntity> player = body.getBrain()
++                .getMemory(MemoryModuleType.NEAREST_VISIBLE_ATTACKABLE_PLAYER)
++                .map(target -> BehaviorUtils.regionSafeEntity(body, target));
++            return player.isPresent()
++                ? player
++                : body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_NEMESIS).map(target -> BehaviorUtils.regionSafeEntity(body, target));
+         }
+     }
+ 
+@@ -143,12 +_,17 @@
+     }
+ 
+     protected static void setAngerTarget(PiglinBrute body, LivingEntity target) {
++        target = BehaviorUtils.regionSafeEntity(body, target);
++        if (target == null) {
++            return;
++        }
++
+         body.getBrain().eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+         body.getBrain().setMemoryWithExpiry(MemoryModuleType.ANGRY_AT, target.getUUID(), 600L);
+     }
+ 
+     protected static void maybePlayActivitySound(PiglinBrute body) {
+-        if (body.level().getRandom().nextFloat() < 0.0125) {
++        if (body.getRandom().nextFloat() < 0.0125) {
+             playActivitySound(body);
+         }
+     }

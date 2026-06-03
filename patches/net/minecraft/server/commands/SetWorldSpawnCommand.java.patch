@@ -1,0 +1,46 @@
+--- a/net/minecraft/server/commands/SetWorldSpawnCommand.java
++++ b/net/minecraft/server/commands/SetWorldSpawnCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
+@@ -21,16 +_,33 @@
+                 .executes(c -> setSpawn(c.getSource(), BlockPos.containing(c.getSource().getPosition()), WorldCoordinates.ZERO_ROTATION))
+                 .then(
+                     Commands.argument("pos", BlockPosArgument.blockPos())
+-                        .executes(c -> setSpawn(c.getSource(), BlockPosArgument.getSpawnablePos(c, "pos"), WorldCoordinates.ZERO_ROTATION))
++                        .executes(c -> setSpawn(c, false))
+                         .then(
+                             Commands.argument("rotation", RotationArgument.rotation())
+-                                .executes(c -> setSpawn(c.getSource(), BlockPosArgument.getSpawnablePos(c, "pos"), RotationArgument.getRotation(c, "rotation")))
++                                .executes(c -> setSpawn(c, true))
+                         )
+                 )
+         );
+     }
+ 
++    private static int setSpawn(CommandContext<CommandSourceStack> context, boolean hasRotation) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setSpawn(context, hasRotation))) {
++            return 0;
++        }
++
++        return setSpawn(
++            source,
++            BlockPosArgument.getSpawnablePos(context, "pos"),
++            hasRotation ? RotationArgument.getRotation(context, "rotation") : WorldCoordinates.ZERO_ROTATION
++        );
++    }
++
+     private static int setSpawn(CommandSourceStack source, BlockPos pos, Coordinates rotation) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setSpawn(source, pos, rotation))) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         Vec2 rotationVector = rotation.getRotation(source);
+         float yaw = rotationVector.y;

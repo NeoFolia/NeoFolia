@@ -1,0 +1,72 @@
+--- a/net/minecraft/world/entity/vehicle/ContainerEntity.java
++++ b/net/minecraft/world/entity/vehicle/ContainerEntity.java
+@@ -28,6 +_,8 @@
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface ContainerEntity extends Container, MenuProvider {
+@@ -80,7 +_,8 @@
+     default void chestVehicleDestroyed(DamageSource source, ServerLevel level, Entity entity) {
+         if (level.getGameRules().get(GameRules.ENTITY_DROPS)) {
+             Containers.dropContents(level, entity, this);
+-            if (source.getDirectEntity() instanceof Player player) {
++            Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(level, source.getDirectEntity());
++            if (directEntity instanceof Player player) {
+                 PiglinAi.angerNearbyPiglins(level, player, true);
+             }
+         }
+@@ -93,22 +_,31 @@
+ 
+     default void unpackChestVehicleLootTable(@Nullable Player player) {
+         MinecraftServer server = this.level().getServer();
+-        if (this.getContainerLootTable() != null && server != null) {
+-            LootTable lootTable = server.reloadableRegistries().getLootTable(this.getContainerLootTable());
+-            if (player != null) {
+-                CriteriaTriggers.GENERATE_LOOT.trigger((ServerPlayer)player, this.getContainerLootTable());
++        ResourceKey<LootTable> lootTableKey = this.getContainerLootTable();
++        if (lootTableKey != null && server != null) {
++            LootTable lootTable = server.reloadableRegistries().getLootTable(lootTableKey);
++            Player safePlayer = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), player);
++            if (safePlayer instanceof ServerPlayer serverPlayer) {
++                triggerGenerateLoot(serverPlayer, lootTableKey);
+             }
+ 
+             this.setContainerLootTable(null);
+             LootParams.Builder builder = new LootParams.Builder((ServerLevel)this.level()).withParameter(LootContextParams.ORIGIN, this.position());
+-            if (player != null) {
+-                builder.withLuck(player.getLuck()).withParameter(LootContextParams.THIS_ENTITY, player);
++            // Neo: set the chest to attacking_entity for loot context.
++            if (this instanceof net.minecraft.world.entity.vehicle.minecart.AbstractMinecartContainer entityContainer)
++                builder.withParameter(LootContextParams.ATTACKING_ENTITY, entityContainer);
++            if (safePlayer != null) {
++                builder.withLuck(safePlayer.getLuck()).withParameter(LootContextParams.THIS_ENTITY, safePlayer);
+             }
+ 
+             lootTable.fill(this, builder.create(LootContextParamSets.CHEST), this.getContainerLootTableSeed());
+         }
+     }
+ 
++    private static void triggerGenerateLoot(ServerPlayer player, ResourceKey<LootTable> lootTable) {
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.GENERATE_LOOT.trigger(player, lootTable));
++    }
++
+     default void clearChestVehicleContent() {
+         this.unpackChestVehicleLootTable(null);
+         this.getItemStacks().clear();
+@@ -171,6 +_,12 @@
+     }
+ 
+     default boolean isChestVehicleStillValid(Player player) {
++        if (this instanceof Entity entity
++            && RegionizedTickContext.isRegionThread()
++            && RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), entity) == null) {
++            return false;
++        }
++
+         return !this.isRemoved() && player.isWithinEntityInteractionRange(this.getBoundingBox(), 4.0);
+     }
+ }

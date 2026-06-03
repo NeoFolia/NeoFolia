@@ -1,0 +1,109 @@
+--- a/net/minecraft/world/level/block/entity/vault/VaultServerData.java
++++ b/net/minecraft/world/level/block/entity/vault/VaultServerData.java
+@@ -44,24 +_,24 @@
+     VaultServerData() {
+     }
+ 
+-    void setLastInsertFailTimestamp(long lastInsertFailTimestamp) {
++    synchronized void setLastInsertFailTimestamp(long lastInsertFailTimestamp) {
+         this.lastInsertFailTimestamp = lastInsertFailTimestamp;
+     }
+ 
+-    long getLastInsertFailTimestamp() {
++    synchronized long getLastInsertFailTimestamp() {
+         return this.lastInsertFailTimestamp;
+     }
+ 
+-    Set<UUID> getRewardedPlayers() {
+-        return this.rewardedPlayers;
++    synchronized Set<UUID> getRewardedPlayers() {
++        return Set.copyOf(this.rewardedPlayers);
+     }
+ 
+-    boolean hasRewardedPlayer(Player player) {
++    synchronized boolean hasRewardedPlayer(Player player) {
+         return this.rewardedPlayers.contains(player.getUUID());
+     }
+ 
+     @VisibleForTesting
+-    public void addToRewardedPlayers(Player player) {
++    public synchronized void addToRewardedPlayers(Player player) {
+         this.rewardedPlayers.add(player.getUUID());
+         if (this.rewardedPlayers.size() > 128) {
+             Iterator<UUID> iterator = this.rewardedPlayers.iterator();
+@@ -74,36 +_,36 @@
+         this.markChanged();
+     }
+ 
+-    long stateUpdatingResumesAt() {
++    synchronized long stateUpdatingResumesAt() {
+         return this.stateUpdatingResumesAt;
+     }
+ 
+-    void pauseStateUpdatingUntil(long stateUpdatingResumesAt) {
++    synchronized void pauseStateUpdatingUntil(long stateUpdatingResumesAt) {
+         this.stateUpdatingResumesAt = stateUpdatingResumesAt;
+         this.markChanged();
+     }
+ 
+-    List<ItemStack> getItemsToEject() {
+-        return this.itemsToEject;
++    synchronized List<ItemStack> getItemsToEject() {
++        return List.copyOf(this.itemsToEject);
+     }
+ 
+-    void markEjectionFinished() {
++    synchronized void markEjectionFinished() {
+         this.totalEjectionsNeeded = 0;
+         this.markChanged();
+     }
+ 
+-    void setItemsToEject(List<ItemStack> newItemsToEject) {
++    synchronized void setItemsToEject(List<ItemStack> newItemsToEject) {
+         this.itemsToEject.clear();
+         this.itemsToEject.addAll(newItemsToEject);
+         this.totalEjectionsNeeded = this.itemsToEject.size();
+         this.markChanged();
+     }
+ 
+-    ItemStack getNextItemToEject() {
++    synchronized ItemStack getNextItemToEject() {
+         return this.itemsToEject.isEmpty() ? ItemStack.EMPTY : Objects.requireNonNullElse(this.itemsToEject.get(this.itemsToEject.size() - 1), ItemStack.EMPTY);
+     }
+ 
+-    ItemStack popNextItemToEject() {
++    synchronized ItemStack popNextItemToEject() {
+         if (this.itemsToEject.isEmpty()) {
+             return ItemStack.EMPTY;
+         } else {
+@@ -112,7 +_,7 @@
+         }
+     }
+ 
+-    void set(VaultServerData from) {
++    synchronized void set(VaultServerData from) {
+         this.stateUpdatingResumesAt = from.stateUpdatingResumesAt();
+         this.itemsToEject.clear();
+         this.itemsToEject.addAll(from.itemsToEject);
+@@ -120,11 +_,19 @@
+         this.rewardedPlayers.addAll(from.rewardedPlayers);
+     }
+ 
+-    private void markChanged() {
++    private synchronized void markChanged() {
+         this.isDirty = true;
+     }
+ 
+-    public float ejectionProgress() {
++    synchronized boolean isDirty() {
++        return this.isDirty;
++    }
++
++    synchronized void clearDirty() {
++        this.isDirty = false;
++    }
++
++    public synchronized float ejectionProgress() {
+         return this.totalEjectionsNeeded == 1 ? 1.0F : 1.0F - Mth.inverseLerp((float)this.getItemsToEject().size(), 1.0F, (float)this.totalEjectionsNeeded);
+     }
+ }

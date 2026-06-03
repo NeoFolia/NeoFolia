@@ -1,0 +1,41 @@
+--- a/net/minecraft/world/entity/ai/goal/ClimbOnTopOfPowderSnowGoal.java
++++ b/net/minecraft/world/entity/ai/goal/ClimbOnTopOfPowderSnowGoal.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.shapes.Shapes;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ClimbOnTopOfPowderSnowGoal extends Goal {
+     private final Mob mob;
+@@ -20,10 +_,14 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         boolean inPowderSnow = this.mob.wasInPowderSnow || this.mob.isInPowderSnow;
+         if (inPowderSnow && this.mob.is(EntityTypeTags.POWDER_SNOW_WALKABLE_MOBS)) {
+             BlockPos above = this.mob.blockPosition().above();
++            if (!RegionizedWorldGuard.shouldLoadChunk(this.level, above.getX() >> 4, above.getZ() >> 4)) {
++                return false;
++            }
++
+             BlockState aboveBlockState = this.level.getBlockState(above);
+             return aboveBlockState.is(Blocks.POWDER_SNOW) || aboveBlockState.getCollisionShape(this.level, above) == Shapes.empty();
+         } else {
+@@ -32,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         this.mob.getJumpControl().jump();
+     }
+ }

@@ -1,0 +1,41 @@
+--- a/net/minecraft/world/entity/ai/sensing/HurtBySensor.java
++++ b/net/minecraft/world/entity/ai/sensing/HurtBySensor.java
+@@ -8,29 +_,32 @@
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.Brain;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class HurtBySensor extends Sensor<LivingEntity> {
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return ImmutableSet.of(MemoryModuleType.HURT_BY, MemoryModuleType.HURT_BY_ENTITY);
+     }
+ 
+     @Override
+-    protected void doTick(ServerLevel level, LivingEntity body) {
++    protected synchronized void doTick(ServerLevel level, LivingEntity body) {
+         Brain<?> brain = body.getBrain();
+         DamageSource damageSource = body.getLastDamageSource();
+         if (damageSource != null) {
+-            brain.setMemory(MemoryModuleType.HURT_BY, body.getLastDamageSource());
++            brain.setMemory(MemoryModuleType.HURT_BY, damageSource);
+             Entity entitySource = damageSource.getEntity();
+-            if (entitySource instanceof LivingEntity) {
+-                brain.setMemory(MemoryModuleType.HURT_BY_ENTITY, (LivingEntity)entitySource);
++            if (entitySource instanceof LivingEntity livingSource && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, livingSource) != null) {
++                brain.setMemory(MemoryModuleType.HURT_BY_ENTITY, livingSource);
++            } else {
++                brain.eraseMemory(MemoryModuleType.HURT_BY_ENTITY);
+             }
+         } else {
+             brain.eraseMemory(MemoryModuleType.HURT_BY);
+         }
+ 
+         brain.getMemory(MemoryModuleType.HURT_BY_ENTITY).ifPresent(hurtByEntity -> {
+-            if (!hurtByEntity.isAlive() || hurtByEntity.level() != level) {
++            if (!hurtByEntity.isAlive() || hurtByEntity.level() != level || RegionizedWorldGuard.restrictEntityToCurrentRegion(level, hurtByEntity) == null) {
+                 brain.eraseMemory(MemoryModuleType.HURT_BY_ENTITY);
+             }
+         });

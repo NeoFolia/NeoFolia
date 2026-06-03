@@ -1,0 +1,31 @@
+--- a/net/minecraft/world/entity/ai/behavior/declarative/MemoryAccessor.java
++++ b/net/minecraft/world/entity/ai/behavior/declarative/MemoryAccessor.java
+@@ -17,23 +_,23 @@
+         this.value = value;
+     }
+ 
+-    public App<F, Value> value() {
++    public synchronized App<F, Value> value() {
+         return this.value;
+     }
+ 
+-    public void set(Value value) {
++    public synchronized void set(Value value) {
+         this.brain.setMemory(this.memoryType, Optional.of(value));
+     }
+ 
+-    public void setOrErase(Optional<Value> value) {
++    public synchronized void setOrErase(Optional<Value> value) {
+         this.brain.setMemory(this.memoryType, value);
+     }
+ 
+-    public void setWithExpiry(Value value, long timeToLive) {
++    public synchronized void setWithExpiry(Value value, long timeToLive) {
+         this.brain.setMemoryWithExpiry(this.memoryType, value, timeToLive);
+     }
+ 
+-    public void erase() {
++    public synchronized void erase() {
+         this.brain.eraseMemory(this.memoryType);
+     }
+ }

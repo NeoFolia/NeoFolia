@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/goal/Goal.java
++++ b/net/minecraft/world/entity/ai/goal/Goal.java
+@@ -32,7 +_,7 @@
+     public void tick() {
+     }
+ 
+-    public void setFlags(EnumSet<Goal.Flag> requiredControlFlags) {
++    public synchronized void setFlags(EnumSet<Goal.Flag> requiredControlFlags) {
+         this.flags.clear();
+         this.flags.addAll(requiredControlFlags);
+     }
+@@ -42,8 +_,8 @@
+         return this.getClass().getSimpleName();
+     }
+ 
+-    public EnumSet<Goal.Flag> getFlags() {
+-        return this.flags;
++    public synchronized EnumSet<Goal.Flag> getFlags() {
++        return EnumSet.copyOf(this.flags);
+     }
+ 
+     protected int adjustedTickDelay(int ticks) {

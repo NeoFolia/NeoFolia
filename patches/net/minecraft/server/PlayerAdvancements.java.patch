@@ -1,0 +1,229 @@
+--- a/net/minecraft/server/PlayerAdvancements.java
++++ b/net/minecraft/server/PlayerAdvancements.java
+@@ -32,6 +_,7 @@
+ import net.minecraft.advancements.CriterionTrigger;
+ import net.minecraft.advancements.CriterionTriggerInstance;
+ import net.minecraft.core.registries.BuiltInRegistries;
++import net.minecraft.network.protocol.Packet;
+ import net.minecraft.network.protocol.game.ClientboundSelectAdvancementsTabPacket;
+ import net.minecraft.network.protocol.game.ClientboundUpdateAdvancementsPacket;
+ import net.minecraft.resources.Identifier;
+@@ -42,6 +_,7 @@
+ import net.minecraft.util.StrictJsonParser;
+ import net.minecraft.util.datafix.DataFixTypes;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -70,17 +_,17 @@
+         this.load(manager);
+     }
+ 
+-    public void setPlayer(ServerPlayer player) {
++    public synchronized void setPlayer(ServerPlayer player) {
+         this.player = player;
+     }
+ 
+-    public void stopListening() {
++    public synchronized void stopListening() {
+         for (CriterionTrigger<?> trigger : BuiltInRegistries.TRIGGER_TYPES) {
+             trigger.removePlayerListeners(this);
+         }
+     }
+ 
+-    public void reload(ServerAdvancementManager manager) {
++    public synchronized void reload(ServerAdvancementManager manager) {
+         this.stopListening();
+         this.progress.clear();
+         this.visible.clear();
+@@ -92,13 +_,13 @@
+         this.load(manager);
+     }
+ 
+-    private void registerListeners(ServerAdvancementManager manager) {
++    private synchronized void registerListeners(ServerAdvancementManager manager) {
+         for (AdvancementHolder advancement : manager.getAllAdvancements()) {
+             this.registerListeners(advancement);
+         }
+     }
+ 
+-    private void checkForAutomaticTriggers(ServerAdvancementManager manager) {
++    private synchronized void checkForAutomaticTriggers(ServerAdvancementManager manager) {
+         for (AdvancementHolder holder : manager.getAllAdvancements()) {
+             Advancement advancement = holder.value();
+             if (advancement.criteria().isEmpty()) {
+@@ -108,7 +_,7 @@
+         }
+     }
+ 
+-    private void load(ServerAdvancementManager manager) {
++    private synchronized void load(ServerAdvancementManager manager) {
+         if (Files.isRegularFile(this.playerSavePath)) {
+             try (Reader reader = Files.newBufferedReader(this.playerSavePath, StandardCharsets.UTF_8)) {
+                 JsonElement json = StrictJsonParser.parse(reader);
+@@ -125,7 +_,7 @@
+         this.registerListeners(manager);
+     }
+ 
+-    public void save() {
++    public synchronized void save() {
+         JsonElement json = this.codec.encodeStart(JsonOps.INSTANCE, this.asData()).getOrThrow();
+ 
+         try {
+@@ -139,7 +_,7 @@
+         }
+     }
+ 
+-    private void applyFrom(ServerAdvancementManager manager, PlayerAdvancements.Data data) {
++    private synchronized void applyFrom(ServerAdvancementManager manager, PlayerAdvancements.Data data) {
+         data.forEach((id, progress) -> {
+             AdvancementHolder advancement = manager.get(id);
+             if (advancement == null) {
+@@ -152,7 +_,7 @@
+         });
+     }
+ 
+-    private PlayerAdvancements.Data asData() {
++    private synchronized PlayerAdvancements.Data asData() {
+         Map<Identifier, AdvancementProgress> map = new LinkedHashMap<>();
+         this.progress.forEach((advancement, progress) -> {
+             if (progress.hasProgress()) {
+@@ -162,7 +_,9 @@
+         return new PlayerAdvancements.Data(map);
+     }
+ 
+-    public boolean award(AdvancementHolder holder, String criterion) {
++    public synchronized boolean award(AdvancementHolder holder, String criterion) {
++        // Forge: don't grant advancements for fake players
++        if (this.player instanceof net.neoforged.neoforge.common.util.FakePlayer) return false;
+         boolean result = false;
+         AdvancementProgress progress = this.getOrStartProgress(holder);
+         boolean wasDone = progress.isDone();
+@@ -170,12 +_,14 @@
+             this.unregisterListeners(holder);
+             this.progressChanged.add(holder);
+             result = true;
++            net.neoforged.neoforge.event.EventHooks.onAdvancementProgressedEvent(this.player, holder, progress, criterion, net.neoforged.neoforge.event.entity.player.AdvancementEvent.AdvancementProgressEvent.ProgressType.GRANT);
+             if (!wasDone && progress.isDone()) {
+                 holder.value().rewards().grant(this.player);
+                 holder.value().display().ifPresent(display -> {
+                     if (display.shouldAnnounceChat() && this.player.level().getGameRules().get(GameRules.SHOW_ADVANCEMENT_MESSAGES)) {
+                         this.playerList.broadcastSystemMessage(display.getType().createAnnouncement(holder, this.player), false);
+                     }
++                    net.neoforged.neoforge.event.EventHooks.onAdvancementEarnedEvent(this.player, holder);
+                 });
+             }
+         }
+@@ -187,7 +_,7 @@
+         return result;
+     }
+ 
+-    public boolean revoke(AdvancementHolder advancement, String criterion) {
++    public synchronized boolean revoke(AdvancementHolder advancement, String criterion) {
+         boolean result = false;
+         AdvancementProgress progress = this.getOrStartProgress(advancement);
+         boolean wasDone = progress.isDone();
+@@ -195,6 +_,7 @@
+             this.registerListeners(advancement);
+             this.progressChanged.add(advancement);
+             result = true;
++            net.neoforged.neoforge.event.EventHooks.onAdvancementProgressedEvent(this.player, advancement, progress, criterion, net.neoforged.neoforge.event.entity.player.AdvancementEvent.AdvancementProgressEvent.ProgressType.REVOKE);
+         }
+ 
+         if (wasDone && !progress.isDone()) {
+@@ -204,14 +_,14 @@
+         return result;
+     }
+ 
+-    private void markForVisibilityUpdate(AdvancementHolder advancement) {
++    private synchronized void markForVisibilityUpdate(AdvancementHolder advancement) {
+         AdvancementNode node = this.tree.get(advancement);
+         if (node != null) {
+             this.rootsToUpdate.add(node.root());
+         }
+     }
+ 
+-    private void registerListeners(AdvancementHolder holder) {
++    private synchronized void registerListeners(AdvancementHolder holder) {
+         AdvancementProgress advancementProgress = this.getOrStartProgress(holder);
+         if (!advancementProgress.isDone()) {
+             for (Entry<String, Criterion<?>> entry : holder.value().criteria().entrySet()) {
+@@ -223,11 +_,11 @@
+         }
+     }
+ 
+-    private <T extends CriterionTriggerInstance> void registerListener(AdvancementHolder holder, String key, Criterion<T> criterion) {
++    private synchronized <T extends CriterionTriggerInstance> void registerListener(AdvancementHolder holder, String key, Criterion<T> criterion) {
+         criterion.trigger().addPlayerListener(this, new CriterionTrigger.Listener<>(criterion.triggerInstance(), holder, key));
+     }
+ 
+-    private void unregisterListeners(AdvancementHolder holder) {
++    private synchronized void unregisterListeners(AdvancementHolder holder) {
+         AdvancementProgress advancementProgress = this.getOrStartProgress(holder);
+ 
+         for (Entry<String, Criterion<?>> entry : holder.value().criteria().entrySet()) {
+@@ -238,11 +_,11 @@
+         }
+     }
+ 
+-    private <T extends CriterionTriggerInstance> void removeListener(AdvancementHolder holder, String key, Criterion<T> criterion) {
++    private synchronized <T extends CriterionTriggerInstance> void removeListener(AdvancementHolder holder, String key, Criterion<T> criterion) {
+         criterion.trigger().removePlayerListener(this, new CriterionTrigger.Listener<>(criterion.triggerInstance(), holder, key));
+     }
+ 
+-    public void flushDirty(ServerPlayer player, boolean showAdvancements) {
++    public synchronized void flushDirty(ServerPlayer player, boolean showAdvancements) {
+         if (this.isFirstPacket || !this.rootsToUpdate.isEmpty() || !this.progressChanged.isEmpty()) {
+             Map<Identifier, AdvancementProgress> progress = new HashMap<>();
+             Set<AdvancementHolder> added = new HashSet<>();
+@@ -262,14 +_,14 @@
+ 
+             this.progressChanged.clear();
+             if (!progress.isEmpty() || !added.isEmpty() || !removed.isEmpty()) {
+-                player.connection.send(new ClientboundUpdateAdvancementsPacket(this.isFirstPacket, added, removed, progress, showAdvancements));
++                this.sendToPlayer(player, new ClientboundUpdateAdvancementsPacket(this.isFirstPacket, added, removed, progress, showAdvancements));
+             }
+         }
+ 
+         this.isFirstPacket = false;
+     }
+ 
+-    public void setSelectedTab(@Nullable AdvancementHolder holder) {
++    public synchronized void setSelectedTab(@Nullable AdvancementHolder holder) {
+         AdvancementHolder old = this.lastSelectedTab;
+         if (holder != null && holder.value().isRoot() && holder.value().display().isPresent()) {
+             this.lastSelectedTab = holder;
+@@ -278,11 +_,15 @@
+         }
+ 
+         if (old != this.lastSelectedTab) {
+-            this.player.connection.send(new ClientboundSelectAdvancementsTabPacket(this.lastSelectedTab == null ? null : this.lastSelectedTab.id()));
++            this.sendToPlayer(this.player, new ClientboundSelectAdvancementsTabPacket(this.lastSelectedTab == null ? null : this.lastSelectedTab.id()));
+         }
+     }
+ 
+-    public AdvancementProgress getOrStartProgress(AdvancementHolder advancement) {
++    private void sendToPlayer(ServerPlayer player, Packet<?> packet) {
++        RegionizedWorldGuard.sendToPlayer(player, packet);
++    }
++
++    public synchronized AdvancementProgress getOrStartProgress(AdvancementHolder advancement) {
+         AdvancementProgress progress = this.progress.get(advancement);
+         if (progress == null) {
+             progress = new AdvancementProgress();
+@@ -292,12 +_,12 @@
+         return progress;
+     }
+ 
+-    private void startProgress(AdvancementHolder holder, AdvancementProgress progress) {
++    private synchronized void startProgress(AdvancementHolder holder, AdvancementProgress progress) {
+         progress.update(holder.value().requirements());
+         this.progress.put(holder, progress);
+     }
+ 
+-    private void updateTreeVisibility(AdvancementNode root, Set<AdvancementHolder> added, Set<Identifier> removed) {
++    private synchronized void updateTreeVisibility(AdvancementNode root, Set<AdvancementHolder> added, Set<Identifier> removed) {
+         AdvancementVisibilityEvaluator.evaluateVisibility(root, node -> this.getOrStartProgress(node.holder()).isDone(), (node, shouldBeVisible) -> {
+             AdvancementHolder advancement = node.holder();
+             if (shouldBeVisible) {

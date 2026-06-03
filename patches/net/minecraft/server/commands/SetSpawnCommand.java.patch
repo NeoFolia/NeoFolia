@@ -1,0 +1,107 @@
+--- a/net/minecraft/server/commands/SetSpawnCommand.java
++++ b/net/minecraft/server/commands/SetSpawnCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import java.util.Collections;
+ import net.minecraft.commands.CommandSourceStack;
+@@ -25,46 +_,35 @@
+             Commands.literal("spawnpoint")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                 .executes(
+-                    c -> setSpawn(
+-                        c.getSource(),
+-                        Collections.singleton(c.getSource().getPlayerOrException()),
+-                        BlockPos.containing(c.getSource().getPosition()),
+-                        WorldCoordinates.ZERO_ROTATION
+-                    )
++                    c -> setSpawn(c, false, false, false)
+                 )
+                 .then(
+                     Commands.argument("targets", EntityArgument.players())
+-                        .executes(
+-                            c -> setSpawn(
+-                                c.getSource(),
+-                                EntityArgument.getPlayers(c, "targets"),
+-                                BlockPos.containing(c.getSource().getPosition()),
+-                                WorldCoordinates.ZERO_ROTATION
+-                            )
+-                        )
++                        .executes(c -> setSpawn(c, true, false, false))
+                         .then(
+                             Commands.argument("pos", BlockPosArgument.blockPos())
+-                                .executes(
+-                                    c -> setSpawn(
+-                                        c.getSource(),
+-                                        EntityArgument.getPlayers(c, "targets"),
+-                                        BlockPosArgument.getSpawnablePos(c, "pos"),
+-                                        WorldCoordinates.ZERO_ROTATION
+-                                    )
+-                                )
++                                .executes(c -> setSpawn(c, true, true, false))
+                                 .then(
+                                     Commands.argument("rotation", RotationArgument.rotation())
+-                                        .executes(
+-                                            c -> setSpawn(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                BlockPosArgument.getSpawnablePos(c, "pos"),
+-                                                RotationArgument.getRotation(c, "rotation")
+-                                            )
+-                                        )
++                                        .executes(c -> setSpawn(c, true, true, true))
+                                 )
+                         )
+                 )
++        );
++    }
++
++    private static int setSpawn(CommandContext<CommandSourceStack> context, boolean hasTargets, boolean hasPosition, boolean hasRotation)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setSpawn(context, hasTargets, hasPosition, hasRotation))) {
++            return 0;
++        }
++
++        return setSpawn(
++            source,
++            hasTargets ? EntityArgument.getPlayers(context, "targets") : Collections.singleton(source.getPlayerOrException()),
++            hasPosition ? BlockPosArgument.getSpawnablePos(context, "pos") : BlockPos.containing(source.getPosition()),
++            hasRotation ? RotationArgument.getRotation(context, "rotation") : WorldCoordinates.ZERO_ROTATION
+         );
+     }
+ 
+@@ -74,12 +_,17 @@
+         float yaw = Mth.wrapDegrees(rotationVector.y);
+         float pitch = Mth.clamp(rotationVector.x, -90.0F, 90.0F);
+ 
++        Component singleTargetName = null;
+         for (ServerPlayer target : targets) {
+-            target.setRespawnPosition(new ServerPlayer.RespawnConfig(LevelData.RespawnData.of(dimension, pos, yaw, pitch), true), false);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(source, target, () -> {
++                target.setRespawnPosition(new ServerPlayer.RespawnConfig(LevelData.RespawnData.of(dimension, pos, yaw, pitch), true), false);
++                return target.getDisplayName();
++            });
+         }
+ 
+         String dimensionName = dimension.identifier().toString();
+         if (targets.size() == 1) {
++            Component finalSingleTargetName = singleTargetName;
+             source.sendSuccess(
+                 () -> Component.translatable(
+                     "commands.spawnpoint.success.single",
+@@ -88,8 +_,8 @@
+                     pos.getZ(),
+                     yaw,
+                     pitch,
+-                    dimensionName,
+-                    targets.iterator().next().getDisplayName()
++                    source.getLevel().getDescription(), // Neo: Use dimension translation, if one exists
++                    finalSingleTargetName
+                 ),
+                 true
+             );

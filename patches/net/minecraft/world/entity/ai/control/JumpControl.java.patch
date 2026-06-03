@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/entity/ai/control/JumpControl.java
++++ b/net/minecraft/world/entity/ai/control/JumpControl.java
+@@ -10,11 +_,11 @@
+         this.mob = mob;
+     }
+ 
+-    public void jump() {
++    public synchronized void jump() {
+         this.jump = true;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         this.mob.setJumping(this.jump);
+         this.jump = false;
+     }

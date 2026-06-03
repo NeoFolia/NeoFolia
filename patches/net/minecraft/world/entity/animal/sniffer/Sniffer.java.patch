@@ -1,0 +1,57 @@
+--- a/net/minecraft/world/entity/animal/sniffer/Sniffer.java
++++ b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+@@ -58,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class Sniffer extends Animal {
+     private static final Brain.Provider<Sniffer> BRAIN_PROVIDER = Brain.<Sniffer>provider(
+@@ -276,11 +_,16 @@
+     }
+ 
+     private boolean canDig(BlockPos position) {
+-        return this.level().getBlockState(position).is(BlockTags.SNIFFER_DIGGABLE_BLOCK)
++        return this.canReadBlock(position)
++            && this.level().getBlockState(position).is(BlockTags.SNIFFER_DIGGABLE_BLOCK)
+             && this.getExploredPositions().noneMatch(explored -> GlobalPos.of(this.level().dimension(), position).equals(explored))
+             && Optional.ofNullable(this.getNavigation().createPath(position, 1)).map(Path::canReach).orElse(false);
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private void dropSeed() {
+         if (this.level() instanceof ServerLevel level && this.entityData.get(DATA_DROP_SEED_AT_TICK) == this.tickCount) {
+             BlockPos head = this.getHeadBlock();
+@@ -297,6 +_,10 @@
+         boolean emit = state.getTimeInMillis(this.tickCount) > 1700L && state.getTimeInMillis(this.tickCount) < 6000L;
+         if (emit) {
+             BlockPos head = this.getHeadBlock();
++            if (!this.canReadBlock(head.below())) {
++                return this;
++            }
++
+             BlockState stateBelow = this.level().getBlockState(head.below());
+             if (stateBelow.getRenderShape() != RenderShape.INVISIBLE) {
+                 for (int i = 0; i < 30; i++) {
+@@ -307,7 +_,7 @@
+                 if (this.tickCount % 10 == 0) {
+                     this.level()
+                         .playLocalSound(
+-                            this.getX(), this.getY(), this.getZ(), stateBelow.getSoundType().getHitSound(), this.getSoundSource(), 0.5F, 0.5F, false
++                            this.getX(), this.getY(), this.getZ(), stateBelow.getSoundType(level(), head.below(), this).getHitSound(), this.getSoundSource(), 0.5F, 0.5F, false
+                         );
+                 }
+             }
+@@ -386,7 +_,7 @@
+ 
+     @Override
+     protected void playEatingSound() {
+-        this.level().playSound(null, this, SoundEvents.SNIFFER_EAT, SoundSource.NEUTRAL, 1.0F, Mth.randomBetween(this.level().getRandom(), 0.8F, 1.2F));
++        this.level().playSound(null, this, SoundEvents.SNIFFER_EAT, SoundSource.NEUTRAL, 1.0F, Mth.randomBetween(this.getRandom(), 0.8F, 1.2F));
+     }
+ 
+     private void playSearchingSound() {

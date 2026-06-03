@@ -1,0 +1,34 @@
+--- a/net/minecraft/world/entity/projectile/EvokerFangs.java
++++ b/net/minecraft/world/entity/projectile/EvokerFangs.java
+@@ -14,6 +_,8 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class EvokerFangs extends Entity implements TraceableEntity {
+@@ -48,7 +_,7 @@
+     }
+ 
+     public @Nullable LivingEntity getOwner() {
+-        return EntityReference.getLivingEntity(this.owner, this.level());
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), EntityReference.getLivingEntity(this.owner, this.level()));
+     }
+ 
+     @Override
+@@ -83,8 +_,11 @@
+             }
+         } else if (--this.warmupDelayTicks < 0) {
+             if (this.warmupDelayTicks == -8) {
+-                for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(0.2, 0.0, 0.2))) {
+-                    this.dealDamageTo(entity);
++                AABB damageBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(0.2, 0.0, 0.2));
++                if (damageBox != null) {
++                    for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, damageBox)) {
++                        this.dealDamageTo(entity);
++                    }
+                 }
+             }
+ 

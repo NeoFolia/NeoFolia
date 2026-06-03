@@ -1,0 +1,69 @@
+--- a/net/minecraft/world/entity/projectile/Projectile.java
++++ b/net/minecraft/world/entity/projectile/Projectile.java
+@@ -2,6 +_,7 @@
+ 
+ import com.google.common.base.MoreObjects;
+ import it.unimi.dsi.fastutil.doubles.DoubleDoubleImmutablePair;
++import java.util.UUID;
+ import java.util.function.Consumer;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.network.protocol.Packet;
+@@ -34,6 +_,7 @@
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class Projectile extends Entity implements TraceableEntity {
+@@ -59,7 +_,11 @@
+ 
+     @Override
+     public @Nullable Entity getOwner() {
+-        return EntityReference.getEntity(this.owner, this.level());
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), EntityReference.getEntity(this.owner, this.level()));
++    }
++
++    public @Nullable UUID getOwnerUUID() {
++        return this.owner != null ? this.owner.getUUID() : null;
+     }
+ 
+     public Entity getEffectSource() {
+@@ -285,7 +_,8 @@
+             BlockHitResult blockHit = (BlockHitResult)hitResult;
+             this.onHitBlock(blockHit);
+             BlockPos target = blockHit.getBlockPos();
+-            this.level().gameEvent(GameEvent.PROJECTILE_LAND, target, GameEvent.Context.of(this, this.level().getBlockState(target)));
++            BlockState targetState = this.canReadBlock(target) ? this.level().getBlockState(target) : null;
++            this.level().gameEvent(GameEvent.PROJECTILE_LAND, target, GameEvent.Context.of(this, targetState));
+         }
+     }
+ 
+@@ -293,10 +_,18 @@
+     }
+ 
+     protected void onHitBlock(BlockHitResult hitResult) {
++        if (!this.canReadBlock(hitResult.getBlockPos())) {
++            return;
++        }
++
+         BlockState state = this.level().getBlockState(hitResult.getBlockPos());
+         state.onProjectileHit(this.level(), state, hitResult, this);
+     }
+ 
++    protected boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     protected boolean canHitEntity(Entity entity) {
+         if (!entity.canBeHitByProjectile()) {
+             return false;
+@@ -343,7 +_,7 @@
+     @Override
+     public boolean mayInteract(ServerLevel level, BlockPos pos) {
+         Entity owner = this.getOwner();
+-        return owner instanceof Player ? owner.mayInteract(level, pos) : owner == null || level.getGameRules().get(GameRules.MOB_GRIEFING);
++        return owner instanceof Player ? owner.mayInteract(level, pos) : owner == null || net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, owner);
+     }
+ 
+     public boolean mayBreak(ServerLevel level) {

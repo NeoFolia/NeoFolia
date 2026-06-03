@@ -1,0 +1,195 @@
+--- a/net/minecraft/world/entity/ai/attributes/AttributeInstance.java
++++ b/net/minecraft/world/entity/ai/attributes/AttributeInstance.java
+@@ -37,11 +_,11 @@
+         return this.attribute;
+     }
+ 
+-    public double getBaseValue() {
++    public synchronized double getBaseValue() {
+         return this.baseValue;
+     }
+ 
+-    public void setBaseValue(double baseValue) {
++    public synchronized void setBaseValue(double baseValue) {
+         if (baseValue != this.baseValue) {
+             this.baseValue = baseValue;
+             this.setDirty();
+@@ -49,27 +_,27 @@
+     }
+ 
+     @VisibleForTesting
+-    Map<Identifier, AttributeModifier> getModifiers(AttributeModifier.Operation operation) {
++    synchronized Map<Identifier, AttributeModifier> getModifiers(AttributeModifier.Operation operation) {
+         return this.modifiersByOperation.computeIfAbsent(operation, key -> new Object2ObjectOpenHashMap<>());
+     }
+ 
+-    public Set<AttributeModifier> getModifiers() {
++    public synchronized Set<AttributeModifier> getModifiers() {
+         return ImmutableSet.copyOf(this.modifierById.values());
+     }
+ 
+-    public Set<AttributeModifier> getPermanentModifiers() {
++    public synchronized Set<AttributeModifier> getPermanentModifiers() {
+         return ImmutableSet.copyOf(this.permanentModifiers.values());
+     }
+ 
+-    public @Nullable AttributeModifier getModifier(Identifier id) {
++    public synchronized @Nullable AttributeModifier getModifier(Identifier id) {
+         return this.modifierById.get(id);
+     }
+ 
+-    public boolean hasModifier(Identifier modifier) {
++    public synchronized boolean hasModifier(Identifier modifier) {
+         return this.modifierById.get(modifier) != null;
+     }
+ 
+-    private void addModifier(AttributeModifier modifier) {
++    private synchronized void addModifier(AttributeModifier modifier) {
+         AttributeModifier previous = this.modifierById.putIfAbsent(modifier.id(), modifier);
+         if (previous != null) {
+             throw new IllegalArgumentException("Modifier is already applied on this attribute!");
+@@ -79,7 +_,7 @@
+         }
+     }
+ 
+-    public void addOrUpdateTransientModifier(AttributeModifier modifier) {
++    public synchronized void addOrUpdateTransientModifier(AttributeModifier modifier) {
+         AttributeModifier oldModifier = this.modifierById.put(modifier.id(), modifier);
+         if (modifier != oldModifier) {
+             this.getModifiers(modifier.operation()).put(modifier.id(), modifier);
+@@ -87,37 +_,37 @@
+         }
+     }
+ 
+-    public void addTransientModifier(AttributeModifier modifier) {
++    public synchronized void addTransientModifier(AttributeModifier modifier) {
+         this.addModifier(modifier);
+     }
+ 
+-    public void addOrReplacePermanentModifier(AttributeModifier modifier) {
++    public synchronized void addOrReplacePermanentModifier(AttributeModifier modifier) {
+         this.removeModifier(modifier.id());
+         this.addModifier(modifier);
+         this.permanentModifiers.put(modifier.id(), modifier);
+     }
+ 
+-    public void addPermanentModifier(AttributeModifier modifier) {
++    public synchronized void addPermanentModifier(AttributeModifier modifier) {
+         this.addModifier(modifier);
+         this.permanentModifiers.put(modifier.id(), modifier);
+     }
+ 
+-    public void addPermanentModifiers(Collection<AttributeModifier> modifiers) {
++    public synchronized void addPermanentModifiers(Collection<AttributeModifier> modifiers) {
+         for (AttributeModifier modifier : modifiers) {
+             this.addPermanentModifier(modifier);
+         }
+     }
+ 
+-    protected void setDirty() {
++    protected synchronized void setDirty() {
+         this.dirty = true;
+         this.onDirty.accept(this);
+     }
+ 
+-    public void removeModifier(AttributeModifier modifier) {
++    public synchronized void removeModifier(AttributeModifier modifier) {
+         this.removeModifier(modifier.id());
+     }
+ 
+-    public boolean removeModifier(Identifier id) {
++    public synchronized boolean removeModifier(Identifier id) {
+         AttributeModifier modifier = this.modifierById.remove(id);
+         if (modifier == null) {
+             return false;
+@@ -129,13 +_,13 @@
+         }
+     }
+ 
+-    public void removeModifiers() {
++    public synchronized void removeModifiers() {
+         for (AttributeModifier modifier : this.getModifiers()) {
+             this.removeModifier(modifier);
+         }
+     }
+ 
+-    public double getValue() {
++    public synchronized double getValue() {
+         if (this.dirty) {
+             this.cachedValue = this.calculateValue();
+             this.dirty = false;
+@@ -144,7 +_,7 @@
+         return this.cachedValue;
+     }
+ 
+-    private double calculateValue() {
++    private synchronized double calculateValue() {
+         double base = this.getBaseValue();
+ 
+         for (AttributeModifier modifier : this.getModifiersOrEmpty(AttributeModifier.Operation.ADD_VALUE)) {
+@@ -164,18 +_,19 @@
+         return this.attribute.value().sanitizeValue(result);
+     }
+ 
+-    private Collection<AttributeModifier> getModifiersOrEmpty(AttributeModifier.Operation operation) {
++    private synchronized Collection<AttributeModifier> getModifiersOrEmpty(AttributeModifier.Operation operation) {
+         return this.modifiersByOperation.getOrDefault(operation, Map.of()).values();
+     }
+ 
+-    public void replaceFrom(AttributeInstance other) {
+-        this.baseValue = other.baseValue;
++    public synchronized void replaceFrom(AttributeInstance other) {
++        AttributeInstance.Snapshot snapshot = other.snapshot();
++        this.baseValue = snapshot.baseValue;
+         this.modifierById.clear();
+-        this.modifierById.putAll(other.modifierById);
++        this.modifierById.putAll(snapshot.modifierById);
+         this.permanentModifiers.clear();
+-        this.permanentModifiers.putAll(other.permanentModifiers);
++        this.permanentModifiers.putAll(snapshot.permanentModifiers);
+         this.modifiersByOperation.clear();
+-        other.modifiersByOperation
++        snapshot.modifiersByOperation
+             .forEach(
+                 (operation, attributeModifiers) -> this.getModifiers(operation)
+                     .putAll((Map<? extends Identifier, ? extends AttributeModifier>)attributeModifiers)
+@@ -183,11 +_,11 @@
+         this.setDirty();
+     }
+ 
+-    public AttributeInstance.Packed pack() {
++    public synchronized AttributeInstance.Packed pack() {
+         return new AttributeInstance.Packed(this.attribute, this.baseValue, List.copyOf(this.permanentModifiers.values()));
+     }
+ 
+-    public void apply(AttributeInstance.Packed packed) {
++    public synchronized void apply(AttributeInstance.Packed packed) {
+         this.baseValue = packed.baseValue;
+ 
+         for (AttributeModifier modifier : packed.modifiers) {
+@@ -197,6 +_,25 @@
+         }
+ 
+         this.setDirty();
++    }
++
++    private synchronized AttributeInstance.Snapshot snapshot() {
++        Map<AttributeModifier.Operation, Map<Identifier, AttributeModifier>> modifiersByOperation = Maps.newEnumMap(AttributeModifier.Operation.class);
++        this.modifiersByOperation.forEach((operation, modifiers) -> modifiersByOperation.put(operation, new Object2ObjectOpenHashMap<>(modifiers)));
++        return new AttributeInstance.Snapshot(
++            this.baseValue,
++            new Object2ObjectArrayMap<>(this.modifierById),
++            new Object2ObjectArrayMap<>(this.permanentModifiers),
++            modifiersByOperation
++        );
++    }
++
++    private record Snapshot(
++        double baseValue,
++        Map<Identifier, AttributeModifier> modifierById,
++        Map<Identifier, AttributeModifier> permanentModifiers,
++        Map<AttributeModifier.Operation, Map<Identifier, AttributeModifier>> modifiersByOperation
++    ) {
+     }
+ 
+     public record Packed(Holder<Attribute> attribute, double baseValue, List<AttributeModifier> modifiers) {

@@ -1,0 +1,300 @@
+--- a/net/minecraft/world/entity/ai/behavior/declarative/BehaviorBuilder.java
++++ b/net/minecraft/world/entity/ai/behavior/declarative/BehaviorBuilder.java
+@@ -40,23 +_,23 @@
+         final BehaviorBuilder.TriggerWithResult<E, Trigger<E>> resolvedBuilder = get((App<BehaviorBuilder.Mu<E>, Trigger<E>>)builder.apply(instance()));
+         return new OneShot<E>() {
+             @Override
+-            public boolean trigger(ServerLevel level, E body, long timestamp) {
++            public synchronized boolean trigger(ServerLevel level, E body, long timestamp) {
+                 Trigger<E> trigger = resolvedBuilder.tryTrigger(level, body, timestamp);
+                 return trigger == null ? false : trigger.trigger(level, body, timestamp);
+             }
+ 
+             @Override
+-            public Set<MemoryModuleType<?>> getRequiredMemories() {
++            public synchronized Set<MemoryModuleType<?>> getRequiredMemories() {
+                 return resolvedBuilder.memories();
+             }
+ 
+             @Override
+-            public String debugString() {
++            public synchronized String debugString() {
+                 return "OneShot[" + resolvedBuilder.debugString() + "]";
+             }
+ 
+             @Override
+-            public String toString() {
++            public synchronized String toString() {
+                 return this.debugString();
+             }
+         };
+@@ -66,12 +_,12 @@
+         final OneShot<E> wrapped = create(i -> i.group(i.ifTriggered(first)).apply(i, var1x -> second::trigger));
+         return new OneShot<E>() {
+             @Override
+-            public boolean trigger(ServerLevel level, E body, long timestamp) {
++            public synchronized boolean trigger(ServerLevel level, E body, long timestamp) {
+                 return wrapped.trigger(level, body, timestamp);
+             }
+ 
+             @Override
+-            public Set<MemoryModuleType<?>> getRequiredMemories() {
++            public synchronized Set<MemoryModuleType<?>> getRequiredMemories() {
+                 Set<MemoryModuleType<?>> memories = new HashSet<>();
+                 memories.addAll(wrapped.getRequiredMemories());
+                 memories.addAll(second.getRequiredMemories());
+@@ -79,12 +_,12 @@
+             }
+ 
+             @Override
+-            public String debugString() {
++            public synchronized String debugString() {
+                 return "OneShot[stuff]";
+             }
+ 
+             @Override
+-            public String toString() {
++            public synchronized String toString() {
+                 return this.debugString();
+             }
+         };
+@@ -122,22 +_,22 @@
+         private Constant(A a, Supplier<String> debugString) {
+             super(new BehaviorBuilder.TriggerWithResult<E, A>() {
+                 @Override
+-                public A tryTrigger(ServerLevel level, E body, long timestamp) {
++                public synchronized A tryTrigger(ServerLevel level, E body, long timestamp) {
+                     return a;
+                 }
+ 
+                 @Override
+-                public Set<MemoryModuleType<?>> memories() {
++                public synchronized Set<MemoryModuleType<?>> memories() {
+                     return Set.of();
+                 }
+ 
+                 @Override
+-                public String debugString() {
++                public synchronized String debugString() {
+                     return debugString.get();
+                 }
+ 
+                 @Override
+-                public String toString() {
++                public synchronized String toString() {
+                     return this.debugString();
+                 }
+             });
+@@ -188,7 +_,7 @@
+                     }
+ 
+                     @Override
+-                    public R tryTrigger(ServerLevel level, E body, long timestamp) {
++                    public synchronized R tryTrigger(ServerLevel level, E body, long timestamp) {
+                         A ra = (A)aTrigger.tryTrigger(level, body, timestamp);
+                         if (ra == null) {
+                             return null;
+@@ -199,7 +_,7 @@
+                     }
+ 
+                     @Override
+-                    public Set<MemoryModuleType<?>> memories() {
++                    public synchronized Set<MemoryModuleType<?>> memories() {
+                         Set<MemoryModuleType<?>> memories = new HashSet<>();
+                         memories.addAll(aTrigger.memories());
+                         memories.addAll(fTrigger.memories());
+@@ -207,12 +_,12 @@
+                     }
+ 
+                     @Override
+-                    public String debugString() {
++                    public synchronized String debugString() {
+                         return fTrigger.debugString() + " * " + aTrigger.debugString();
+                     }
+ 
+                     @Override
+-                    public String toString() {
++                    public synchronized String toString() {
+                         return this.debugString();
+                     }
+                 });
+@@ -227,23 +_,23 @@
+                 }
+ 
+                 @Override
+-                public R tryTrigger(ServerLevel level, E body, long timestamp) {
++                public synchronized R tryTrigger(ServerLevel level, E body, long timestamp) {
+                     T t = tTrigger.tryTrigger(level, body, timestamp);
+                     return (R)(t == null ? null : func.apply(t));
+                 }
+ 
+                 @Override
+-                public Set<MemoryModuleType<?>> memories() {
++                public synchronized Set<MemoryModuleType<?>> memories() {
+                     return tTrigger.memories();
+                 }
+ 
+                 @Override
+-                public String debugString() {
++                public synchronized String debugString() {
+                     return tTrigger.debugString() + ".map[" + func + "]";
+                 }
+ 
+                 @Override
+-                public String toString() {
++                public synchronized String toString() {
+                     return this.debugString();
+                 }
+             });
+@@ -261,7 +_,7 @@
+                 }
+ 
+                 @Override
+-                public R tryTrigger(ServerLevel level, E body, long timestamp) {
++                public synchronized R tryTrigger(ServerLevel level, E body, long timestamp) {
+                     A ra = aTrigger.tryTrigger(level, body, timestamp);
+                     if (ra == null) {
+                         return null;
+@@ -277,7 +_,7 @@
+                 }
+ 
+                 @Override
+-                public Set<MemoryModuleType<?>> memories() {
++                public synchronized Set<MemoryModuleType<?>> memories() {
+                     Set<MemoryModuleType<?>> memories = new HashSet<>();
+                     memories.addAll(aTrigger.memories());
+                     memories.addAll(bTrigger.memories());
+@@ -286,12 +_,12 @@
+                 }
+ 
+                 @Override
+-                public String debugString() {
++                public synchronized String debugString() {
+                     return fTrigger.debugString() + " * " + aTrigger.debugString() + " * " + bTrigger.debugString();
+                 }
+ 
+                 @Override
+-                public String toString() {
++                public synchronized String toString() {
+                     return this.debugString();
+                 }
+             });
+@@ -313,7 +_,7 @@
+                 }
+ 
+                 @Override
+-                public R tryTrigger(ServerLevel level, E body, long timestamp) {
++                public synchronized R tryTrigger(ServerLevel level, E body, long timestamp) {
+                     T1 r1 = t1Trigger.tryTrigger(level, body, timestamp);
+                     if (r1 == null) {
+                         return null;
+@@ -334,7 +_,7 @@
+                 }
+ 
+                 @Override
+-                public Set<MemoryModuleType<?>> memories() {
++                public synchronized Set<MemoryModuleType<?>> memories() {
+                     Set<MemoryModuleType<?>> memories = new HashSet<>();
+                     memories.addAll(t1Trigger.memories());
+                     memories.addAll(t2Trigger.memories());
+@@ -344,12 +_,12 @@
+                 }
+ 
+                 @Override
+-                public String debugString() {
++                public synchronized String debugString() {
+                     return fTrigger.debugString() + " * " + t1Trigger.debugString() + " * " + t2Trigger.debugString() + " * " + t3Trigger.debugString();
+                 }
+ 
+                 @Override
+-                public String toString() {
++                public synchronized String toString() {
+                     return this.debugString();
+                 }
+             });
+@@ -374,7 +_,7 @@
+                     }
+ 
+                     @Override
+-                    public R tryTrigger(ServerLevel level, E body, long timestamp) {
++                    public synchronized R tryTrigger(ServerLevel level, E body, long timestamp) {
+                         T1 r1 = t1Trigger.tryTrigger(level, body, timestamp);
+                         if (r1 == null) {
+                             return null;
+@@ -400,7 +_,7 @@
+                     }
+ 
+                     @Override
+-                    public Set<MemoryModuleType<?>> memories() {
++                    public synchronized Set<MemoryModuleType<?>> memories() {
+                         Set<MemoryModuleType<?>> memories = new HashSet<>();
+                         memories.addAll(t1Trigger.memories());
+                         memories.addAll(t2Trigger.memories());
+@@ -411,7 +_,7 @@
+                     }
+ 
+                     @Override
+-                    public String debugString() {
++                    public synchronized String debugString() {
+                         return fTrigger.debugString()
+                             + " * "
+                             + t1Trigger.debugString()
+@@ -424,7 +_,7 @@
+                     }
+ 
+                     @Override
+-                    public String toString() {
++                    public synchronized String toString() {
+                         return this.debugString();
+                     }
+                 }
+@@ -441,24 +_,24 @@
+     private static final class PureMemory<E extends LivingEntity, F extends K1, Value> extends BehaviorBuilder<E, MemoryAccessor<F, Value>> {
+         private PureMemory(MemoryCondition<F, Value> condition) {
+             super(new BehaviorBuilder.TriggerWithResult<E, MemoryAccessor<F, Value>>() {
+-                public @Nullable MemoryAccessor<F, Value> tryTrigger(ServerLevel level, E body, long timestamp) {
++                public synchronized @Nullable MemoryAccessor<F, Value> tryTrigger(ServerLevel level, E body, long timestamp) {
+                     Brain<?> brain = body.getBrain();
+                     Optional<Value> value = brain.getMemoryInternal(condition.memory());
+                     return value == null ? null : condition.createAccessor(brain, value);
+                 }
+ 
+                 @Override
+-                public Set<MemoryModuleType<?>> memories() {
++                public synchronized Set<MemoryModuleType<?>> memories() {
+                     return Set.of(condition.memory());
+                 }
+ 
+                 @Override
+-                public String debugString() {
++                public synchronized String debugString() {
+                     return "M[" + condition + "]";
+                 }
+ 
+                 @Override
+-                public String toString() {
++                public synchronized String toString() {
+                     return this.debugString();
+                 }
+             });
+@@ -476,17 +_,17 @@
+     private static final class TriggerWrapper<E extends LivingEntity> extends BehaviorBuilder<E, Unit> {
+         private TriggerWrapper(Trigger<? super E> dependentTrigger) {
+             super(new BehaviorBuilder.TriggerWithResult<E, Unit>() {
+-                public @Nullable Unit tryTrigger(ServerLevel level, E body, long timestamp) {
++                public synchronized @Nullable Unit tryTrigger(ServerLevel level, E body, long timestamp) {
+                     return dependentTrigger.trigger(level, body, timestamp) ? Unit.INSTANCE : null;
+                 }
+ 
+                 @Override
+-                public Set<MemoryModuleType<?>> memories() {
++                public synchronized Set<MemoryModuleType<?>> memories() {
+                     return Set.of();
+                 }
+ 
+                 @Override
+-                public String debugString() {
++                public synchronized String debugString() {
+                     return "T[" + dependentTrigger + "]";
+                 }
+             });

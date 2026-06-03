@@ -1,0 +1,54 @@
+--- a/net/minecraft/world/entity/ai/goal/EatBlockGoal.java
++++ b/net/minecraft/world/entity/ai/goal/EatBlockGoal.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class EatBlockGoal extends Goal {
+     private static final int EAT_ANIMATION_TICKS = 40;
+@@ -30,6 +_,10 @@
+             return false;
+         } else {
+             BlockPos pos = this.mob.blockPosition();
++            if (!this.canReadBlock(pos) || !this.canReadBlock(pos.below())) {
++                return false;
++            }
++
+             return IS_EDIBLE.test(this.level.getBlockState(pos)) ? true : this.level.getBlockState(pos.below()).is(Blocks.GRASS_BLOCK);
+         }
+     }
+@@ -60,8 +_,12 @@
+         this.eatAnimationTick = Math.max(0, this.eatAnimationTick - 1);
+         if (this.eatAnimationTick == this.adjustedTickDelay(4)) {
+             BlockPos pos = this.mob.blockPosition();
++            if (!this.canReadBlock(pos) || !this.canReadBlock(pos.below())) {
++                return;
++            }
++
+             if (IS_EDIBLE.test(this.level.getBlockState(pos))) {
+-                if (getServerLevel(this.level).getGameRules().get(GameRules.MOB_GRIEFING)) {
++                if (net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(this.level), this.mob)) {
+                     this.level.destroyBlock(pos, false);
+                 }
+ 
+@@ -69,7 +_,7 @@
+             } else {
+                 BlockPos below = pos.below();
+                 if (this.level.getBlockState(below).is(Blocks.GRASS_BLOCK)) {
+-                    if (getServerLevel(this.level).getGameRules().get(GameRules.MOB_GRIEFING)) {
++                    if (net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(this.level), this.mob)) {
+                         this.level.levelEvent(2001, below, Block.getId(Blocks.GRASS_BLOCK.defaultBlockState()));
+                         this.level.setBlock(below, Blocks.DIRT.defaultBlockState(), 2);
+                     }
+@@ -78,5 +_,9 @@
+                 }
+             }
+         }
++    }
++
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

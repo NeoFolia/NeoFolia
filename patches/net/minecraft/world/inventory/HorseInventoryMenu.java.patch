@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/inventory/HorseInventoryMenu.java
++++ b/net/minecraft/world/inventory/HorseInventoryMenu.java
+@@ -23,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean isActive() {
++            public synchronized boolean isActive() {
+                 return horse.canUseSlot(EquipmentSlot.SADDLE) && horse.is(EntityTypeTags.CAN_EQUIP_SADDLE);
+             }
+         });
+@@ -36,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean isActive() {
++            public synchronized boolean isActive() {
+                 return horse.canUseSlot(EquipmentSlot.BODY) && (horse.is(EntityTypeTags.CAN_WEAR_HORSE_ARMOR) || isLlama);
+             }
+         });

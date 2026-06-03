@@ -1,0 +1,219 @@
+--- a/net/minecraft/server/commands/WaypointCommand.java
++++ b/net/minecraft/server/commands/WaypointCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.HexFormat;
+ import java.util.Optional;
+ import java.util.Set;
+@@ -44,50 +_,32 @@
+                                         .then(
+                                             Commands.argument("color", ColorArgument.color())
+                                                 .executes(
+-                                                    c -> setWaypointColor(
+-                                                        c.getSource(), WaypointArgument.getWaypoint(c, "waypoint"), ColorArgument.getColor(c, "color")
+-                                                    )
++                                                    c -> setWaypointColor(c, ColorMode.NAMED)
+                                                 )
+                                         )
+                                         .then(
+                                             Commands.literal("hex")
+                                                 .then(
+                                                     Commands.argument("color", HexColorArgument.hexColor())
+-                                                        .executes(
+-                                                            c -> setWaypointColor(
+-                                                                c.getSource(),
+-                                                                WaypointArgument.getWaypoint(c, "waypoint"),
+-                                                                HexColorArgument.getHexColor(c, "color")
+-                                                            )
+-                                                        )
++                                                        .executes(c -> setWaypointColor(c, ColorMode.HEX))
+                                                 )
+                                         )
+                                         .then(
+                                             Commands.literal("reset")
+-                                                .executes(c -> resetWaypointColor(c.getSource(), WaypointArgument.getWaypoint(c, "waypoint")))
++                                                .executes(WaypointCommand::resetWaypointColor)
+                                         )
+                                 )
+                                 .then(
+                                     Commands.literal("style")
+                                         .then(
+                                             Commands.literal("reset")
+-                                                .executes(
+-                                                    c -> setWaypointStyle(
+-                                                        c.getSource(), WaypointArgument.getWaypoint(c, "waypoint"), WaypointStyleAssets.DEFAULT
+-                                                    )
+-                                                )
++                                                .executes(c -> setWaypointStyle(c, false))
+                                         )
+                                         .then(
+                                             Commands.literal("set")
+                                                 .then(
+                                                     Commands.argument("style", IdentifierArgument.id())
+-                                                        .executes(
+-                                                            c -> setWaypointStyle(
+-                                                                c.getSource(),
+-                                                                WaypointArgument.getWaypoint(c, "waypoint"),
+-                                                                ResourceKey.create(WaypointStyleAssets.ROOT_ID, IdentifierArgument.getId(c, "style"))
+-                                                            )
+-                                                        )
++                                                        .executes(c -> setWaypointStyle(c, true))
+                                                 )
+                                         )
+                                 )
+@@ -96,20 +_,67 @@
+         );
+     }
+ 
++    private static int setWaypointStyle(CommandContext<CommandSourceStack> context, boolean hasStyle) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWaypointStyle(context, hasStyle))) {
++            return 0;
++        }
++
++        ResourceKey<WaypointStyleAsset> style = hasStyle
++            ? ResourceKey.create(WaypointStyleAssets.ROOT_ID, IdentifierArgument.getId(context, "style"))
++            : WaypointStyleAssets.DEFAULT;
++        return setWaypointStyle(source, WaypointArgument.getWaypoint(context, "waypoint"), style);
++    }
++
++    private static int setWaypointColor(CommandContext<CommandSourceStack> context, ColorMode mode) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWaypointColor(context, mode))) {
++            return 0;
++        }
++
++        WaypointTransmitter waypoint = WaypointArgument.getWaypoint(context, "waypoint");
++        if (mode == ColorMode.NAMED) {
++            return setWaypointColor(source, waypoint, ColorArgument.getColor(context, "color"));
++        } else {
++            return setWaypointColor(source, waypoint, HexColorArgument.getHexColor(context, "color"));
++        }
++    }
++
++    private static int resetWaypointColor(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetWaypointColor(context))) {
++            return 0;
++        }
++
++        return resetWaypointColor(source, WaypointArgument.getWaypoint(context, "waypoint"));
++    }
++
+     private static int setWaypointStyle(CommandSourceStack source, WaypointTransmitter waypoint, ResourceKey<WaypointStyleAsset> style) {
+-        mutateIcon(source, waypoint, icon -> icon.style = style);
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWaypointStyle(source, waypoint, style))) {
++            return 0;
++        }
++
++        mutateIcon(source, waypoint, icon -> icon.style(style));
+         source.sendSuccess(() -> Component.translatable("commands.waypoint.modify.style"), false);
+         return 0;
+     }
+ 
+     private static int setWaypointColor(CommandSourceStack source, WaypointTransmitter waypoint, ChatFormatting color) {
+-        mutateIcon(source, waypoint, icon -> icon.color = Optional.of(color.getColor()));
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWaypointColor(source, waypoint, color))) {
++            return 0;
++        }
++
++        mutateIcon(source, waypoint, icon -> icon.color(Optional.of(color.getColor())));
+         source.sendSuccess(() -> Component.translatable("commands.waypoint.modify.color", Component.literal(color.getName()).withStyle(color)), false);
+         return 0;
+     }
+ 
+     private static int setWaypointColor(CommandSourceStack source, WaypointTransmitter waypoint, Integer color) {
+-        mutateIcon(source, waypoint, icon -> icon.color = Optional.of(color));
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setWaypointColor(source, waypoint, color))) {
++            return 0;
++        }
++
++        mutateIcon(source, waypoint, icon -> icon.color(Optional.of(color)));
+         source.sendSuccess(
+             () -> Component.translatable(
+                 "commands.waypoint.modify.color", Component.literal(HexFormat.of().withUpperCase().toHexDigits(ARGB.color(0, color), 6)).withColor(color)
+@@ -120,12 +_,20 @@
+     }
+ 
+     private static int resetWaypointColor(CommandSourceStack source, WaypointTransmitter waypoint) {
+-        mutateIcon(source, waypoint, icon -> icon.color = Optional.empty());
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetWaypointColor(source, waypoint))) {
++            return 0;
++        }
++
++        mutateIcon(source, waypoint, icon -> icon.color(Optional.empty()));
+         source.sendSuccess(() -> Component.translatable("commands.waypoint.modify.color.reset"), false);
+         return 0;
+     }
+ 
+     private static int listWaypoints(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listWaypoints(source))) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         Set<WaypointTransmitter> waypoints = level.getWaypointManager().transmitters();
+         String dimension = level.dimension().identifier().toString();
+@@ -138,8 +_,17 @@
+                     .map(
+                         transmitter -> {
+                             if (transmitter instanceof LivingEntity livingEntity) {
+-                                BlockPos pos = livingEntity.blockPosition();
+-                                return livingEntity.getFeedbackDisplayName()
++                                WaypointSnapshot snapshot = RegionizedCommandHelper.callOnEntityRegion(
++                                    source,
++                                    livingEntity,
++                                    () -> new WaypointSnapshot(
++                                        livingEntity.blockPosition(),
++                                        livingEntity.getFeedbackDisplayName(),
++                                        transmitter.waypointIcon().color().orElse(-1)
++                                    )
++                                );
++                                BlockPos pos = snapshot.pos();
++                                return snapshot.displayName()
+                                     .copy()
+                                     .withStyle(
+                                         s -> s.withClickEvent(
+@@ -148,7 +_,7 @@
+                                                 )
+                                             )
+                                             .withHoverEvent(new HoverEvent.ShowText(Component.translatable("chat.coordinates.tooltip")))
+-                                            .withColor(transmitter.waypointIcon().color.orElse(-1))
++                                            .withColor(snapshot.color())
+                                     );
+                             } else {
+                                 return Component.literal(transmitter.toString());
+@@ -164,9 +_,29 @@
+     }
+ 
+     private static void mutateIcon(CommandSourceStack source, WaypointTransmitter waypoint, Consumer<Waypoint.Icon> iconConsumer) {
++        if (waypoint instanceof LivingEntity livingEntity) {
++            RegionizedCommandHelper.callOnEntityRegion(source, livingEntity, () -> {
++                mutateIconOnCurrentThread(source, waypoint, iconConsumer);
++                return null;
++            });
++            return;
++        }
++
++        mutateIconOnCurrentThread(source, waypoint, iconConsumer);
++    }
++
++    private static void mutateIconOnCurrentThread(CommandSourceStack source, WaypointTransmitter waypoint, Consumer<Waypoint.Icon> iconConsumer) {
+         ServerLevel level = source.getLevel();
+         level.getWaypointManager().untrackWaypoint(waypoint);
+         iconConsumer.accept(waypoint.waypointIcon());
+         level.getWaypointManager().trackWaypoint(waypoint);
++    }
++
++    private record WaypointSnapshot(BlockPos pos, Component displayName, int color) {
++    }
++
++    private enum ColorMode {
++        NAMED,
++        HEX
+     }
+ }

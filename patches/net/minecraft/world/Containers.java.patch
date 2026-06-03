@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/Containers.java
++++ b/net/minecraft/world/Containers.java
+@@ -2,6 +_,7 @@
+ 
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.NonNullList;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntityType;
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class Containers {
+     public static void dropContents(Level level, BlockPos pos, Container container) {
+@@ -33,7 +_,7 @@
+         double size = EntityType.ITEM.getWidth();
+         double centerRange = 1.0 - size;
+         double halfSize = size / 2.0;
+-        RandomSource random = level.getRandom();
++        RandomSource random = containersRandom(level);
+         double xo = Math.floor(x) + random.nextDouble() * centerRange + halfSize;
+         double yo = Math.floor(y) + random.nextDouble() * centerRange;
+         double zo = Math.floor(z) + random.nextDouble() * centerRange + halfSize;
+@@ -46,6 +_,10 @@
+             );
+             level.addFreshEntity(entity);
+         }
++    }
++
++    private static RandomSource containersRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     public static void updateNeighboursAfterDestroy(BlockState state, Level level, BlockPos pos) {

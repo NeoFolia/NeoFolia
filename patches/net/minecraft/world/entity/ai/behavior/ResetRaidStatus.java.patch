@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/entity/ai/behavior/ResetRaidStatus.java
++++ b/net/minecraft/world/entity/ai/behavior/ResetRaidStatus.java
+@@ -7,9 +_,9 @@
+ import net.minecraft.world.entity.schedule.Activity;
+ 
+ public class ResetRaidStatus {
+-    public static BehaviorControl<LivingEntity> create() {
++    public static synchronized BehaviorControl<LivingEntity> create() {
+         return BehaviorBuilder.create(i -> i.point((level, body, timestamp) -> {
+-            if (level.getRandom().nextInt(20) != 0) {
++            if (body.getRandom().nextInt(20) != 0) {
+                 return false;
+             } else {
+                 Brain<?> brain = body.getBrain();

@@ -1,0 +1,55 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase.java
+@@ -27,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         if (this.attackTarget == null) {
+             LOGGER.warn("Skipping player strafe phase because no player was found");
+             this.dragon.getPhaseManager().setPhase(EnderDragonPhase.HOLDING_PATTERN);
+@@ -96,7 +_,7 @@
+         }
+     }
+ 
+-    private void findNewTarget() {
++    private synchronized void findNewTarget() {
+         if (this.currentPath == null || this.currentPath.isDone()) {
+             int currentNodeIndex = this.dragon.findClosestNode();
+             int targetNodeIndex = currentNodeIndex;
+@@ -131,7 +_,7 @@
+         this.navigateToNextPathNode();
+     }
+ 
+-    private void navigateToNextPathNode() {
++    private synchronized void navigateToNextPathNode() {
+         if (this.currentPath != null && !this.currentPath.isDone()) {
+             Vec3i current = this.currentPath.getNextNodePos();
+             this.currentPath.advance();
+@@ -148,14 +_,14 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.fireballCharge = 0;
+         this.targetLocation = null;
+         this.currentPath = null;
+         this.attackTarget = null;
+     }
+ 
+-    public void setTarget(LivingEntity target) {
++    public synchronized void setTarget(LivingEntity target) {
+         this.attackTarget = target;
+         int currentNodeIndex = this.dragon.findClosestNode();
+         int targetNodeIndex = this.dragon.findClosestNode(this.attackTarget.getX(), this.attackTarget.getY(), this.attackTarget.getZ());
+@@ -175,7 +_,7 @@
+     }
+ 
+     @Override
+-    public @Nullable Vec3 getFlyTargetLocation() {
++    public synchronized @Nullable Vec3 getFlyTargetLocation() {
+         return this.targetLocation;
+     }
+ 

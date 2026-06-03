@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/animal/pig/Pig.java
++++ b/net/minecraft/world/entity/animal/pig/Pig.java
+@@ -194,10 +_,11 @@
+ 
+     @Override
+     public void thunderHit(ServerLevel level, LightningBolt lightningBolt) {
+-        if (level.getDifficulty() != Difficulty.PEACEFUL) {
++        if (level.getDifficulty() != Difficulty.PEACEFUL && net.neoforged.neoforge.event.EventHooks.canLivingConvert(this, EntityType.ZOMBIFIED_PIGLIN, (timer) -> {})) {
+             ZombifiedPiglin zombifiedPiglin = this.convertTo(EntityType.ZOMBIFIED_PIGLIN, ConversionParams.single(this, false, true), zp -> {
+                 zp.populateDefaultEquipmentSlots(this.getRandom(), level.getCurrentDifficultyAt(this.blockPosition()));
+                 zp.setPersistenceRequired();
++                net.neoforged.neoforge.event.EventHooks.onLivingConvert(this, zp);
+             });
+             if (zombifiedPiglin == null) {
+                 super.thunderHit(level, lightningBolt);
+@@ -303,7 +_,7 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         VariantUtils.selectVariantToSpawn(SpawnContext.create(level, this.blockPosition()), Registries.PIG_VARIANT).ifPresent(this::setVariant);
+-        this.setSoundVariant(PigSoundVariants.pickRandomSoundVariant(this.registryAccess(), level.getRandom()));
++        this.setSoundVariant(PigSoundVariants.pickRandomSoundVariant(this.registryAccess(), this.random));
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+     }
+ }

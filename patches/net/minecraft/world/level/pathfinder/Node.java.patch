@@ -1,0 +1,108 @@
+--- a/net/minecraft/world/level/pathfinder/Node.java
++++ b/net/minecraft/world/level/pathfinder/Node.java
+@@ -28,7 +_,7 @@
+         this.hash = createHash(x, y, z);
+     }
+ 
+-    public Node cloneAndMove(int x, int y, int z) {
++    public synchronized Node cloneAndMove(int x, int y, int z) {
+         Node node = new Node(x, y, z);
+         node.heapIdx = this.heapIdx;
+         node.g = this.g;
+@@ -46,82 +_,82 @@
+         return y & 0xFF | (x & 32767) << 8 | (z & 32767) << 24 | (x < 0 ? Integer.MIN_VALUE : 0) | (z < 0 ? 32768 : 0);
+     }
+ 
+-    public float distanceTo(Node to) {
++    public synchronized float distanceTo(Node to) {
+         float xd = to.x - this.x;
+         float yd = to.y - this.y;
+         float zd = to.z - this.z;
+         return Mth.sqrt(xd * xd + yd * yd + zd * zd);
+     }
+ 
+-    public float distanceToXZ(Node to) {
++    public synchronized float distanceToXZ(Node to) {
+         float xd = to.x - this.x;
+         float zd = to.z - this.z;
+         return Mth.sqrt(xd * xd + zd * zd);
+     }
+ 
+-    public float distanceTo(BlockPos pos) {
++    public synchronized float distanceTo(BlockPos pos) {
+         float xd = pos.getX() - this.x;
+         float yd = pos.getY() - this.y;
+         float zd = pos.getZ() - this.z;
+         return Mth.sqrt(xd * xd + yd * yd + zd * zd);
+     }
+ 
+-    public float distanceToSqr(Node to) {
++    public synchronized float distanceToSqr(Node to) {
+         float xd = to.x - this.x;
+         float yd = to.y - this.y;
+         float zd = to.z - this.z;
+         return xd * xd + yd * yd + zd * zd;
+     }
+ 
+-    public float distanceToSqr(BlockPos pos) {
++    public synchronized float distanceToSqr(BlockPos pos) {
+         float xd = pos.getX() - this.x;
+         float yd = pos.getY() - this.y;
+         float zd = pos.getZ() - this.z;
+         return xd * xd + yd * yd + zd * zd;
+     }
+ 
+-    public float distanceManhattan(Node to) {
++    public synchronized float distanceManhattan(Node to) {
+         float xd = Math.abs(to.x - this.x);
+         float yd = Math.abs(to.y - this.y);
+         float zd = Math.abs(to.z - this.z);
+         return xd + yd + zd;
+     }
+ 
+-    public float distanceManhattan(BlockPos pos) {
++    public synchronized float distanceManhattan(BlockPos pos) {
+         float xd = Math.abs(pos.getX() - this.x);
+         float yd = Math.abs(pos.getY() - this.y);
+         float zd = Math.abs(pos.getZ() - this.z);
+         return xd + yd + zd;
+     }
+ 
+-    public BlockPos asBlockPos() {
++    public synchronized BlockPos asBlockPos() {
+         return new BlockPos(this.x, this.y, this.z);
+     }
+ 
+-    public Vec3 asVec3() {
++    public synchronized Vec3 asVec3() {
+         return new Vec3(this.x, this.y, this.z);
+     }
+ 
+     @Override
+-    public boolean equals(Object o) {
++    public synchronized boolean equals(Object o) {
+         return !(o instanceof Node no) ? false : this.hash == no.hash && this.x == no.x && this.y == no.y && this.z == no.z;
+     }
+ 
+     @Override
+-    public int hashCode() {
++    public synchronized int hashCode() {
+         return this.hash;
+     }
+ 
+-    public boolean inOpenSet() {
++    public synchronized boolean inOpenSet() {
+         return this.heapIdx >= 0;
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return "Node{x=" + this.x + ", y=" + this.y + ", z=" + this.z + "}";
+     }
+ 
+-    public void writeToStream(FriendlyByteBuf buffer) {
++    public synchronized void writeToStream(FriendlyByteBuf buffer) {
+         buffer.writeInt(this.x);
+         buffer.writeInt(this.y);
+         buffer.writeInt(this.z);

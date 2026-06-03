@@ -1,0 +1,82 @@
+--- a/net/minecraft/world/ticks/LevelChunkTicks.java
++++ b/net/minecraft/world/ticks/LevelChunkTicks.java
+@@ -30,15 +_,15 @@
+         }
+     }
+ 
+-    public void setOnTickAdded(@Nullable BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded) {
++    public synchronized void setOnTickAdded(@Nullable BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded) {
+         this.onTickAdded = onTickAdded;
+     }
+ 
+-    public @Nullable ScheduledTick<T> peek() {
++    public synchronized @Nullable ScheduledTick<T> peek() {
+         return this.tickQueue.peek();
+     }
+ 
+-    public @Nullable ScheduledTick<T> poll() {
++    public synchronized @Nullable ScheduledTick<T> poll() {
+         ScheduledTick<T> result = this.tickQueue.poll();
+         if (result != null) {
+             this.ticksPerPosition.remove(result);
+@@ -48,13 +_,13 @@
+     }
+ 
+     @Override
+-    public void schedule(ScheduledTick<T> tick) {
++    public synchronized void schedule(ScheduledTick<T> tick) {
+         if (this.ticksPerPosition.add(tick)) {
+             this.scheduleUnchecked(tick);
+         }
+     }
+ 
+-    private void scheduleUnchecked(ScheduledTick<T> tick) {
++    private synchronized void scheduleUnchecked(ScheduledTick<T> tick) {
+         this.tickQueue.add(tick);
+         if (this.onTickAdded != null) {
+             this.onTickAdded.accept(this, tick);
+@@ -62,11 +_,11 @@
+     }
+ 
+     @Override
+-    public boolean hasScheduledTick(BlockPos pos, T type) {
++    public synchronized boolean hasScheduledTick(BlockPos pos, T type) {
+         return this.ticksPerPosition.contains(ScheduledTick.probe(type, pos));
+     }
+ 
+-    public void removeIf(Predicate<ScheduledTick<T>> test) {
++    public synchronized void removeIf(Predicate<ScheduledTick<T>> test) {
+         Iterator<ScheduledTick<T>> iterator = this.tickQueue.iterator();
+ 
+         while (iterator.hasNext()) {
+@@ -78,17 +_,17 @@
+         }
+     }
+ 
+-    public Stream<ScheduledTick<T>> getAll() {
+-        return this.tickQueue.stream();
++    public synchronized Stream<ScheduledTick<T>> getAll() {
++        return List.copyOf(this.tickQueue).stream();
+     }
+ 
+     @Override
+-    public int count() {
++    public synchronized int count() {
+         return this.tickQueue.size() + (this.pendingTicks != null ? this.pendingTicks.size() : 0);
+     }
+ 
+     @Override
+-    public List<SavedTick<T>> pack(long currentTick) {
++    public synchronized List<SavedTick<T>> pack(long currentTick) {
+         List<SavedTick<T>> ticks = new ArrayList<>(this.tickQueue.size());
+         if (this.pendingTicks != null) {
+             ticks.addAll(this.pendingTicks);
+@@ -101,7 +_,7 @@
+         return ticks;
+     }
+ 
+-    public void unpack(long currentTick) {
++    public synchronized void unpack(long currentTick) {
+         if (this.pendingTicks != null) {
+             int subTickBase = -this.pendingTicks.size();
+ 

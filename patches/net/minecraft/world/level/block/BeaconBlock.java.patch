@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/BeaconBlock.java
++++ b/net/minecraft/world/level/block/BeaconBlock.java
+@@ -3,6 +_,7 @@
+ import com.mojang.serialization.MapCodec;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.DyeColor;
+@@ -47,7 +_,7 @@
+     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+         if (!level.isClientSide() && level.getBlockEntity(pos) instanceof BeaconBlockEntity beacon) {
+             player.openMenu(beacon);
+-            player.awardStat(Stats.INTERACT_WITH_BEACON);
++            RegionizedWorldGuard.awardStat(player, Stats.INTERACT_WITH_BEACON);
+         }
+ 
+         return InteractionResult.SUCCESS;

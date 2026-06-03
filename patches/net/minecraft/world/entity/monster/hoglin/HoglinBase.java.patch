@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/entity/monster/hoglin/HoglinBase.java
++++ b/net/minecraft/world/entity/monster/hoglin/HoglinBase.java
+@@ -18,7 +_,7 @@
+         float attackDamage = (float)body.getAttributeValue(Attributes.ATTACK_DAMAGE);
+         float actualDamage;
+         if (!body.isBaby() && (int)attackDamage > 0) {
+-            actualDamage = attackDamage / 2.0F + level.getRandom().nextInt((int)attackDamage);
++            actualDamage = attackDamage / 2.0F + body.getRandom().nextInt((int)attackDamage);
+         } else {
+             actualDamage = attackDamage;
+         }
+@@ -42,7 +_,7 @@
+         if (!(effectiveKnockbackPower <= 0.0)) {
+             double xd = target.getX() - body.getX();
+             double zd = target.getZ() - body.getZ();
+-            RandomSource random = body.level().getRandom();
++            RandomSource random = body.getRandom();
+             float horizontalPushAngle = random.nextInt(21) - 10;
+             double horizontalScale = effectiveKnockbackPower * (random.nextFloat() * 0.5F + 0.2F);
+             Vec3 horizontalPushVector = new Vec3(xd, 0.0, zd).normalize().scale(horizontalScale).yRot(horizontalPushAngle);

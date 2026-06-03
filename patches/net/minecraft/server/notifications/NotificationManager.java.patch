@@ -1,0 +1,117 @@
+--- a/net/minecraft/server/notifications/NotificationManager.java
++++ b/net/minecraft/server/notifications/NotificationManager.java
+@@ -12,92 +_,96 @@
+ public class NotificationManager implements NotificationService {
+     private final List<NotificationService> notificationServices = Lists.newArrayList();
+ 
+-    public void registerService(NotificationService notificationService) {
++    public synchronized void registerService(NotificationService notificationService) {
+         this.notificationServices.add(notificationService);
+     }
+ 
++    private synchronized List<NotificationService> servicesSnapshot() {
++        return List.copyOf(this.notificationServices);
++    }
++
+     @Override
+     public void playerJoined(ServerPlayer player) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerJoined(player));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerJoined(player));
+     }
+ 
+     @Override
+     public void playerLeft(ServerPlayer player) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerLeft(player));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerLeft(player));
+     }
+ 
+     @Override
+     public void serverStarted() {
+-        this.notificationServices.forEach(NotificationService::serverStarted);
++        this.servicesSnapshot().forEach(NotificationService::serverStarted);
+     }
+ 
+     @Override
+     public void serverShuttingDown() {
+-        this.notificationServices.forEach(NotificationService::serverShuttingDown);
++        this.servicesSnapshot().forEach(NotificationService::serverShuttingDown);
+     }
+ 
+     @Override
+     public void serverSaveStarted() {
+-        this.notificationServices.forEach(NotificationService::serverSaveStarted);
++        this.servicesSnapshot().forEach(NotificationService::serverSaveStarted);
+     }
+ 
+     @Override
+     public void serverSaveCompleted() {
+-        this.notificationServices.forEach(NotificationService::serverSaveCompleted);
++        this.servicesSnapshot().forEach(NotificationService::serverSaveCompleted);
+     }
+ 
+     @Override
+     public void serverActivityOccured() {
+-        this.notificationServices.forEach(NotificationService::serverActivityOccured);
++        this.servicesSnapshot().forEach(NotificationService::serverActivityOccured);
+     }
+ 
+     @Override
+     public void playerOped(ServerOpListEntry operator) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerOped(operator));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerOped(operator));
+     }
+ 
+     @Override
+     public void playerDeoped(ServerOpListEntry operator) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerDeoped(operator));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerDeoped(operator));
+     }
+ 
+     @Override
+     public void playerAddedToAllowlist(NameAndId player) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerAddedToAllowlist(player));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerAddedToAllowlist(player));
+     }
+ 
+     @Override
+     public void playerRemovedFromAllowlist(NameAndId player) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerRemovedFromAllowlist(player));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerRemovedFromAllowlist(player));
+     }
+ 
+     @Override
+     public void ipBanned(IpBanListEntry ban) {
+-        this.notificationServices.forEach(notificationService -> notificationService.ipBanned(ban));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.ipBanned(ban));
+     }
+ 
+     @Override
+     public void ipUnbanned(String ip) {
+-        this.notificationServices.forEach(notificationService -> notificationService.ipUnbanned(ip));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.ipUnbanned(ip));
+     }
+ 
+     @Override
+     public void playerBanned(UserBanListEntry ban) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerBanned(ban));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerBanned(ban));
+     }
+ 
+     @Override
+     public void playerUnbanned(NameAndId player) {
+-        this.notificationServices.forEach(notificationService -> notificationService.playerUnbanned(player));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.playerUnbanned(player));
+     }
+ 
+     @Override
+     public <T> void onGameRuleChanged(GameRule<T> gameRule, T value) {
+-        this.notificationServices.forEach(notificationService -> notificationService.onGameRuleChanged(gameRule, value));
++        this.servicesSnapshot().forEach(notificationService -> notificationService.onGameRuleChanged(gameRule, value));
+     }
+ 
+     @Override
+     public void statusHeartbeat() {
+-        this.notificationServices.forEach(NotificationService::statusHeartbeat);
++        this.servicesSnapshot().forEach(NotificationService::statusHeartbeat);
+     }
+ }

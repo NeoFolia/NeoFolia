@@ -1,0 +1,23 @@
+--- a/net/minecraft/world/level/LocalMobCapCalculator.java
++++ b/net/minecraft/world/level/LocalMobCapCalculator.java
+@@ -20,17 +_,17 @@
+         this.chunkMap = chunkMap;
+     }
+ 
+-    private List<ServerPlayer> getPlayersNear(ChunkPos pos) {
++    private synchronized List<ServerPlayer> getPlayersNear(ChunkPos pos) {
+         return this.playersNearChunk.computeIfAbsent(pos.pack(), key -> this.chunkMap.getPlayersCloseForSpawning(pos));
+     }
+ 
+-    public void addMob(ChunkPos pos, MobCategory category) {
++    public synchronized void addMob(ChunkPos pos, MobCategory category) {
+         for (ServerPlayer player : this.getPlayersNear(pos)) {
+             this.playerMobCounts.computeIfAbsent(player, key -> new LocalMobCapCalculator.MobCounts()).add(category);
+         }
+     }
+ 
+-    public boolean canSpawn(MobCategory mobCategory, ChunkPos pos) {
++    public synchronized boolean canSpawn(MobCategory mobCategory, ChunkPos pos) {
+         for (ServerPlayer serverPlayer : this.getPlayersNear(pos)) {
+             LocalMobCapCalculator.MobCounts mobCounts = this.playerMobCounts.get(serverPlayer);
+             if (mobCounts == null || mobCounts.canSpawn(mobCategory)) {

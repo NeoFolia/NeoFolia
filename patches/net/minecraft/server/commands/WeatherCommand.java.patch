@@ -1,0 +1,33 @@
+--- a/net/minecraft/server/commands/WeatherCommand.java
++++ b/net/minecraft/server/commands/WeatherCommand.java
+@@ -48,18 +_,30 @@
+     }
+ 
+     private static int setClear(CommandSourceStack source, int duration) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setClear(source, duration))) {
++            return 0;
++        }
++
+         source.getServer().setWeatherParameters(getDuration(source, duration, ServerLevel.RAIN_DELAY), 0, false, false);
+         source.sendSuccess(() -> Component.translatable("commands.weather.set.clear"), true);
+         return duration;
+     }
+ 
+     private static int setRain(CommandSourceStack source, int duration) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setRain(source, duration))) {
++            return 0;
++        }
++
+         source.getServer().setWeatherParameters(0, getDuration(source, duration, ServerLevel.RAIN_DURATION), true, false);
+         source.sendSuccess(() -> Component.translatable("commands.weather.set.rain"), true);
+         return duration;
+     }
+ 
+     private static int setThunder(CommandSourceStack source, int duration) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setThunder(source, duration))) {
++            return 0;
++        }
++
+         source.getServer().setWeatherParameters(0, getDuration(source, duration, ServerLevel.THUNDER_DURATION), true, true);
+         source.sendSuccess(() -> Component.translatable("commands.weather.set.thunder"), true);
+         return duration;

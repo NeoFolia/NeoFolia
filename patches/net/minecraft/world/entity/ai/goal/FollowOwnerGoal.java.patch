@@ -1,0 +1,83 @@
+--- a/net/minecraft/world/entity/ai/goal/FollowOwnerGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowOwnerGoal.java
+@@ -7,6 +_,7 @@
+ import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
+ import net.minecraft.world.entity.ai.navigation.PathNavigation;
+ import net.minecraft.world.level.pathfinder.PathType;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FollowOwnerGoal extends Goal {
+@@ -32,8 +_,8 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        LivingEntity owner = this.tamable.getOwner();
++    public synchronized boolean canUse() {
++        LivingEntity owner = this.regionSafeOwner(this.tamable.getOwner());
+         if (owner == null) {
+             return false;
+         } else if (this.tamable.unableToMoveToOwner()) {
+@@ -47,33 +_,41 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
++        LivingEntity target = this.regionSafeOwner(this.owner);
++        if (target == null) {
++            return false;
++        }
+         if (this.navigation.isDone()) {
+             return false;
+         } else {
+-            return this.tamable.unableToMoveToOwner() ? false : !(this.tamable.distanceToSqr(this.owner) <= this.stopDistance * this.stopDistance);
++            return this.tamable.unableToMoveToOwner() ? false : !(this.tamable.distanceToSqr(target) <= this.stopDistance * this.stopDistance);
+         }
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.timeToRecalcPath = 0;
+         this.oldWaterCost = this.tamable.getPathfindingMalus(PathType.WATER);
+         this.tamable.setPathfindingMalus(PathType.WATER, 0.0F);
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.owner = null;
+         this.navigation.stop();
+         this.tamable.setPathfindingMalus(PathType.WATER, this.oldWaterCost);
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeOwner(this.owner);
++        if (target == null) {
++            return;
++        }
+         boolean isOwnerFarAway = this.tamable.shouldTryTeleportToOwner();
+         if (!isOwnerFarAway) {
+-            this.tamable.getLookControl().setLookAt(this.owner, 10.0F, this.tamable.getMaxHeadXRot());
++            this.tamable.getLookControl().setLookAt(target, 10.0F, this.tamable.getMaxHeadXRot());
+         }
+ 
+         if (--this.timeToRecalcPath <= 0) {
+@@ -81,8 +_,12 @@
+             if (isOwnerFarAway) {
+                 this.tamable.tryToTeleportToOwner();
+             } else {
+-                this.navigation.moveTo(this.owner, this.speedModifier);
++                this.navigation.moveTo(target, this.speedModifier);
+             }
+         }
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeOwner(@Nullable LivingEntity owner) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.tamable.level(), owner);
+     }
+ }

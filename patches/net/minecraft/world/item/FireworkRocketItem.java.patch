@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/FireworkRocketItem.java
++++ b/net/minecraft/world/item/FireworkRocketItem.java
+@@ -15,6 +_,7 @@
+ import net.minecraft.world.item.context.UseOnContext;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class FireworkRocketItem extends Item implements ProjectileItem {
+     public static final byte[] CRAFTABLE_DURATIONS = new byte[]{1, 2, 3};
+@@ -65,7 +_,7 @@
+ 
+                 Projectile.spawnProjectile(new FireworkRocketEntity(level, itemStack, player), serverLevel, itemStack);
+                 itemStack.consume(1, player);
+-                player.awardStat(Stats.ITEM_USED.get(this));
++                RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+             }
+ 
+             return InteractionResult.SUCCESS;

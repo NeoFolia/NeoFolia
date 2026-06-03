@@ -1,0 +1,134 @@
+--- a/net/minecraft/advancements/AdvancementProgress.java
++++ b/net/minecraft/advancements/AdvancementProgress.java
+@@ -36,7 +_,7 @@
+         );
+     public static final Codec<AdvancementProgress> CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+-                CRITERIA_CODEC.optionalFieldOf("criteria", Map.of()).forGetter(a -> a.criteria),
++                CRITERIA_CODEC.optionalFieldOf("criteria", Map.of()).forGetter(AdvancementProgress::criteriaSnapshot),
+                 Codec.BOOL.fieldOf("done").orElse(true).forGetter(AdvancementProgress::isDone)
+             )
+             .apply(i, (criteria, done) -> new AdvancementProgress(new HashMap<>(criteria)))
+@@ -52,7 +_,14 @@
+         this.criteria = Maps.newHashMap();
+     }
+ 
+-    public void update(AdvancementRequirements requirements) {
++    private synchronized Map<String, CriterionProgress> criteriaSnapshot() {
++        return this.criteria
++            .entrySet()
++            .stream()
++            .collect(Collectors.toMap(Entry::getKey, entry -> new CriterionProgress(entry.getValue().getObtained())));
++    }
++
++    public synchronized void update(AdvancementRequirements requirements) {
+         Set<String> names = requirements.names();
+         this.criteria.entrySet().removeIf(entry -> !names.contains(entry.getKey()));
+ 
+@@ -63,11 +_,11 @@
+         this.requirements = requirements;
+     }
+ 
+-    public boolean isDone() {
++    public synchronized boolean isDone() {
+         return this.requirements.test(this::isCriterionDone);
+     }
+ 
+-    public boolean hasProgress() {
++    public synchronized boolean hasProgress() {
+         for (CriterionProgress progress : this.criteria.values()) {
+             if (progress.isDone()) {
+                 return true;
+@@ -77,7 +_,7 @@
+         return false;
+     }
+ 
+-    public boolean grantProgress(String name) {
++    public synchronized boolean grantProgress(String name) {
+         CriterionProgress progress = this.criteria.get(name);
+         if (progress != null && !progress.isDone()) {
+             progress.grant();
+@@ -87,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean revokeProgress(String name) {
++    public synchronized boolean revokeProgress(String name) {
+         CriterionProgress progress = this.criteria.get(name);
+         if (progress != null && progress.isDone()) {
+             progress.revoke();
+@@ -98,12 +_,12 @@
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return "AdvancementProgress{criteria=" + this.criteria + ", requirements=" + this.requirements + "}";
+     }
+ 
+-    public void serializeToNetwork(FriendlyByteBuf output) {
+-        output.writeMap(this.criteria, FriendlyByteBuf::writeUtf, (b, v) -> v.serializeToNetwork(b));
++    public synchronized void serializeToNetwork(FriendlyByteBuf output) {
++        output.writeMap(this.criteriaSnapshot(), FriendlyByteBuf::writeUtf, (b, v) -> v.serializeToNetwork(b));
+     }
+ 
+     public static AdvancementProgress fromNetwork(FriendlyByteBuf input) {
+@@ -111,7 +_,7 @@
+         return new AdvancementProgress(criteria);
+     }
+ 
+-    public @Nullable CriterionProgress getCriterion(String id) {
++    public synchronized @Nullable CriterionProgress getCriterion(String id) {
+         return this.criteria.get(id);
+     }
+ 
+@@ -120,7 +_,7 @@
+         return progress != null && progress.isDone();
+     }
+ 
+-    public float getPercent() {
++    public synchronized float getPercent() {
+         if (this.criteria.isEmpty()) {
+             return 0.0F;
+         } else {
+@@ -130,7 +_,7 @@
+         }
+     }
+ 
+-    public @Nullable Component getProgressText() {
++    public synchronized @Nullable Component getProgressText() {
+         if (this.criteria.isEmpty()) {
+             return null;
+         } else {
+@@ -144,11 +_,11 @@
+         }
+     }
+ 
+-    private int countCompletedRequirements() {
++    private synchronized int countCompletedRequirements() {
+         return this.requirements.count(this::isCriterionDone);
+     }
+ 
+-    public Iterable<String> getRemainingCriteria() {
++    public synchronized Iterable<String> getRemainingCriteria() {
+         List<String> remaining = Lists.newArrayList();
+ 
+         for (Entry<String, CriterionProgress> entry : this.criteria.entrySet()) {
+@@ -160,7 +_,7 @@
+         return remaining;
+     }
+ 
+-    public Iterable<String> getCompletedCriteria() {
++    public synchronized Iterable<String> getCompletedCriteria() {
+         List<String> completed = Lists.newArrayList();
+ 
+         for (Entry<String, CriterionProgress> entry : this.criteria.entrySet()) {
+@@ -172,7 +_,7 @@
+         return completed;
+     }
+ 
+-    public @Nullable Instant getFirstProgressDate() {
++    public synchronized @Nullable Instant getFirstProgressDate() {
+         return this.criteria.values().stream().map(CriterionProgress::getObtained).filter(Objects::nonNull).min(Comparator.naturalOrder()).orElse(null);
+     }
+ 

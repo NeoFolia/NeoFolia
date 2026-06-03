@@ -1,0 +1,117 @@
+--- a/net/minecraft/world/entity/ai/behavior/ShowTradesToPlayer.java
++++ b/net/minecraft/world/entity/ai/behavior/ShowTradesToPlayer.java
+@@ -28,21 +_,21 @@
+         super(ImmutableMap.of(MemoryModuleType.INTERACTION_TARGET, MemoryStatus.VALUE_PRESENT), minDuration, maxDuration);
+     }
+ 
+-    public boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++    public synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+         Brain<?> brain = body.getBrain();
+         if (brain.getMemory(MemoryModuleType.INTERACTION_TARGET).isEmpty()) {
+             return false;
+         } else {
+-            LivingEntity target = brain.getMemory(MemoryModuleType.INTERACTION_TARGET).get();
+-            return target.is(EntityType.PLAYER) && body.isAlive() && target.isAlive() && !body.isBaby() && body.distanceToSqr(target) <= 17.0;
++            LivingEntity target = BehaviorUtils.regionSafeEntity(body, brain.getMemory(MemoryModuleType.INTERACTION_TARGET).get());
++            return target != null && target.is(EntityType.PLAYER) && body.isAlive() && target.isAlive() && !body.isBaby() && body.distanceToSqr(target) <= 17.0;
+         }
+     }
+ 
+-    public boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    public synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return this.checkExtraStartConditions(level, body) && this.lookTime > 0 && body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).isPresent();
+     }
+ 
+-    public void start(ServerLevel level, Villager body, long timestamp) {
++    public synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         super.start(level, body, timestamp);
+         this.lookAtTarget(body);
+         this.cycleCounter = 0;
+@@ -50,8 +_,13 @@
+         this.lookTime = 40;
+     }
+ 
+-    public void tick(ServerLevel level, Villager body, long timestamp) {
++    public synchronized void tick(ServerLevel level, Villager body, long timestamp) {
+         LivingEntity target = this.lookAtTarget(body);
++        if (target == null) {
++            this.lookTime = 0;
++            return;
++        }
++
+         this.findItemsToDisplay(target, body);
+         if (!this.displayItems.isEmpty()) {
+             this.displayCyclingItems(body);
+@@ -63,18 +_,22 @@
+         this.lookTime--;
+     }
+ 
+-    public void stop(ServerLevel level, Villager body, long timestamp) {
++    public synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         super.stop(level, body, timestamp);
+         body.getBrain().eraseMemory(MemoryModuleType.INTERACTION_TARGET);
+         clearHeldItem(body);
+         this.playerItemStack = null;
++        this.displayItems.clear();
++        this.cycleCounter = 0;
++        this.displayIndex = 0;
++        this.lookTime = 0;
+     }
+ 
+-    private void findItemsToDisplay(LivingEntity player, Villager villager) {
++    private synchronized void findItemsToDisplay(LivingEntity player, Villager villager) {
+         boolean changed = false;
+         ItemStack currentPlayerItemStack = player.getMainHandItem();
+         if (this.playerItemStack == null || !ItemStack.isSameItem(this.playerItemStack, currentPlayerItemStack)) {
+-            this.playerItemStack = currentPlayerItemStack;
++            this.playerItemStack = currentPlayerItemStack.copy();
+             changed = true;
+             this.displayItems.clear();
+         }
+@@ -88,19 +_,19 @@
+         }
+     }
+ 
+-    private void displayFirstItem(Villager villager) {
++    private synchronized void displayFirstItem(Villager villager) {
+         displayAsHeldItem(villager, this.displayItems.get(0));
+     }
+ 
+-    private void updateDisplayItems(Villager villager) {
+-        for (MerchantOffer offer : villager.getOffers()) {
++    private synchronized void updateDisplayItems(Villager villager) {
++        for (MerchantOffer offer : List.copyOf(villager.getOffers())) {
+             if (!offer.isOutOfStock() && this.playerItemStackMatchesCostOfOffer(offer)) {
+                 this.displayItems.add(offer.assemble());
+             }
+         }
+     }
+ 
+-    private boolean playerItemStackMatchesCostOfOffer(MerchantOffer offer) {
++    private synchronized boolean playerItemStackMatchesCostOfOffer(MerchantOffer offer) {
+         return ItemStack.isSameItem(this.playerItemStack, offer.getCostA()) || ItemStack.isSameItem(this.playerItemStack, offer.getCostB());
+     }
+ 
+@@ -114,14 +_,19 @@
+         body.setDropChance(EquipmentSlot.MAINHAND, 0.0F);
+     }
+ 
+-    private LivingEntity lookAtTarget(Villager myBody) {
++    private synchronized @Nullable LivingEntity lookAtTarget(Villager myBody) {
+         Brain<?> brain = myBody.getBrain();
+-        LivingEntity target = brain.getMemory(MemoryModuleType.INTERACTION_TARGET).get();
++        LivingEntity target = brain.getMemory(MemoryModuleType.INTERACTION_TARGET).orElse(null);
++        target = BehaviorUtils.regionSafeEntity(myBody, target);
++        if (target == null) {
++            return null;
++        }
++
+         brain.setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(target, true));
+         return target;
+     }
+ 
+-    private void displayCyclingItems(Villager villager) {
++    private synchronized void displayCyclingItems(Villager villager) {
+         if (this.displayItems.size() >= 2 && ++this.cycleCounter >= 40) {
+             this.displayIndex++;
+             this.cycleCounter = 0;

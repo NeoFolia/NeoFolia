@@ -1,0 +1,555 @@
+--- a/net/minecraft/world/entity/ai/behavior/TransportItemsBetweenContainers.java
++++ b/net/minecraft/world/entity/ai/behavior/TransportItemsBetweenContainers.java
+@@ -35,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.function.TriConsumer;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -96,26 +_,26 @@
+         this.state = TransportItemsBetweenContainers.TransportItemState.TRAVELLING;
+     }
+ 
+-    protected void start(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void start(ServerLevel level, PathfinderMob body, long timestamp) {
+         if (body.getNavigation() instanceof GroundPathNavigation pathNavigation) {
+             pathNavigation.setCanPathToTargetsBelowSurface(true);
+         }
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, PathfinderMob body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, PathfinderMob body) {
+         return !body.isLeashed();
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
+         return body.getBrain().getMemory(MemoryModuleType.TRANSPORT_ITEMS_COOLDOWN_TICKS).isEmpty() && !body.isPanicking() && !body.isLeashed();
+     }
+ 
+     @Override
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return false;
+     }
+ 
+-    protected void tick(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, PathfinderMob body, long timestamp) {
+         boolean updatedInvalidTarget = this.updateInvalidTarget(level, body);
+         if (this.target == null) {
+             this.stop(level, body, timestamp);
+@@ -134,7 +_,7 @@
+         }
+     }
+ 
+-    private boolean updateInvalidTarget(ServerLevel level, PathfinderMob body) {
++    private synchronized boolean updateInvalidTarget(ServerLevel level, PathfinderMob body) {
+         if (!this.hasValidTarget(level, body)) {
+             this.stopTargetingCurrentTarget(body);
+             Optional<TransportItemsBetweenContainers.TransportItemTarget> targetBlockPosition = this.getTransportTarget(level, body);
+@@ -152,13 +_,13 @@
+         }
+     }
+ 
+-    private void onQueuingForTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body) {
++    private synchronized void onQueuingForTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body) {
+         if (!this.isAnotherMobInteractingWithTarget(target, level)) {
+             this.resumeTravelling(body);
+         }
+     }
+ 
+-    protected void onTravelToTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body) {
++    protected synchronized void onTravelToTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body) {
+         if (this.isWithinTargetDistance(3.0, target, level, body, this.getCenterPos(body)) && this.isAnotherMobInteractingWithTarget(target, level)) {
+             this.startQueuing(body);
+         } else if (this.isWithinTargetDistance(getInteractionRange(body), target, level, body, this.getCenterPos(body))) {
+@@ -168,11 +_,11 @@
+         }
+     }
+ 
+-    private Vec3 getCenterPos(PathfinderMob body) {
++    private synchronized Vec3 getCenterPos(PathfinderMob body) {
+         return this.setMiddleYPosition(body, body.position());
+     }
+ 
+-    protected void onReachedTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body) {
++    protected synchronized void onReachedTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body) {
+         if (!this.isWithinTargetDistance(2.0, target, level, body, this.getCenterPos(body))) {
+             this.onStartTravelling(body);
+         } else {
+@@ -192,23 +_,23 @@
+         }
+     }
+ 
+-    private void startQueuing(PathfinderMob body) {
++    private synchronized void startQueuing(PathfinderMob body) {
+         this.stopInPlace(body);
+         this.setTransportingState(TransportItemsBetweenContainers.TransportItemState.QUEUING);
+     }
+ 
+-    private void resumeTravelling(PathfinderMob body) {
++    private synchronized void resumeTravelling(PathfinderMob body) {
+         this.setTransportingState(TransportItemsBetweenContainers.TransportItemState.TRAVELLING);
+         this.walkTowardsTarget(body);
+     }
+ 
+-    private void walkTowardsTarget(PathfinderMob body) {
++    private synchronized void walkTowardsTarget(PathfinderMob body) {
+         if (this.target != null) {
+             BehaviorUtils.setWalkAndLookTargetMemories(body, this.target.pos, this.speedModifier, 0);
+         }
+     }
+ 
+-    private void startOnReachedTargetInteraction(TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body) {
++    private synchronized void startOnReachedTargetInteraction(TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body) {
+         this.doReachedTargetInteraction(
+             body,
+             target.container,
+@@ -220,7 +_,7 @@
+         this.setTransportingState(TransportItemsBetweenContainers.TransportItemState.INTERACTING);
+     }
+ 
+-    private void onStartTravelling(PathfinderMob body) {
++    private synchronized void onStartTravelling(PathfinderMob body) {
+         this.onStartTravelling.accept(body);
+         this.setTransportingState(TransportItemsBetweenContainers.TransportItemState.TRAVELLING);
+         this.interactionState = null;
+@@ -231,15 +_,15 @@
+         return (mob, container) -> this.setInteractionState(state);
+     }
+ 
+-    private void setTransportingState(TransportItemsBetweenContainers.TransportItemState state) {
++    private synchronized void setTransportingState(TransportItemsBetweenContainers.TransportItemState state) {
+         this.state = state;
+     }
+ 
+-    private void setInteractionState(TransportItemsBetweenContainers.ContainerInteractionState state) {
++    private synchronized void setInteractionState(TransportItemsBetweenContainers.ContainerInteractionState state) {
+         this.interactionState = state;
+     }
+ 
+-    private void onTargetInteraction(TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body) {
++    private synchronized void onTargetInteraction(TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body) {
+         body.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(target.pos));
+         this.stopInPlace(body);
+         if (this.interactionState != null) {
+@@ -248,7 +_,7 @@
+         }
+     }
+ 
+-    private void doReachedTargetInteraction(
++    private synchronized void doReachedTargetInteraction(
+         PathfinderMob body,
+         Container container,
+         BiConsumer<PathfinderMob, Container> onPickupSuccess,
+@@ -269,7 +_,7 @@
+         }
+     }
+ 
+-    private Optional<TransportItemsBetweenContainers.TransportItemTarget> getTransportTarget(ServerLevel level, PathfinderMob body) {
++    private synchronized Optional<TransportItemsBetweenContainers.TransportItemTarget> getTransportTarget(ServerLevel level, PathfinderMob body) {
+         AABB targetBlockSearchArea = this.getTargetSearchArea(body);
+         Set<GlobalPos> visitedPositions = getVisitedPositions(body);
+         Set<GlobalPos> unreachablePositions = getUnreachablePositions(body);
+@@ -279,9 +_,13 @@
+         double closestDistance = Float.MAX_VALUE;
+ 
+         for (ChunkPos chunkPos : list) {
++            if (!RegionizedWorldGuard.shouldLoadChunk(level, chunkPos.x(), chunkPos.z())) {
++                continue;
++            }
++
+             LevelChunk levelChunk = level.getChunkSource().getChunkNow(chunkPos.x(), chunkPos.z());
+             if (levelChunk != null) {
+-                for (BlockEntity potentialTarget : levelChunk.getBlockEntities().values()) {
++                for (BlockEntity potentialTarget : List.copyOf(levelChunk.getBlockEntities().values())) {
+                     if (potentialTarget instanceof ChestBlockEntity chestBlockEntity) {
+                         double distance = chestBlockEntity.getBlockPos().distToCenterSqr(body.position());
+                         if (distance < closestDistance) {
+@@ -301,7 +_,7 @@
+         return target == null ? Optional.empty() : Optional.of(target);
+     }
+ 
+-    private TransportItemsBetweenContainers.@Nullable TransportItemTarget isTargetValidToPick(
++    private synchronized TransportItemsBetweenContainers.@Nullable TransportItemTarget isTargetValidToPick(
+         PathfinderMob body,
+         Level level,
+         BlockEntity blockEntity,
+@@ -310,6 +_,10 @@
+         AABB targetBlockSearchArea
+     ) {
+         BlockPos blockPos = blockEntity.getBlockPos();
++        if (!RegionizedWorldGuard.shouldLoadChunk(level, blockPos.getX() >> 4, blockPos.getZ() >> 4)) {
++            return null;
++        }
++
+         boolean isWithinSearchArea = targetBlockSearchArea.contains(blockPos.getX(), blockPos.getY(), blockPos.getZ());
+         if (!isWithinSearchArea) {
+             return null;
+@@ -328,11 +_,11 @@
+         }
+     }
+ 
+-    private boolean isContainerLocked(TransportItemsBetweenContainers.TransportItemTarget transportItemTarget) {
++    private synchronized boolean isContainerLocked(TransportItemsBetweenContainers.TransportItemTarget transportItemTarget) {
+         return transportItemTarget.blockEntity instanceof BaseContainerBlockEntity blockEntity && blockEntity.isLocked();
+     }
+ 
+-    private boolean hasValidTarget(Level level, PathfinderMob body) {
++    private synchronized boolean hasValidTarget(Level level, PathfinderMob body) {
+         boolean targetIsOfValidType = this.target != null && this.isWantedBlock(body, this.target.state) && this.targetHasNotChanged(level, this.target);
+         if (targetIsOfValidType && !this.isTargetBlocked(level, this.target)) {
+             if (!this.state.equals(TransportItemsBetweenContainers.TransportItemState.TRAVELLING)) {
+@@ -349,7 +_,7 @@
+         return false;
+     }
+ 
+-    private boolean hasValidTravellingPath(Level level, TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body) {
++    private synchronized boolean hasValidTravellingPath(Level level, TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body) {
+         Path path = body.getNavigation().getPath() == null ? body.getNavigation().createPath(target.pos, 0) : body.getNavigation().getPath();
+         Vec3 posFromWhichToReachTarget = this.getPositionToReachTargetFrom(path, body);
+         boolean canReachTarget = this.isWithinTargetDistance(getInteractionRange(body), target, level, body, posFromWhichToReachTarget);
+@@ -357,59 +_,69 @@
+         return hasNotYetCreatedPathToTarget || this.targetIsReachableFromPosition(level, canReachTarget, posFromWhichToReachTarget, target, body);
+     }
+ 
+-    private Vec3 getPositionToReachTargetFrom(@Nullable Path path, PathfinderMob body) {
++    private synchronized Vec3 getPositionToReachTargetFrom(@Nullable Path path, PathfinderMob body) {
+         boolean haveNoValidPath = path == null || path.getEndNode() == null;
+         Vec3 bottomCenter = haveNoValidPath ? body.position() : path.getEndNode().asBlockPos().getBottomCenter();
+         return this.setMiddleYPosition(body, bottomCenter);
+     }
+ 
+-    private Vec3 setMiddleYPosition(PathfinderMob body, Vec3 pos) {
++    private synchronized Vec3 setMiddleYPosition(PathfinderMob body, Vec3 pos) {
+         return pos.add(0.0, body.getBoundingBox().getYsize() / 2.0, 0.0);
+     }
+ 
+-    private boolean isTargetBlocked(Level level, TransportItemsBetweenContainers.TransportItemTarget target) {
++    private synchronized boolean isTargetBlocked(Level level, TransportItemsBetweenContainers.TransportItemTarget target) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(level, target.pos.getX() >> 4, target.pos.getZ() >> 4)) {
++            return true;
++        }
++
+         return ChestBlock.isChestBlockedAt(level, target.pos);
+     }
+ 
+-    private boolean targetHasNotChanged(Level level, TransportItemsBetweenContainers.TransportItemTarget target) {
++    private synchronized boolean targetHasNotChanged(Level level, TransportItemsBetweenContainers.TransportItemTarget target) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(level, target.pos.getX() >> 4, target.pos.getZ() >> 4)) {
++            return false;
++        }
++
+         return target.blockEntity.equals(level.getBlockEntity(target.pos));
+     }
+ 
+-    private Stream<TransportItemsBetweenContainers.TransportItemTarget> getConnectedTargets(
++    private synchronized Stream<TransportItemsBetweenContainers.TransportItemTarget> getConnectedTargets(
+         TransportItemsBetweenContainers.TransportItemTarget target, Level level
+     ) {
++        Stream<TransportItemsBetweenContainers.TransportItemTarget> targets;
+         if (target.state.getValueOrElse(ChestBlock.TYPE, ChestType.SINGLE) != ChestType.SINGLE) {
+             TransportItemsBetweenContainers.TransportItemTarget connectedTarget = TransportItemsBetweenContainers.TransportItemTarget.tryCreatePossibleTarget(
+                 ChestBlock.getConnectedBlockPos(target.pos, target.state), level
+             );
+-            return connectedTarget != null ? Stream.of(target, connectedTarget) : Stream.of(target);
++            targets = connectedTarget != null ? Stream.of(target, connectedTarget) : Stream.of(target);
+         } else {
+-            return Stream.of(target);
++            targets = Stream.of(target);
+         }
++        return targets.toList().stream();
+     }
+ 
+-    private AABB getTargetSearchArea(PathfinderMob mob) {
++    private synchronized AABB getTargetSearchArea(PathfinderMob mob) {
+         int horizontalSearchDistance = this.getHorizontalSearchDistance(mob);
+         return new AABB(mob.blockPosition()).inflate(horizontalSearchDistance, this.getVerticalSearchDistance(mob), horizontalSearchDistance);
+     }
+ 
+-    private int getHorizontalSearchDistance(PathfinderMob mob) {
++    private synchronized int getHorizontalSearchDistance(PathfinderMob mob) {
+         return mob.isPassenger() ? 1 : this.horizontalSearchDistance;
+     }
+ 
+-    private int getVerticalSearchDistance(PathfinderMob mob) {
++    private synchronized int getVerticalSearchDistance(PathfinderMob mob) {
+         return mob.isPassenger() ? 1 : this.verticalSearchDistance;
+     }
+ 
+     private static Set<GlobalPos> getVisitedPositions(PathfinderMob mob) {
+-        return mob.getBrain().getMemory(MemoryModuleType.VISITED_BLOCK_POSITIONS).orElse(Set.of());
++        return Set.copyOf(mob.getBrain().getMemory(MemoryModuleType.VISITED_BLOCK_POSITIONS).orElse(Set.of()));
+     }
+ 
+     private static Set<GlobalPos> getUnreachablePositions(PathfinderMob mob) {
+-        return mob.getBrain().getMemory(MemoryModuleType.UNREACHABLE_TRANSPORT_BLOCK_POSITIONS).orElse(Set.of());
++        return Set.copyOf(mob.getBrain().getMemory(MemoryModuleType.UNREACHABLE_TRANSPORT_BLOCK_POSITIONS).orElse(Set.of()));
+     }
+ 
+-    private boolean isPositionAlreadyVisited(
++    private synchronized boolean isPositionAlreadyVisited(
+         Set<GlobalPos> visitedPositions, Set<GlobalPos> unreachablePositions, TransportItemsBetweenContainers.TransportItemTarget target, Level level
+     ) {
+         return this.getConnectedTargets(target, level)
+@@ -421,17 +_,17 @@
+         return body.getNavigation().getPath() != null && body.getNavigation().getPath().isDone();
+     }
+ 
+-    protected void setVisitedBlockPos(PathfinderMob body, Level level, BlockPos target) {
++    protected synchronized void setVisitedBlockPos(PathfinderMob body, Level level, BlockPos target) {
+         Set<GlobalPos> visitedPositions = new HashSet<>(getVisitedPositions(body));
+         visitedPositions.add(new GlobalPos(level.dimension(), target));
+         if (visitedPositions.size() > 10) {
+             this.enterCooldownAfterNoMatchingTargetFound(body);
+         } else {
+-            body.getBrain().setMemoryWithExpiry(MemoryModuleType.VISITED_BLOCK_POSITIONS, visitedPositions, 6000L);
++            body.getBrain().setMemoryWithExpiry(MemoryModuleType.VISITED_BLOCK_POSITIONS, Set.copyOf(visitedPositions), 6000L);
+         }
+     }
+ 
+-    protected void markVisitedBlockPosAsUnreachable(PathfinderMob body, Level level, BlockPos target) {
++    protected synchronized void markVisitedBlockPosAsUnreachable(PathfinderMob body, Level level, BlockPos target) {
+         Set<GlobalPos> visitedPositions = new HashSet<>(getVisitedPositions(body));
+         visitedPositions.remove(new GlobalPos(level.dimension(), target));
+         Set<GlobalPos> unreachablePositions = new HashSet<>(getUnreachablePositions(body));
+@@ -439,12 +_,12 @@
+         if (unreachablePositions.size() > 50) {
+             this.enterCooldownAfterNoMatchingTargetFound(body);
+         } else {
+-            body.getBrain().setMemoryWithExpiry(MemoryModuleType.VISITED_BLOCK_POSITIONS, visitedPositions, 6000L);
+-            body.getBrain().setMemoryWithExpiry(MemoryModuleType.UNREACHABLE_TRANSPORT_BLOCK_POSITIONS, unreachablePositions, 6000L);
++            body.getBrain().setMemoryWithExpiry(MemoryModuleType.VISITED_BLOCK_POSITIONS, Set.copyOf(visitedPositions), 6000L);
++            body.getBrain().setMemoryWithExpiry(MemoryModuleType.UNREACHABLE_TRANSPORT_BLOCK_POSITIONS, Set.copyOf(unreachablePositions), 6000L);
+         }
+     }
+ 
+-    private boolean isWantedBlock(PathfinderMob mob, BlockState block) {
++    private synchronized boolean isWantedBlock(PathfinderMob mob, BlockState block) {
+         return isPickingUpItems(mob) ? this.sourceBlockType.test(block) : this.destinationBlockType.test(block);
+     }
+ 
+@@ -452,7 +_,7 @@
+         return hasFinishedPath(body) ? 1.0 : 0.5;
+     }
+ 
+-    private boolean isWithinTargetDistance(
++    private synchronized boolean isWithinTargetDistance(
+         double distance, TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body, Vec3 fromPos
+     ) {
+         AABB boundingBox = body.getBoundingBox();
+@@ -460,13 +_,13 @@
+         return target.state.getCollisionShape(level, target.pos).bounds().inflate(distance, 0.5, distance).move(target.pos).intersects(movedBoundBox);
+     }
+ 
+-    private boolean targetIsReachableFromPosition(
++    private synchronized boolean targetIsReachableFromPosition(
+         Level level, boolean canReachTarget, Vec3 pos, TransportItemsBetweenContainers.TransportItemTarget target, PathfinderMob body
+     ) {
+         return canReachTarget && this.canSeeAnyTargetSide(target, level, body, pos);
+     }
+ 
+-    private boolean canSeeAnyTargetSide(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body, Vec3 eyePosition) {
++    private synchronized boolean canSeeAnyTargetSide(TransportItemsBetweenContainers.TransportItemTarget target, Level level, PathfinderMob body, Vec3 eyePosition) {
+         Vec3 center = target.pos.getCenter();
+         return Direction.stream()
+             .map(direction -> center.add(0.5 * direction.getStepX(), 0.5 * direction.getStepY(), 0.5 * direction.getStepZ()))
+@@ -474,7 +_,7 @@
+             .anyMatch(hitResult -> hitResult.getType() == HitResult.Type.BLOCK && hitResult.getBlockPos().equals(target.pos));
+     }
+ 
+-    private boolean isAnotherMobInteractingWithTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level) {
++    private synchronized boolean isAnotherMobInteractingWithTarget(TransportItemsBetweenContainers.TransportItemTarget target, Level level) {
+         return this.getConnectedTargets(target, level).anyMatch(this.shouldQueueForTarget);
+     }
+ 
+@@ -483,36 +_,47 @@
+     }
+ 
+     private static boolean matchesGettingItemsRequirement(Container container) {
+-        return !container.isEmpty();
++        synchronized (container) {
++            return !container.isEmpty();
++        }
+     }
+ 
+     private static boolean matchesLeavingItemsRequirement(PathfinderMob body, Container container) {
+-        return container.isEmpty() || hasItemMatchingHandItem(body, container);
++        synchronized (container) {
++            return container.isEmpty() || hasItemMatchingHandItem(body, container);
++        }
+     }
+ 
+     private static boolean hasItemMatchingHandItem(PathfinderMob body, Container container) {
+-        ItemStack mainHandItem = body.getMainHandItem();
++        synchronized (container) {
++            ItemStack mainHandItem = body.getMainHandItem();
+ 
+-        for (ItemStack itemStack : container) {
+-            if (ItemStack.isSameItem(itemStack, mainHandItem)) {
+-                return true;
++            for (ItemStack itemStack : container) {
++                if (ItemStack.isSameItem(itemStack, mainHandItem)) {
++                    return true;
++                }
+             }
+-        }
+ 
+-        return false;
++            return false;
++        }
+     }
+ 
+-    private void pickUpItems(PathfinderMob body, Container container) {
+-        body.setItemSlot(EquipmentSlot.MAINHAND, pickupItemFromContainer(container));
+-        body.setGuaranteedDrop(EquipmentSlot.MAINHAND);
+-        container.setChanged();
++    private synchronized void pickUpItems(PathfinderMob body, Container container) {
++        synchronized (container) {
++            body.setItemSlot(EquipmentSlot.MAINHAND, pickupItemFromContainer(container));
++            body.setGuaranteedDrop(EquipmentSlot.MAINHAND);
++            container.setChanged();
++        }
+         this.clearMemoriesAfterMatchingTargetFound(body);
+     }
+ 
+-    private void putDownItem(PathfinderMob body, Container container) {
+-        ItemStack itemsLeftAfterVisitingChest = addItemsToContainer(body, container);
+-        container.setChanged();
+-        body.setItemSlot(EquipmentSlot.MAINHAND, itemsLeftAfterVisitingChest);
++    private synchronized void putDownItem(PathfinderMob body, Container container) {
++        ItemStack itemsLeftAfterVisitingChest;
++        synchronized (container) {
++            itemsLeftAfterVisitingChest = addItemsToContainer(body, container);
++            container.setChanged();
++            body.setItemSlot(EquipmentSlot.MAINHAND, itemsLeftAfterVisitingChest);
++        }
+         if (itemsLeftAfterVisitingChest.isEmpty()) {
+             this.clearMemoriesAfterMatchingTargetFound(body);
+         } else {
+@@ -521,75 +_,79 @@
+     }
+ 
+     private static ItemStack pickupItemFromContainer(Container container) {
+-        int slot = 0;
+-
+-        for (ItemStack itemStack : container) {
+-            if (!itemStack.isEmpty()) {
+-                int itemCount = Math.min(itemStack.getCount(), 16);
+-                return container.removeItem(slot, itemCount);
++        synchronized (container) {
++            int slot = 0;
++
++            for (ItemStack itemStack : container) {
++                if (!itemStack.isEmpty()) {
++                    int itemCount = Math.min(itemStack.getCount(), 16);
++                    return container.removeItem(slot, itemCount);
++                }
++
++                slot++;
+             }
+ 
+-            slot++;
++            return ItemStack.EMPTY;
+         }
+-
+-        return ItemStack.EMPTY;
+     }
+ 
+     private static ItemStack addItemsToContainer(PathfinderMob body, Container container) {
+-        int slot = 0;
+-        ItemStack itemStack = body.getMainHandItem();
+-
+-        for (ItemStack containerItemStack : container) {
+-            if (containerItemStack.isEmpty()) {
+-                container.setItem(slot, itemStack);
+-                return ItemStack.EMPTY;
+-            }
+-
+-            if (ItemStack.isSameItemSameComponents(containerItemStack, itemStack) && containerItemStack.getCount() < containerItemStack.getMaxStackSize()) {
+-                int countThatCanBeAdded = containerItemStack.getMaxStackSize() - containerItemStack.getCount();
+-                int countToAdd = Math.min(countThatCanBeAdded, itemStack.getCount());
+-                containerItemStack.setCount(containerItemStack.getCount() + countToAdd);
+-                itemStack.setCount(itemStack.getCount() - countThatCanBeAdded);
+-                container.setItem(slot, containerItemStack);
+-                if (itemStack.isEmpty()) {
++        synchronized (container) {
++            int slot = 0;
++            ItemStack itemStack = body.getMainHandItem();
++
++            for (ItemStack containerItemStack : container) {
++                if (containerItemStack.isEmpty()) {
++                    container.setItem(slot, itemStack);
+                     return ItemStack.EMPTY;
+                 }
++
++                if (ItemStack.isSameItemSameComponents(containerItemStack, itemStack) && containerItemStack.getCount() < containerItemStack.getMaxStackSize()) {
++                    int countThatCanBeAdded = containerItemStack.getMaxStackSize() - containerItemStack.getCount();
++                    int countToAdd = Math.min(countThatCanBeAdded, itemStack.getCount());
++                    containerItemStack.setCount(containerItemStack.getCount() + countToAdd);
++                    itemStack.setCount(itemStack.getCount() - countThatCanBeAdded);
++                    container.setItem(slot, containerItemStack);
++                    if (itemStack.isEmpty()) {
++                        return ItemStack.EMPTY;
++                    }
++                }
++
++                slot++;
+             }
+ 
+-            slot++;
++            return itemStack;
+         }
+-
+-        return itemStack;
+     }
+ 
+-    protected void stopTargetingCurrentTarget(PathfinderMob body) {
++    protected synchronized void stopTargetingCurrentTarget(PathfinderMob body) {
+         this.ticksSinceReachingTarget = 0;
+         this.target = null;
+         body.getNavigation().stop();
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+     }
+ 
+-    protected void clearMemoriesAfterMatchingTargetFound(PathfinderMob body) {
++    protected synchronized void clearMemoriesAfterMatchingTargetFound(PathfinderMob body) {
+         this.stopTargetingCurrentTarget(body);
+         body.getBrain().eraseMemory(MemoryModuleType.VISITED_BLOCK_POSITIONS);
+         body.getBrain().eraseMemory(MemoryModuleType.UNREACHABLE_TRANSPORT_BLOCK_POSITIONS);
+     }
+ 
+-    private void enterCooldownAfterNoMatchingTargetFound(PathfinderMob body) {
++    private synchronized void enterCooldownAfterNoMatchingTargetFound(PathfinderMob body) {
+         this.stopTargetingCurrentTarget(body);
+         body.getBrain().setMemory(MemoryModuleType.TRANSPORT_ITEMS_COOLDOWN_TICKS, 140);
+         body.getBrain().eraseMemory(MemoryModuleType.VISITED_BLOCK_POSITIONS);
+         body.getBrain().eraseMemory(MemoryModuleType.UNREACHABLE_TRANSPORT_BLOCK_POSITIONS);
+     }
+ 
+-    protected void stop(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, PathfinderMob body, long timestamp) {
+         this.onStartTravelling(body);
+         if (body.getNavigation() instanceof GroundPathNavigation pathNavigation) {
+             pathNavigation.setCanPathToTargetsBelowSurface(false);
+         }
+     }
+ 
+-    private void stopInPlace(PathfinderMob mob) {
++    private synchronized void stopInPlace(PathfinderMob mob) {
+         mob.getNavigation().stop();
+         mob.setXxa(0.0F);
+         mob.setYya(0.0F);
+@@ -623,6 +_,10 @@
+         }
+ 
+         public static TransportItemsBetweenContainers.@Nullable TransportItemTarget tryCreatePossibleTarget(BlockPos blockPos, Level level) {
++            if (!RegionizedWorldGuard.shouldLoadChunk(level, blockPos.getX() >> 4, blockPos.getZ() >> 4)) {
++                return null;
++            }
++
+             BlockEntity blockEntity = level.getBlockEntity(blockPos);
+             return blockEntity == null ? null : tryCreatePossibleTarget(blockEntity, level);
+         }

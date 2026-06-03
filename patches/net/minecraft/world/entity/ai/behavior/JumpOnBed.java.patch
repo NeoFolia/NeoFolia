@@ -1,0 +1,108 @@
+--- a/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
++++ b/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.memory.MemoryStatus;
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class JumpOnBed extends Behavior<Mob> {
+@@ -27,22 +_,22 @@
+         this.speedModifier = speedModifier;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Mob body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Mob body) {
+         return body.isBaby() && this.nearBed(level, body);
+     }
+ 
+-    protected void start(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Mob body, long timestamp) {
+         super.start(level, body, timestamp);
+         this.getNearestBed(body).ifPresent(targetBed -> {
+             this.targetBed = targetBed;
+             this.remainingTimeToReachBed = 100;
+-            this.remainingJumps = 3 + level.getRandom().nextInt(4);
++            this.remainingJumps = 3 + body.getRandom().nextInt(4);
+             this.remainingCooldownUntilNextJump = 0;
+             this.startWalkingTowardsBed(body, targetBed);
+         });
+     }
+ 
+-    protected void stop(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Mob body, long timestamp) {
+         super.stop(level, body, timestamp);
+         this.targetBed = null;
+         this.remainingTimeToReachBed = 0;
+@@ -50,7 +_,7 @@
+         this.remainingCooldownUntilNextJump = 0;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
+         return body.isBaby()
+             && this.targetBed != null
+             && this.isBed(level, this.targetBed)
+@@ -59,11 +_,11 @@
+     }
+ 
+     @Override
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return false;
+     }
+ 
+-    protected void tick(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Mob body, long timestamp) {
+         if (!this.onOrOverBed(level, body)) {
+             this.remainingTimeToReachBed--;
+         } else if (this.remainingCooldownUntilNextJump > 0) {
+@@ -77,37 +_,38 @@
+         }
+     }
+ 
+-    private void startWalkingTowardsBed(Mob body, BlockPos bedPos) {
++    private synchronized void startWalkingTowardsBed(Mob body, BlockPos bedPos) {
+         body.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(bedPos, this.speedModifier, 0));
+     }
+ 
+-    private boolean nearBed(ServerLevel level, Mob body) {
++    private synchronized boolean nearBed(ServerLevel level, Mob body) {
+         return this.onOrOverBed(level, body) || this.getNearestBed(body).isPresent();
+     }
+ 
+-    private boolean onOrOverBed(ServerLevel level, Mob body) {
++    private synchronized boolean onOrOverBed(ServerLevel level, Mob body) {
+         BlockPos bodyPos = body.blockPosition();
+         BlockPos oneBelow = bodyPos.below();
+         return this.isBed(level, bodyPos) || this.isBed(level, oneBelow);
+     }
+ 
+-    private boolean onBedSurface(ServerLevel level, Mob body) {
++    private synchronized boolean onBedSurface(ServerLevel level, Mob body) {
+         return this.isBed(level, body.blockPosition());
+     }
+ 
+-    private boolean isBed(ServerLevel level, BlockPos bodyPos) {
+-        return level.getBlockState(bodyPos).is(BlockTags.BEDS);
++    private synchronized boolean isBed(ServerLevel level, BlockPos bodyPos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, bodyPos.getX() >> 4, bodyPos.getZ() >> 4)
++            && level.getBlockState(bodyPos).is(BlockTags.BEDS);
+     }
+ 
+-    private Optional<BlockPos> getNearestBed(Mob body) {
++    private synchronized Optional<BlockPos> getNearestBed(Mob body) {
+         return body.getBrain().getMemory(MemoryModuleType.NEAREST_BED);
+     }
+ 
+-    private boolean tiredOfWalking(ServerLevel level, Mob body) {
++    private synchronized boolean tiredOfWalking(ServerLevel level, Mob body) {
+         return !this.onOrOverBed(level, body) && this.remainingTimeToReachBed <= 0;
+     }
+ 
+-    private boolean tiredOfJumping(ServerLevel level, Mob body) {
++    private synchronized boolean tiredOfJumping(ServerLevel level, Mob body) {
+         return this.onOrOverBed(level, body) && this.remainingJumps <= 0;
+     }
+ }

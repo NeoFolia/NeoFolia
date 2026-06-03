@@ -1,0 +1,71 @@
+--- a/net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java
++++ b/net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.util.VisibleForDebug;
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.sensing.Sensor;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class NearestVisibleLivingEntities {
+     private static final NearestVisibleLivingEntities EMPTY = new NearestVisibleLivingEntities();
+@@ -22,9 +_,12 @@
+     }
+ 
+     public NearestVisibleLivingEntities(ServerLevel level, LivingEntity body, List<LivingEntity> livingEntities) {
+-        this.nearbyEntities = livingEntities;
+-        Object2BooleanOpenHashMap<LivingEntity> cache = new Object2BooleanOpenHashMap<>(livingEntities.size());
+-        Predicate<LivingEntity> targetTest = targetEntity -> Sensor.isEntityTargetable(level, body, targetEntity);
++        this.nearbyEntities = livingEntities.stream()
++            .filter(entity -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, entity) != null)
++            .toList();
++        Object2BooleanOpenHashMap<LivingEntity> cache = new Object2BooleanOpenHashMap<>(this.nearbyEntities.size());
++        Predicate<LivingEntity> targetTest = targetEntity -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, targetEntity) != null
++            && Sensor.isEntityTargetable(level, body, targetEntity);
+         this.lineOfSightTest = otherEntity -> cache.computeIfAbsent(otherEntity, targetTest);
+     }
+ 
+@@ -33,11 +_,11 @@
+     }
+ 
+     @VisibleForDebug
+-    public List<LivingEntity> nearbyEntities() {
+-        return this.nearbyEntities;
++    public synchronized List<LivingEntity> nearbyEntities() {
++        return List.copyOf(this.nearbyEntities);
+     }
+ 
+-    public Optional<LivingEntity> findClosest(Predicate<LivingEntity> filter) {
++    public synchronized Optional<LivingEntity> findClosest(Predicate<LivingEntity> filter) {
+         for (LivingEntity nearbyEntity : this.nearbyEntities) {
+             if (filter.test(nearbyEntity) && this.lineOfSightTest.test(nearbyEntity)) {
+                 return Optional.of(nearbyEntity);
+@@ -47,19 +_,19 @@
+         return Optional.empty();
+     }
+ 
+-    public Iterable<LivingEntity> findAll(Predicate<LivingEntity> filter) {
+-        return Iterables.filter(this.nearbyEntities, entity -> filter.test(entity) && this.lineOfSightTest.test(entity));
+-    }
+-
+-    public Stream<LivingEntity> find(Predicate<LivingEntity> filter) {
+-        return this.nearbyEntities.stream().filter(entity -> filter.test(entity) && this.lineOfSightTest.test(entity));
+-    }
+-
+-    public boolean contains(LivingEntity targetEntity) {
++    public synchronized Iterable<LivingEntity> findAll(Predicate<LivingEntity> filter) {
++        return this.nearbyEntities.stream().filter(entity -> filter.test(entity) && this.lineOfSightTest.test(entity)).toList();
++    }
++
++    public synchronized Stream<LivingEntity> find(Predicate<LivingEntity> filter) {
++        return this.nearbyEntities.stream().filter(entity -> filter.test(entity) && this.lineOfSightTest.test(entity)).toList().stream();
++    }
++
++    public synchronized boolean contains(LivingEntity targetEntity) {
+         return this.nearbyEntities.contains(targetEntity) && this.lineOfSightTest.test(targetEntity);
+     }
+ 
+-    public boolean contains(Predicate<LivingEntity> filter) {
++    public synchronized boolean contains(Predicate<LivingEntity> filter) {
+         for (LivingEntity nearbyEntity : this.nearbyEntities) {
+             if (filter.test(nearbyEntity) && this.lineOfSightTest.test(nearbyEntity)) {
+                 return true;

@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/ai/sensing/NearestLivingEntitySensor.java
++++ b/net/minecraft/world/entity/ai/sensing/NearestLivingEntitySensor.java
+@@ -11,16 +_,24 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.memory.NearestVisibleLivingEntities;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class NearestLivingEntitySensor<T extends LivingEntity> extends Sensor<T> {
+     @Override
+     protected void doTick(ServerLevel level, T body) {
+         double followRange = body.getAttributeValue(Attributes.FOLLOW_RANGE);
+         AABB boundingBox = body.getBoundingBox().inflate(followRange, followRange, followRange);
+-        List<LivingEntity> livingEntities = level.getEntitiesOfClass(LivingEntity.class, boundingBox, mob -> mob != body && mob.isAlive());
++        boundingBox = RegionizedWorldGuard.restrictToCurrentRegion(level, boundingBox);
++        List<LivingEntity> livingEntities = boundingBox == null
++            ? List.of()
++            : level.getEntitiesOfClass(
++                LivingEntity.class,
++                boundingBox,
++                mob -> mob != body && mob.isAlive() && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, mob) != null
++            );
+         livingEntities.sort(Comparator.comparingDouble(body::distanceToSqr));
+         Brain<?> brain = body.getBrain();
+-        brain.setMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES, livingEntities);
++        brain.setMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES, List.copyOf(livingEntities));
+         brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES, new NearestVisibleLivingEntities(level, body, livingEntities));
+     }
+ 

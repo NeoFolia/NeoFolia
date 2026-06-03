@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/InstrumentItem.java
++++ b/net/minecraft/world/item/InstrumentItem.java
+@@ -14,6 +_,7 @@
+ import net.minecraft.world.item.component.InstrumentComponent;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class InstrumentItem extends Item {
+     public InstrumentItem(Item.Properties properties) {
+@@ -35,7 +_,7 @@
+             player.startUsingItem(hand);
+             play(level, player, instrument);
+             player.getCooldowns().addCooldown(itemStack, Mth.floor(instrument.useDuration() * 20.0F));
+-            player.awardStat(Stats.ITEM_USED.get(this));
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+             return InteractionResult.CONSUME;
+         } else {
+             return InteractionResult.FAIL;

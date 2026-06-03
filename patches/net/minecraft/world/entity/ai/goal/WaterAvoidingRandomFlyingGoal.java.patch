@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/goal/WaterAvoidingRandomFlyingGoal.java
++++ b/net/minecraft/world/entity/ai/goal/WaterAvoidingRandomFlyingGoal.java
+@@ -12,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected @Nullable Vec3 getPosition() {
++    protected synchronized @Nullable Vec3 getPosition() {
+         Vec3 wanderDirection = this.mob.getViewVector(0.0F);
+         int xzDist = 8;
+         Vec3 groundBasedPosition = HoverRandomPos.getPos(this.mob, 8, 7, wanderDirection.x, wanderDirection.z, (float) (Math.PI / 2), 3, 1);

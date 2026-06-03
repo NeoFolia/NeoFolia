@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/level/gameevent/EntityPositionSource.java
++++ b/net/minecraft/world/level/gameevent/EntityPositionSource.java
+@@ -15,6 +_,7 @@
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class EntityPositionSource implements PositionSource {
+     public static final MapCodec<EntityPositionSource> CODEC = RecordCodecBuilder.mapCodec(
+@@ -49,7 +_,9 @@
+             this.resolveEntity(level);
+         }
+ 
+-        return this.entityOrUuidOrId.left().map(entity -> entity.position().add(0.0, this.yOffset, 0.0));
++        return this.entityOrUuidOrId.left()
++            .map(entity -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, entity))
++            .map(entity -> entity.position().add(0.0, this.yOffset, 0.0));
+     }
+ 
+     private void resolveEntity(Level level) {

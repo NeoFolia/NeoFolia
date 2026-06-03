@@ -1,0 +1,87 @@
+--- a/net/minecraft/world/entity/monster/Silverfish.java
++++ b/net/minecraft/world/entity/monster/Silverfish.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.level.block.InfestedBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Silverfish extends Monster {
+@@ -84,7 +_,8 @@
+         if (this.isInvulnerableTo(level, source)) {
+             return false;
+         } else {
+-            if ((source.getEntity() != null || source.is(DamageTypeTags.ALWAYS_TRIGGERS_SILVERFISH)) && this.friendsGoal != null) {
++            Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++            if ((sourceEntity != null || source.is(DamageTypeTags.ALWAYS_TRIGGERS_SILVERFISH)) && this.friendsGoal != null) {
+                 this.friendsGoal.notifyHurt();
+             }
+ 
+@@ -106,7 +_,12 @@
+ 
+     @Override
+     public float getWalkTargetValue(BlockPos pos, LevelReader level) {
+-        return InfestedBlock.isCompatibleHostBlock(level.getBlockState(pos.below())) ? 10.0F : super.getWalkTargetValue(pos, level);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && InfestedBlock.isCompatibleHostBlock(level.getBlockState(below)) ? 10.0F : super.getWalkTargetValue(pos, level);
++    }
++
++    private static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     public static boolean checkSilverfishSpawnRules(
+@@ -133,15 +_,19 @@
+ 
+         @Override
+         public boolean canUse() {
+-            if (this.mob.getTarget() != null) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), this.mob.getTarget()) != null) {
+                 return false;
+             } else if (!this.mob.getNavigation().isDone()) {
+                 return false;
+             } else {
+                 RandomSource random = this.mob.getRandom();
+-                if (getServerLevel(this.mob).getGameRules().get(GameRules.MOB_GRIEFING) && random.nextInt(reducedTickDelay(10)) == 0) {
++                if (net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(this.mob.level()), this.mob) && random.nextInt(reducedTickDelay(10)) == 0) {
+                     this.selectedDirection = Direction.getRandom(random);
+                     BlockPos pos = BlockPos.containing(this.mob.getX(), this.mob.getY() + 0.5, this.mob.getZ()).relative(this.selectedDirection);
++                    if (!Silverfish.canReadBlock(this.mob.level(), pos)) {
++                        return false;
++                    }
++
+                     BlockState blockState = this.mob.level().getBlockState(pos);
+                     if (InfestedBlock.isCompatibleHostBlock(blockState)) {
+                         this.doMerge = true;
+@@ -166,6 +_,10 @@
+             } else {
+                 LevelAccessor level = this.mob.level();
+                 BlockPos pos = BlockPos.containing(this.mob.getX(), this.mob.getY() + 0.5, this.mob.getZ()).relative(this.selectedDirection);
++                if (!Silverfish.canReadBlock(level, pos)) {
++                    return;
++                }
++
+                 BlockState blockState = level.getBlockState(pos);
+                 if (InfestedBlock.isCompatibleHostBlock(blockState)) {
+                     level.setBlock(pos, InfestedBlock.infestedStateByHost(blockState), 3);
+@@ -207,13 +_,17 @@
+                     for (int xOff = 0; xOff <= 10 && xOff >= -10; xOff = (xOff <= 0 ? 1 : 0) - xOff) {
+                         for (int zOff = 0; zOff <= 10 && zOff >= -10; zOff = (zOff <= 0 ? 1 : 0) - zOff) {
+                             BlockPos testPos = basePos.offset(xOff, yOff, zOff);
++                            if (!Silverfish.canReadBlock(level, testPos)) {
++                                continue;
++                            }
++
+                             BlockState blockState = level.getBlockState(testPos);
+                             Block block = blockState.getBlock();
+                             if (block instanceof InfestedBlock) {
+-                                if (getServerLevel(level).getGameRules().get(GameRules.MOB_GRIEFING)) {
++                                if (net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(level), this.silverfish)) {
+                                     level.destroyBlock(testPos, true, this.silverfish);
+                                 } else {
+-                                    level.setBlock(testPos, ((InfestedBlock)block).hostStateByInfested(level.getBlockState(testPos)), 3);
++                                    level.setBlock(testPos, ((InfestedBlock)block).hostStateByInfested(blockState), 3);
+                                 }
+ 
+                                 if (random.nextBoolean()) {

@@ -1,0 +1,315 @@
+--- a/net/minecraft/world/entity/ai/village/poi/PoiManager.java
++++ b/net/minecraft/world/entity/ai/village/poi/PoiManager.java
+@@ -30,6 +_,7 @@
+ import net.minecraft.util.datafix.DataFixTypes;
+ import net.minecraft.util.debug.DebugPoiInfo;
+ import net.minecraft.world.level.ChunkPos;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelHeightAccessor;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.block.state.BlockState;
+@@ -39,6 +_,9 @@
+ import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+ import net.minecraft.world.level.chunk.storage.SectionStorage;
+ import net.minecraft.world.level.chunk.storage.SimpleRegionStorage;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
+@@ -46,6 +_,7 @@
+     public static final int VILLAGE_SECTION_SIZE = 1;
+     private final PoiManager.DistanceTracker distanceTracker;
+     private final LongSet loadedChunks = new LongOpenHashSet();
++    private final ResourceKey<Level> dimension;
+ 
+     public PoiManager(
+         RegionStorageInfo info,
+@@ -67,75 +_,109 @@
+             levelHeightAccessor
+         );
+         this.distanceTracker = new PoiManager.DistanceTracker();
+-    }
+-
+-    public @Nullable PoiRecord add(BlockPos pos, Holder<PoiType> type) {
++        this.dimension = info.dimension();
++    }
++
++    private boolean isVisibleToCurrentRegion(ChunkPos chunkPos) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return true;
++        }
++
++        RegionKey expected = RegionKey.fromChunk(this.dimension, chunkPos.x(), chunkPos.z(), RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT);
++        return RegionizedTickContext.currentRegion().map(expected::equals).orElse(false);
++    }
++
++    private boolean isVisibleToCurrentRegion(SectionPos sectionPos) {
++        return this.isVisibleToCurrentRegion(sectionPos.chunk());
++    }
++
++    private boolean isVisibleToCurrentRegion(BlockPos pos) {
++        return this.isVisibleToCurrentRegion(ChunkPos.containing(pos));
++    }
++
++    public synchronized @Nullable PoiRecord add(BlockPos pos, Holder<PoiType> type) {
+         return this.getOrCreate(SectionPos.asLong(pos)).add(pos, type);
+     }
+ 
+-    public void remove(BlockPos pos) {
++    public synchronized void remove(BlockPos pos) {
+         this.getOrLoad(SectionPos.asLong(pos)).ifPresent(poiSection -> poiSection.remove(pos));
+     }
+ 
+-    public long getCountInRange(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
++    public synchronized long getCountInRange(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
+         return this.getInRange(predicate, center, radius, occupancy).count();
+     }
+ 
+-    public boolean existsAtPosition(ResourceKey<PoiType> poiType, BlockPos blockPos) {
++    public synchronized boolean existsAtPosition(ResourceKey<PoiType> poiType, BlockPos blockPos) {
+         return this.exists(blockPos, p -> p.is(poiType));
+     }
+ 
+-    public Stream<PoiRecord> getInSquare(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
++    public synchronized Stream<PoiRecord> getInSquare(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
+         int chunkRadius = Math.floorDiv(radius, 16) + 1;
+-        return ChunkPos.rangeClosed(ChunkPos.containing(center), chunkRadius).flatMap(pos -> this.getInChunk(predicate, pos, occupancy)).filter(record -> {
+-            BlockPos pos = record.getPos();
+-            return Math.abs(pos.getX() - center.getX()) <= radius && Math.abs(pos.getZ() - center.getZ()) <= radius;
+-        });
++        return ChunkPos.rangeClosed(ChunkPos.containing(center), chunkRadius)
++            .flatMap(pos -> this.getInChunk(predicate, pos, occupancy))
++            .filter(record -> {
++                BlockPos pos = record.getPos();
++                return Math.abs(pos.getX() - center.getX()) <= radius && Math.abs(pos.getZ() - center.getZ()) <= radius;
++            })
++            .toList()
++            .stream();
+     }
+ 
+-    public Stream<PoiRecord> getInRange(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
++    public synchronized Stream<PoiRecord> getInRange(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
+         int radiusSqr = radius * radius;
+-        return this.getInSquare(predicate, center, radius, occupancy).filter(r -> r.getPos().distSqr(center) <= radiusSqr);
++        return this.getInSquare(predicate, center, radius, occupancy).filter(r -> r.getPos().distSqr(center) <= radiusSqr).toList().stream();
+     }
+ 
+     @VisibleForDebug
+-    public Stream<PoiRecord> getInChunk(Predicate<Holder<PoiType>> predicate, ChunkPos chunkPos, PoiManager.Occupancy occupancy) {
++    public synchronized Stream<PoiRecord> getInChunk(Predicate<Holder<PoiType>> predicate, ChunkPos chunkPos, PoiManager.Occupancy occupancy) {
++        if (!this.isVisibleToCurrentRegion(chunkPos)) {
++            return Stream.empty();
++        }
++
+         return IntStream.rangeClosed(this.levelHeightAccessor.getMinSectionY(), this.levelHeightAccessor.getMaxSectionY())
+             .boxed()
+             .map(sectionY -> this.getOrLoad(SectionPos.of(chunkPos, sectionY).asLong()))
+-            .filter(Optional::isPresent)
+-            .flatMap(poiSection -> poiSection.get().getRecords(predicate, occupancy));
+-    }
+-
+-    public Stream<BlockPos> findAll(
+-        Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
+-    ) {
+-        return this.getInRange(predicate, center, radius, occupancy).map(PoiRecord::getPos).filter(filter);
+-    }
+-
+-    public Stream<Pair<Holder<PoiType>, BlockPos>> findAllWithType(
+-        Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
+-    ) {
+-        return this.getInRange(predicate, center, radius, occupancy).filter(p -> filter.test(p.getPos())).map(p -> Pair.of(p.getPoiType(), p.getPos()));
+-    }
+-
+-    public Stream<Pair<Holder<PoiType>, BlockPos>> findAllClosestFirstWithType(
+-        Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
+-    ) {
+-        return this.findAllWithType(predicate, filter, center, radius, occupancy).sorted(Comparator.comparingDouble(p -> p.getSecond().distSqr(center)));
+-    }
+-
+-    public Optional<BlockPos> find(
++            .flatMap(poiSection -> poiSection.map(section -> section.getRecords(predicate, occupancy)).orElseGet(Stream::empty))
++            .toList()
++            .stream();
++    }
++
++    public synchronized Stream<BlockPos> findAll(
++        Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
++    ) {
++        return this.getInRange(predicate, center, radius, occupancy).map(PoiRecord::getPos).filter(filter).toList().stream();
++    }
++
++    public synchronized Stream<Pair<Holder<PoiType>, BlockPos>> findAllWithType(
++        Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
++    ) {
++        return this.getInRange(predicate, center, radius, occupancy)
++            .filter(p -> filter.test(p.getPos()))
++            .map(p -> Pair.of(p.getPoiType(), p.getPos()))
++            .toList()
++            .stream();
++    }
++
++    public synchronized Stream<Pair<Holder<PoiType>, BlockPos>> findAllClosestFirstWithType(
++        Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
++    ) {
++        return this.findAllWithType(predicate, filter, center, radius, occupancy)
++            .sorted(Comparator.comparingDouble(p -> p.getSecond().distSqr(center)))
++            .toList()
++            .stream();
++    }
++
++    public synchronized Optional<BlockPos> find(
+         Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
+     ) {
+         return this.findAll(predicate, filter, center, radius, occupancy).findFirst();
+     }
+ 
+-    public Optional<BlockPos> findClosest(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
++    public synchronized Optional<BlockPos> findClosest(Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy) {
+         return this.getInRange(predicate, center, radius, occupancy).map(PoiRecord::getPos).min(Comparator.comparingDouble(pos -> pos.distSqr(center)));
+     }
+ 
+-    public Optional<Pair<Holder<PoiType>, BlockPos>> findClosestWithType(
++    public synchronized Optional<Pair<Holder<PoiType>, BlockPos>> findClosestWithType(
+         Predicate<Holder<PoiType>> predicate, BlockPos center, int radius, PoiManager.Occupancy occupancy
+     ) {
+         return this.getInRange(predicate, center, radius, occupancy)
+@@ -143,7 +_,7 @@
+             .map(p -> Pair.of(p.getPoiType(), p.getPos()));
+     }
+ 
+-    public Optional<BlockPos> findClosest(
++    public synchronized Optional<BlockPos> findClosest(
+         Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, BlockPos center, int radius, PoiManager.Occupancy occupancy
+     ) {
+         return this.getInRange(predicate, center, radius, occupancy)
+@@ -152,7 +_,7 @@
+             .min(Comparator.comparingDouble(pos -> pos.distSqr(center)));
+     }
+ 
+-    public Optional<BlockPos> take(Predicate<Holder<PoiType>> predicate, BiPredicate<Holder<PoiType>, BlockPos> filter, BlockPos center, int radius) {
++    public synchronized Optional<BlockPos> take(Predicate<Holder<PoiType>> predicate, BiPredicate<Holder<PoiType>, BlockPos> filter, BlockPos center, int radius) {
+         return this.getInRange(predicate, center, radius, PoiManager.Occupancy.HAS_SPACE)
+             .filter(poi -> filter.test(poi.getPoiType(), poi.getPos()))
+             .findFirst()
+@@ -162,38 +_,58 @@
+             });
+     }
+ 
+-    public Optional<BlockPos> getRandom(
++    public synchronized Optional<BlockPos> getRandom(
+         Predicate<Holder<PoiType>> predicate, Predicate<BlockPos> filter, PoiManager.Occupancy occupancy, BlockPos center, int radius, RandomSource random
+     ) {
+         List<PoiRecord> collect = Util.toShuffledList(this.getInRange(predicate, center, radius, occupancy), random);
+         return collect.stream().filter(poi -> filter.test(poi.getPos())).findFirst().map(PoiRecord::getPos);
+     }
+ 
+-    public boolean release(BlockPos pos) {
++    public synchronized boolean release(BlockPos pos) {
++        if (!this.isVisibleToCurrentRegion(pos)) {
++            return false;
++        }
++
+         return this.getOrLoad(SectionPos.asLong(pos))
+             .map(section -> section.release(pos))
+             .orElseThrow(() -> Util.pauseInIde(new IllegalStateException("POI never registered at " + pos)));
+     }
+ 
+-    public boolean exists(BlockPos pos, Predicate<Holder<PoiType>> predicate) {
++    public synchronized boolean exists(BlockPos pos, Predicate<Holder<PoiType>> predicate) {
++        if (!this.isVisibleToCurrentRegion(pos)) {
++            return false;
++        }
++
+         return this.getOrLoad(SectionPos.asLong(pos)).map(s -> s.exists(pos, predicate)).orElse(false);
+     }
+ 
+-    public Optional<Holder<PoiType>> getType(BlockPos pos) {
++    public synchronized Optional<Holder<PoiType>> getType(BlockPos pos) {
++        if (!this.isVisibleToCurrentRegion(pos)) {
++            return Optional.empty();
++        }
++
+         return this.getOrLoad(SectionPos.asLong(pos)).flatMap(section -> section.getType(pos));
+     }
+ 
+     @VisibleForDebug
+-    public @Nullable DebugPoiInfo getDebugPoiInfo(BlockPos pos) {
++    public synchronized @Nullable DebugPoiInfo getDebugPoiInfo(BlockPos pos) {
++        if (!this.isVisibleToCurrentRegion(pos)) {
++            return null;
++        }
++
+         return this.getOrLoad(SectionPos.asLong(pos)).flatMap(section -> section.getDebugPoiInfo(pos)).orElse(null);
+     }
+ 
+-    public int sectionsToVillage(SectionPos sectionPos) {
++    public synchronized int sectionsToVillage(SectionPos sectionPos) {
++        if (!this.isVisibleToCurrentRegion(sectionPos)) {
++            return MAX_VILLAGE_DISTANCE + 1;
++        }
++
+         this.distanceTracker.runAllUpdates();
+         return this.distanceTracker.getLevel(sectionPos.asLong());
+     }
+ 
+-    private boolean isVillageCenter(long sectionPos) {
++    private synchronized boolean isVillageCenter(long sectionPos) {
+         Optional<PoiSection> section = this.get(sectionPos);
+         return section == null
+             ? false
+@@ -201,23 +_,23 @@
+     }
+ 
+     @Override
+-    public void tick(BooleanSupplier haveTime) {
++    public synchronized void tick(BooleanSupplier haveTime) {
+         super.tick(haveTime);
+         this.distanceTracker.runAllUpdates();
+     }
+ 
+     @Override
+-    protected void setDirty(long sectionPos) {
++    protected synchronized void setDirty(long sectionPos) {
+         super.setDirty(sectionPos);
+         this.distanceTracker.update(sectionPos, this.distanceTracker.getLevelFromSource(sectionPos), false);
+     }
+ 
+     @Override
+-    protected void onSectionLoad(long sectionPos) {
++    protected synchronized void onSectionLoad(long sectionPos) {
+         this.distanceTracker.update(sectionPos, this.distanceTracker.getLevelFromSource(sectionPos), false);
+     }
+ 
+-    public void checkConsistencyWithBlocks(SectionPos sectionPos, LevelChunkSection blockSection) {
++    public synchronized void checkConsistencyWithBlocks(SectionPos sectionPos, LevelChunkSection blockSection) {
+         Util.ifElse(this.getOrLoad(sectionPos.asLong()), section -> section.refresh(output -> {
+             if (mayHavePoi(blockSection)) {
+                 this.updateFromSection(blockSection, sectionPos, output);
+@@ -234,7 +_,7 @@
+         return blockSection.maybeHas(PoiTypes::hasPoi);
+     }
+ 
+-    private void updateFromSection(LevelChunkSection blockSection, SectionPos pos, BiConsumer<BlockPos, Holder<PoiType>> output) {
++    private synchronized void updateFromSection(LevelChunkSection blockSection, SectionPos pos, BiConsumer<BlockPos, Holder<PoiType>> output) {
+         pos.blocksInside()
+             .forEach(
+                 blockPos -> {
+@@ -246,13 +_,15 @@
+             );
+     }
+ 
+-    public void ensureLoadedAndValid(LevelReader reader, BlockPos center, int radius) {
++    public synchronized void ensureLoadedAndValid(LevelReader reader, BlockPos center, int radius) {
+         SectionPos.aroundChunk(
+                 ChunkPos.containing(center), Math.floorDiv(radius, 16), this.levelHeightAccessor.getMinSectionY(), this.levelHeightAccessor.getMaxSectionY()
+             )
+             .map(pos -> Pair.of(pos, this.getOrLoad(pos.asLong())))
+             .filter(poiSection -> !poiSection.getSecond().map(PoiSection::isValid).orElse(false))
+             .map(p -> p.getFirst().chunk())
++            .filter(this::isVisibleToCurrentRegion)
++            .filter(pos -> !(reader instanceof Level level) || RegionizedWorldGuard.shouldLoadChunk(level, pos.x(), pos.z()))
+             .filter(pos -> this.loadedChunks.add(pos.pack()))
+             .forEach(pos -> reader.getChunk(pos.x(), pos.z(), ChunkStatus.EMPTY));
+     }

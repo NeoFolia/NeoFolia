@@ -1,0 +1,112 @@
+--- a/net/minecraft/world/level/block/entity/CreakingHeartBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/CreakingHeartBlockEntity.java
+@@ -35,6 +_,8 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.mutable.Mutable;
+ import org.apache.commons.lang3.mutable.MutableObject;
+ import org.jspecify.annotations.Nullable;
+@@ -96,7 +_,7 @@
+             }
+ 
+             if (entity.ticker-- < 0) {
+-                entity.ticker = entity.level == null ? 20 : entity.level.getRandom().nextInt(5) + 20;
++                entity.ticker = creakingRandom(serverLevel).nextInt(5) + 20;
+                 BlockState updatedState = updateCreakingState(level, state, pos, entity);
+                 if (updatedState != state) {
+                     level.setBlock(pos, updatedState, 3);
+@@ -170,7 +_,11 @@
+             return NO_CREAKING;
+         } else {
+             if (this.creakingInfo.left().isPresent()) {
+-                Creaking creaking = this.creakingInfo.left().get();
++                Creaking creaking = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, this.creakingInfo.left().get());
++                if (creaking == null) {
++                    return NO_CREAKING;
++                }
++
+                 if (!creaking.isRemoved()) {
+                     return Optional.of(creaking);
+                 }
+@@ -180,7 +_,12 @@
+ 
+             if (this.level instanceof ServerLevel serverLevel && this.creakingInfo.right().isPresent()) {
+                 UUID uuid = this.creakingInfo.right().get();
+-                if (serverLevel.getEntity(uuid) instanceof Creaking resolvedCreaking) {
++                if (serverLevel.getEntities().get(uuid) instanceof Creaking resolvedCreaking) {
++                    resolvedCreaking = RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, resolvedCreaking);
++                    if (resolvedCreaking == null) {
++                        return NO_CREAKING;
++                    }
++
+                     this.setCreakingInfo(resolvedCreaking);
+                     return Optional.of(resolvedCreaking);
+                 } else {
+@@ -227,7 +_,7 @@
+                 if (this.emitter <= 0) {
+                     this.emitParticles(serverLevel, 20, false);
+                     if (this.getBlockState().getValue(CreakingHeartBlock.STATE) == CreakingHeartState.AWAKE) {
+-                        int numberOfClumps = this.level.getRandom().nextIntBetweenInclusive(2, 3);
++                        int numberOfClumps = creakingRandom(serverLevel).nextIntBetweenInclusive(2, 3);
+ 
+                         for (int i = 0; i < numberOfClumps; i++) {
+                             this.spreadResin(serverLevel).ifPresent(blockPos -> {
+@@ -245,21 +_,25 @@
+     }
+ 
+     private Optional<BlockPos> spreadResin(ServerLevel level) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = creakingRandom(level);
+         Mutable<BlockPos> placedResin = new MutableObject<>(null);
+         BlockPos.breadthFirstTraversal(this.worldPosition, 2, 64, (pos, acceptor) -> {
+             for (Direction dir : Util.shuffledCopy(Direction.values(), random)) {
+                 BlockPos neighbourPos = pos.relative(dir);
+-                if (level.getBlockState(neighbourPos).is(BlockTags.PALE_OAK_LOGS)) {
++                if (canReadBlock(level, neighbourPos) && level.getBlockState(neighbourPos).is(BlockTags.PALE_OAK_LOGS)) {
+                     acceptor.accept(neighbourPos);
+                 }
+             }
+         }, pos -> {
+-            if (!level.getBlockState(pos).is(BlockTags.PALE_OAK_LOGS)) {
++            if (!canReadBlock(level, pos) || !level.getBlockState(pos).is(BlockTags.PALE_OAK_LOGS)) {
+                 return BlockPos.TraversalNodeStatus.ACCEPT;
+             } else {
+                 for (Direction dir : Util.shuffledCopy(Direction.values(), random)) {
+                     BlockPos neightbourPos = pos.relative(dir);
++                    if (!canReadBlock(level, neightbourPos)) {
++                        continue;
++                    }
++
+                     BlockState neighbourState = level.getBlockState(neightbourPos);
+                     Direction opposite = dir.getOpposite();
+                     if (neighbourState.isAir()) {
+@@ -281,10 +_,14 @@
+         return Optional.ofNullable(placedResin.get());
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private void emitParticles(ServerLevel serverLevel, int count, boolean towardsCreaking) {
+         if (this.getCreakingProtector().orElse(null) instanceof Creaking creaking) {
+             int color = towardsCreaking ? 16545810 : 6250335;
+-            RandomSource random = serverLevel.getRandom();
++            RandomSource random = creakingRandom(serverLevel);
+ 
+             for (double i = 0.0; i < count; i++) {
+                 AABB box = creaking.getBoundingBox();
+@@ -301,6 +_,10 @@
+                 serverLevel.sendParticles(particleOption, true, true, source.x, source.y, source.z, 1, 0.0, 0.0, 0.0, 0.0);
+             }
+         }
++    }
++
++    private static RandomSource creakingRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
+     }
+ 
+     @Override

@@ -1,0 +1,76 @@
+--- a/net/minecraft/world/item/FlintAndSteelItem.java
++++ b/net/minecraft/world/item/FlintAndSteelItem.java
+@@ -2,9 +_,11 @@
+ 
+ import net.minecraft.advancements.CriteriaTriggers;
+ import net.minecraft.core.BlockPos;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.context.UseOnContext;
+@@ -16,6 +_,8 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class FlintAndSteelItem extends Item {
+     public FlintAndSteelItem(Item.Properties properties) {
+@@ -28,16 +_,20 @@
+         Level level = context.getLevel();
+         BlockPos pos = context.getClickedPos();
+         BlockState state = level.getBlockState(pos);
+-        if (!CampfireBlock.canLight(state) && !CandleBlock.canLight(state) && !CandleCakeBlock.canLight(state)) {
++        BlockState blockstate2 = state.getToolModifiedState(context, net.neoforged.neoforge.common.ItemAbilities.FIRESTARTER_LIGHT, false);
++        if (blockstate2 == null) {
+             BlockPos relativePos = pos.relative(context.getClickedFace());
+             if (BaseFireBlock.canBePlacedAt(level, relativePos, context.getHorizontalDirection())) {
+-                level.playSound(player, relativePos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, level.getRandom().nextFloat() * 0.4F + 0.8F);
++                level.playSound(player, relativePos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, flintRandom(player, level).nextFloat() * 0.4F + 0.8F);
+                 BlockState fireState = BaseFireBlock.getState(level, relativePos);
+                 level.setBlock(relativePos, fireState, 11);
+                 level.gameEvent(player, GameEvent.BLOCK_PLACE, pos);
+                 ItemStack itemStack = context.getItemInHand();
+-                if (player instanceof ServerPlayer) {
+-                    CriteriaTriggers.PLACED_BLOCK.trigger((ServerPlayer)player, relativePos, itemStack);
++                if (player instanceof ServerPlayer serverPlayer) {
++                    ItemStack itemSnapshot = itemStack.copy();
++                    RegionizedWorldGuard.executeOnPlayerRegion(
++                        serverPlayer, () -> CriteriaTriggers.PLACED_BLOCK.trigger(serverPlayer, relativePos, itemSnapshot)
++                    );
+                     itemStack.hurtAndBreak(1, player, context.getHand().asEquipmentSlot());
+                 }
+ 
+@@ -46,8 +_,8 @@
+                 return InteractionResult.FAIL;
+             }
+         } else {
+-            level.playSound(player, pos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, level.getRandom().nextFloat() * 0.4F + 0.8F);
+-            level.setBlock(pos, state.setValue(BlockStateProperties.LIT, true), 11);
++            level.playSound(player, pos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, flintRandom(player, level).nextFloat() * 0.4F + 0.8F);
++            level.setBlock(pos, blockstate2, 11);
+             level.gameEvent(player, GameEvent.BLOCK_CHANGE, pos);
+             if (player != null) {
+                 context.getItemInHand().hurtAndBreak(1, player, context.getHand().asEquipmentSlot());
+@@ -55,5 +_,16 @@
+ 
+             return InteractionResult.SUCCESS;
+         }
++    }
++
++    private static RandomSource flintRandom(Player player, Level level) {
++        return player != null
++            ? player.getRandom()
++            : level instanceof ServerLevel serverLevel ? RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()) : level.getRandom();
++    }
++
++    @Override
++    public boolean canPerformAction(ItemInstance stack, net.neoforged.neoforge.common.ItemAbility itemAbility) {
++        return net.neoforged.neoforge.common.ItemAbilities.DEFAULT_FLINT_ACTIONS.contains(itemAbility);
+     }
+ }

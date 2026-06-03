@@ -1,0 +1,19 @@
+--- a/net/minecraft/gametest/framework/ReportGameListener.java
++++ b/net/minecraft/gametest/framework/ReportGameListener.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.util.Util;
+ import net.minecraft.world.level.block.entity.BlockEntityType;
+ import net.minecraft.world.level.block.entity.TestInstanceBlockEntity;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.exception.ExceptionUtils;
+ 
+ class ReportGameListener implements GameTestListener {
+@@ -135,6 +_,7 @@
+     }
+ 
+     protected static void say(ServerLevel level, ChatFormatting format, String text) {
+-        level.getPlayers(player -> true).forEach(player -> player.sendSystemMessage(Component.literal(text).withStyle(format)));
++        Component message = Component.literal(text).withStyle(format);
++        level.getPlayers(player -> true).forEach(player -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> player.sendSystemMessage(message)));
+     }
+ }

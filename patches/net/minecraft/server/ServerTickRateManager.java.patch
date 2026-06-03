@@ -1,0 +1,98 @@
+--- a/net/minecraft/server/ServerTickRateManager.java
++++ b/net/minecraft/server/ServerTickRateManager.java
+@@ -7,6 +_,8 @@
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.TimeUtil;
+ import net.minecraft.world.TickRateManager;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ServerTickRateManager extends TickRateManager {
+     private long remainingSprintTicks = 0L;
+@@ -26,6 +_,10 @@
+ 
+     @Override
+     public void setFrozen(boolean frozen) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setFrozen(frozen))) {
++            return;
++        }
++
+         super.setFrozen(frozen);
+         this.updateStateToClients();
+     }
+@@ -39,6 +_,10 @@
+     }
+ 
+     public boolean stepGameIfPaused(int ticks) {
++        if (this.scheduleGlobalIfRegionized(() -> this.stepGameIfPaused(ticks))) {
++            return this.isFrozen();
++        }
++
+         if (!this.isFrozen()) {
+             return false;
+         } else {
+@@ -49,6 +_,10 @@
+     }
+ 
+     public boolean stopStepping() {
++        if (this.scheduleGlobalIfRegionized(this::stopStepping)) {
++            return this.frozenTicksToRun > 0;
++        }
++
+         if (this.frozenTicksToRun > 0) {
+             this.frozenTicksToRun = 0;
+             this.updateStepTicks();
+@@ -59,6 +_,10 @@
+     }
+ 
+     public boolean stopSprinting() {
++        if (this.scheduleGlobalIfRegionized(this::stopSprinting)) {
++            return this.remainingSprintTicks > 0L;
++        }
++
+         if (this.remainingSprintTicks > 0L) {
+             this.finishTickSprint();
+             return true;
+@@ -68,6 +_,10 @@
+     }
+ 
+     public boolean requestGameToSprint(int time) {
++        if (this.scheduleGlobalIfRegionized(() -> this.requestGameToSprint(time))) {
++            return this.remainingSprintTicks > 0L;
++        }
++
+         boolean interrupted = this.remainingSprintTicks > 0L;
+         this.sprintTimeSpend = 0L;
+         this.scheduledCurrentSprintTicks = time;
+@@ -113,13 +_,29 @@
+ 
+     @Override
+     public void setTickRate(float rate) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setTickRate(rate))) {
++            return;
++        }
++
+         super.setTickRate(rate);
+         this.server.onTickRateChanged();
+         this.updateStateToClients();
+     }
+ 
+     public void updateJoiningPlayer(ServerPlayer player) {
+-        player.connection.send(ClientboundTickingStatePacket.from(this));
+-        player.connection.send(ClientboundTickingStepPacket.from(this));
++        RegionizedWorldGuard.sendToPlayer(player, ClientboundTickingStatePacket.from(this));
++        RegionizedWorldGuard.sendToPlayer(player, ClientboundTickingStepPacket.from(this));
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate tick rate state from region worker while region dispatcher is not running");
+     }
+ }

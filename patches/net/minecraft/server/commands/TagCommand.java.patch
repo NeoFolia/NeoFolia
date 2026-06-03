@@ -1,0 +1,172 @@
+--- a/net/minecraft/server/commands/TagCommand.java
++++ b/net/minecraft/server/commands/TagCommand.java
+@@ -3,6 +_,7 @@
+ import com.google.common.collect.Sets;
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.StringArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.Collection;
+@@ -29,40 +_,52 @@
+                             Commands.literal("add")
+                                 .then(
+                                     Commands.argument("name", StringArgumentType.word())
+-                                        .executes(c -> addTag(c.getSource(), EntityArgument.getEntities(c, "targets"), StringArgumentType.getString(c, "name")))
++                                        .executes(TagCommand::addTag)
+                                 )
+                         )
+                         .then(
+                             Commands.literal("remove")
+                                 .then(
+                                     Commands.argument("name", StringArgumentType.word())
+-                                        .suggests((c, p) -> SharedSuggestionProvider.suggest(getTags(EntityArgument.getEntities(c, "targets")), p))
+-                                        .executes(
+-                                            c -> removeTag(c.getSource(), EntityArgument.getEntities(c, "targets"), StringArgumentType.getString(c, "name"))
+-                                        )
++                                        .suggests((c, p) -> SharedSuggestionProvider.suggest(getTags(c.getSource(), EntityArgument.getEntities(c, "targets")), p))
++                                        .executes(TagCommand::removeTag)
+                                 )
+                         )
+-                        .then(Commands.literal("list").executes(c -> listTags(c.getSource(), EntityArgument.getEntities(c, "targets"))))
++                        .then(Commands.literal("list").executes(TagCommand::listTags))
+                 )
+         );
+     }
+ 
+-    private static Collection<String> getTags(Collection<? extends Entity> entities) {
++    private static Collection<String> getTags(CommandSourceStack source, Collection<? extends Entity> entities) {
+         Set<String> result = Sets.newHashSet();
+ 
+         for (Entity entity : entities) {
+-            result.addAll(entity.entityTags());
++            result.addAll(RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> Set.copyOf(entity.entityTags())));
+         }
+ 
+         return result;
+     }
+ 
++    private static int addTag(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> addTag(context))) {
++            return 0;
++        }
++
++        return addTag(source, EntityArgument.getEntities(context, "targets"), StringArgumentType.getString(context, "name"));
++    }
++
+     private static int addTag(CommandSourceStack source, Collection<? extends Entity> targets, String name) throws CommandSyntaxException {
+         int count = 0;
++        Component singleTargetName = null;
+ 
+         for (Entity entity : targets) {
+-            if (entity.addTag(name)) {
++            TagResult result = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> new TagResult(entity.addTag(name), entity.getDisplayName()));
++            if (result.success()) {
+                 count++;
++            }
++            if (targets.size() == 1) {
++                singleTargetName = result.targetName();
+             }
+         }
+ 
+@@ -70,7 +_,8 @@
+             throw ERROR_ADD_FAILED.create();
+         } else {
+             if (targets.size() == 1) {
+-                source.sendSuccess(() -> Component.translatable("commands.tag.add.success.single", name, targets.iterator().next().getDisplayName()), true);
++                Component targetName = singleTargetName;
++                source.sendSuccess(() -> Component.translatable("commands.tag.add.success.single", name, targetName), true);
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.tag.add.success.multiple", name, targets.size()), true);
+             }
+@@ -79,12 +_,26 @@
+         }
+     }
+ 
++    private static int removeTag(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> removeTag(context))) {
++            return 0;
++        }
++
++        return removeTag(source, EntityArgument.getEntities(context, "targets"), StringArgumentType.getString(context, "name"));
++    }
++
+     private static int removeTag(CommandSourceStack source, Collection<? extends Entity> targets, String name) throws CommandSyntaxException {
+         int count = 0;
++        Component singleTargetName = null;
+ 
+         for (Entity entity : targets) {
+-            if (entity.removeTag(name)) {
++            TagResult result = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> new TagResult(entity.removeTag(name), entity.getDisplayName()));
++            if (result.success()) {
+                 count++;
++            }
++            if (targets.size() == 1) {
++                singleTargetName = result.targetName();
+             }
+         }
+ 
+@@ -92,7 +_,8 @@
+             throw ERROR_REMOVE_FAILED.create();
+         } else {
+             if (targets.size() == 1) {
+-                source.sendSuccess(() -> Component.translatable("commands.tag.remove.success.single", name, targets.iterator().next().getDisplayName()), true);
++                Component targetName = singleTargetName;
++                source.sendSuccess(() -> Component.translatable("commands.tag.remove.success.single", name, targetName), true);
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.tag.remove.success.multiple", name, targets.size()), true);
+             }
+@@ -101,20 +_,35 @@
+         }
+     }
+ 
++    private static int listTags(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> listTags(context))) {
++            return 0;
++        }
++
++        return listTags(source, EntityArgument.getEntities(context, "targets"));
++    }
++
+     private static int listTags(CommandSourceStack source, Collection<? extends Entity> targets) {
+         Set<String> tags = Sets.newHashSet();
++        Component singleTargetName = null;
+ 
+         for (Entity entity : targets) {
+-            tags.addAll(entity.entityTags());
++            TagListResult result = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> new TagListResult(Set.copyOf(entity.entityTags()), entity.getDisplayName()));
++            tags.addAll(result.tags());
++            if (targets.size() == 1) {
++                singleTargetName = result.targetName();
++            }
+         }
+ 
+         if (targets.size() == 1) {
+-            Entity entity = targets.iterator().next();
+             if (tags.isEmpty()) {
+-                source.sendSuccess(() -> Component.translatable("commands.tag.list.single.empty", entity.getDisplayName()), false);
++                Component targetName = singleTargetName;
++                source.sendSuccess(() -> Component.translatable("commands.tag.list.single.empty", targetName), false);
+             } else {
++                Component targetName = singleTargetName;
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.tag.list.single.success", entity.getDisplayName(), tags.size(), ComponentUtils.formatList(tags)),
++                    () -> Component.translatable("commands.tag.list.single.success", targetName, tags.size(), ComponentUtils.formatList(tags)),
+                     false
+                 );
+             }
+@@ -127,5 +_,11 @@
+         }
+ 
+         return tags.size();
++    }
++
++    private record TagResult(boolean success, Component targetName) {
++    }
++
++    private record TagListResult(Collection<String> tags, Component targetName) {
+     }
+ }

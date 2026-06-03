@@ -1,0 +1,103 @@
+--- a/net/minecraft/server/chase/ChaseServer.java
++++ b/net/minecraft/server/chase/ChaseServer.java
+@@ -10,12 +_,20 @@
+ import java.nio.charset.StandardCharsets;
+ import java.util.List;
+ import java.util.Locale;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.CompletionException;
+ import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
+ import java.util.stream.Collectors;
++import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.commands.ChaseCommand;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.players.PlayerList;
+ import net.minecraft.util.Util;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.io.IOUtils;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+@@ -124,21 +_,73 @@
+     }
+ 
+     private ChaseServer.@Nullable PlayerPosition getPlayerPosition() {
+-        List<ServerPlayer> players = this.playerList.getPlayers();
++        MinecraftServer server = this.playerList.getServer();
++        if (server.isSameThread()) {
++            return this.getPlayerPositionOnServer();
++        }
++
++        try {
++            if (server.regionizedTaskDispatcher().isRunning()) {
++                ServerPlayer player = waitForChaseFuture("first chase player", server.regionizedTaskDispatcher().submitGlobal(this::getFirstPlayerOnServer));
++                return player == null ? null : this.getPlayerPositionOnOwningRegion(player);
++            }
++
++            return waitForChaseFuture("chase player position", server.submit(this::getPlayerPositionOnServer));
++        } catch (CompletionException ex) {
++            LOGGER.warn("Failed to get chase player position from the server thread", ex);
++            return null;
++        } catch (IllegalStateException ex) {
++            LOGGER.warn("Failed to get chase player position from the server thread", ex);
++            return null;
++        }
++    }
++
++    private @Nullable ServerPlayer getFirstPlayerOnServer() {
++        List<ServerPlayer> players = this.playerList.getAllPlayers();
++        if (players.isEmpty()) {
++            return null;
++        }
++
++        return players.get(0);
++    }
++
++    private ChaseServer.@Nullable PlayerPosition getPlayerPositionOnOwningRegion(ServerPlayer player) {
++        return RegionizedWorldGuard.callOnPlayerRegionAndWait(player, "chase player position", () -> this.getPlayerPosition(player));
++    }
++
++    private ChaseServer.@Nullable PlayerPosition getPlayerPositionOnServer() {
++        List<ServerPlayer> players = this.playerList.getAllPlayers();
+         if (players.isEmpty()) {
+             return null;
+         } else {
+-            ServerPlayer player = players.get(0);
+-            String dimensionName = ChaseCommand.DIMENSION_NAMES.inverse().get(player.level().dimension());
+-            return dimensionName == null
+-                ? null
+-                : new ChaseServer.PlayerPosition(dimensionName, player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot());
++            return this.getPlayerPosition(players.get(0));
+         }
++    }
++
++    private ChaseServer.@Nullable PlayerPosition getPlayerPosition(ServerPlayer player) {
++        String dimensionName = ChaseCommand.DIMENSION_NAMES.inverse().get(player.level().dimension());
++        return dimensionName == null
++            ? null
++            : new ChaseServer.PlayerPosition(dimensionName, player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot());
+     }
+ 
+     private record PlayerPosition(String dimensionName, double x, double y, double z, float yRot, float xRot) {
+         private String format() {
+             return String.format(Locale.ROOT, "t %s %.2f %.2f %.2f %.2f %.2f\n", this.dimensionName, this.x, this.y, this.z, this.yRot, this.xRot);
++        }
++    }
++
++    private static <T> T waitForChaseFuture(String reason, CompletableFuture<T> future) {
++        int timeoutSeconds = RegionizedServerSettings.regionTaskTimeoutSeconds();
++        try {
++            return timeoutSeconds <= 0 ? future.get() : future.get(timeoutSeconds, TimeUnit.SECONDS);
++        } catch (InterruptedException ex) {
++            Thread.currentThread().interrupt();
++            throw new IllegalStateException("Interrupted while waiting for " + reason, ex);
++        } catch (TimeoutException ex) {
++            throw new IllegalStateException("Timed out waiting for " + reason, ex);
++        } catch (ExecutionException ex) {
++            throw new IllegalStateException("Failed while waiting for " + reason, ex.getCause());
+         }
+     }
+ }

@@ -1,0 +1,35 @@
+--- a/net/minecraft/world/entity/ai/goal/target/OwnerHurtByTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/OwnerHurtByTargetGoal.java
+@@ -18,13 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.tameAnimal.isTame() && !this.tameAnimal.isOrderedToSit()) {
+-            LivingEntity owner = this.tameAnimal.getOwner();
++            LivingEntity owner = this.regionSafeTarget(this.tameAnimal.getOwner());
+             if (owner == null) {
+                 return false;
+             } else {
+-                this.ownerLastHurtBy = owner.getLastHurtByMob();
++                this.ownerLastHurtBy = this.regionSafeTarget(owner.getLastHurtByMob());
+                 int ts = owner.getLastHurtByMobTimestamp();
+                 return ts != this.timestamp
+                     && this.canAttack(this.ownerLastHurtBy, TargetingConditions.DEFAULT)
+@@ -36,9 +_,12 @@
+     }
+ 
+     @Override
+-    public void start() {
+-        this.mob.setTarget(this.ownerLastHurtBy);
+-        LivingEntity owner = this.tameAnimal.getOwner();
++    public synchronized void start() {
++        LivingEntity ownerLastHurtBy = this.regionSafeTarget(this.ownerLastHurtBy);
++        if (ownerLastHurtBy != null) {
++            this.mob.setTarget(ownerLastHurtBy);
++        }
++        LivingEntity owner = this.regionSafeTarget(this.tameAnimal.getOwner());
+         if (owner != null) {
+             this.timestamp = owner.getLastHurtByMobTimestamp();
+         }

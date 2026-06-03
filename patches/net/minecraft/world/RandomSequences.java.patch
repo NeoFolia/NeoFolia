@@ -1,0 +1,193 @@
+--- a/net/minecraft/world/RandomSequences.java
++++ b/net/minecraft/world/RandomSequences.java
+@@ -20,7 +_,7 @@
+                 Codec.INT.fieldOf("salt").forGetter(RandomSequences::salt),
+                 Codec.BOOL.optionalFieldOf("include_world_seed", true).forGetter(RandomSequences::includeWorldSeed),
+                 Codec.BOOL.optionalFieldOf("include_sequence_id", true).forGetter(RandomSequences::includeSequenceId),
+-                Codec.unboundedMap(Identifier.CODEC, RandomSequence.CODEC).fieldOf("sequences").forGetter(rs -> rs.sequences)
++                Codec.unboundedMap(Identifier.CODEC, RandomSequence.CODEC).fieldOf("sequences").forGetter(RandomSequences::sequences)
+             )
+             .apply(i, RandomSequences::new)
+     );
+@@ -42,8 +_,15 @@
+         this.sequences.putAll(sequences);
+     }
+ 
+-    public RandomSource get(Identifier key, long worldSeed) {
+-        RandomSource random = this.sequences.computeIfAbsent(key, rl -> this.createSequence(rl, worldSeed)).random();
++    public synchronized RandomSource get(Identifier key, long worldSeed) {
++        RandomSequence sequence = this.sequences.get(key);
++        if (sequence == null) {
++            sequence = this.createSequence(key, worldSeed);
++            this.sequences.put(key, sequence);
++            this.setDirty();
++        }
++
++        RandomSource random = sequence.random();
+         return new RandomSequences.DirtyMarkingRandomSource(random);
+     }
+ 
+@@ -57,41 +_,52 @@
+     }
+ 
+     public void forAllSequences(BiConsumer<Identifier, RandomSequence> consumer) {
+-        this.sequences.forEach(consumer);
++        this.sequences().forEach(consumer);
+     }
+ 
+-    public void setSeedDefaults(int salt, boolean includeWorldSeed, boolean includeSequenceId) {
++    public synchronized void setSeedDefaults(int salt, boolean includeWorldSeed, boolean includeSequenceId) {
+         this.salt = salt;
+         this.includeWorldSeed = includeWorldSeed;
+         this.includeSequenceId = includeSequenceId;
++        this.setDirty();
+     }
+ 
+-    public int clear() {
++    public synchronized int clear() {
+         int count = this.sequences.size();
+         this.sequences.clear();
++        if (count != 0) {
++            this.setDirty();
++        }
++
+         return count;
+     }
+ 
+-    public void reset(Identifier id, long worldSeed) {
++    public synchronized void reset(Identifier id, long worldSeed) {
+         this.sequences.put(id, this.createSequence(id, worldSeed));
++        this.setDirty();
+     }
+ 
+-    public void reset(Identifier id, long worldSeed, int salt, boolean includeWorldSeed, boolean includeSequenceId) {
++    public synchronized void reset(Identifier id, long worldSeed, int salt, boolean includeWorldSeed, boolean includeSequenceId) {
+         this.sequences.put(id, this.createSequence(id, worldSeed, salt, includeWorldSeed, includeSequenceId));
++        this.setDirty();
+     }
+ 
+-    private int salt() {
++    private synchronized int salt() {
+         return this.salt;
+     }
+ 
+-    private boolean includeWorldSeed() {
++    private synchronized boolean includeWorldSeed() {
+         return this.includeWorldSeed;
+     }
+ 
+-    private boolean includeSequenceId() {
++    private synchronized boolean includeSequenceId() {
+         return this.includeSequenceId;
+     }
+ 
++    private synchronized Map<Identifier, RandomSequence> sequences() {
++        return Map.copyOf(this.sequences);
++    }
++
+     private class DirtyMarkingRandomSource implements RandomSource {
+         private final RandomSource random;
+ 
+@@ -103,62 +_,82 @@
+ 
+         @Override
+         public RandomSource fork() {
+-            RandomSequences.this.setDirty();
+-            return this.random.fork();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.fork();
++            }
+         }
+ 
+         @Override
+         public PositionalRandomFactory forkPositional() {
+-            RandomSequences.this.setDirty();
+-            return this.random.forkPositional();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.forkPositional();
++            }
+         }
+ 
+         @Override
+         public void setSeed(long seed) {
+-            RandomSequences.this.setDirty();
+-            this.random.setSeed(seed);
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                this.random.setSeed(seed);
++            }
+         }
+ 
+         @Override
+         public int nextInt() {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextInt();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextInt();
++            }
+         }
+ 
+         @Override
+         public int nextInt(int bound) {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextInt(bound);
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextInt(bound);
++            }
+         }
+ 
+         @Override
+         public long nextLong() {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextLong();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextLong();
++            }
+         }
+ 
+         @Override
+         public boolean nextBoolean() {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextBoolean();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextBoolean();
++            }
+         }
+ 
+         @Override
+         public float nextFloat() {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextFloat();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextFloat();
++            }
+         }
+ 
+         @Override
+         public double nextDouble() {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextDouble();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextDouble();
++            }
+         }
+ 
+         @Override
+         public double nextGaussian() {
+-            RandomSequences.this.setDirty();
+-            return this.random.nextGaussian();
++            synchronized (RandomSequences.this) {
++                RandomSequences.this.setDirty();
++                return this.random.nextGaussian();
++            }
+         }
+ 
+         @Override

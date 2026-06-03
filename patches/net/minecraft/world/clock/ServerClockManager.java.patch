@@ -1,0 +1,273 @@
+--- a/net/minecraft/world/clock/ServerClockManager.java
++++ b/net/minecraft/world/clock/ServerClockManager.java
+@@ -2,6 +_,7 @@
+ 
+ import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
+ import java.util.HashMap;
++import java.util.List;
+ import java.util.Map;
+ import java.util.Map.Entry;
+ import java.util.function.Consumer;
+@@ -19,6 +_,7 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.level.saveddata.SavedData;
+ import net.minecraft.world.level.saveddata.SavedDataType;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.apache.commons.lang3.mutable.MutableBoolean;
+ 
+ public class ServerClockManager extends SavedData implements ClockManager {
+@@ -36,12 +_,12 @@
+         this.packedClockStates = packedClockStates;
+     }
+ 
+-    public void init(MinecraftServer server) {
++    public synchronized void init(MinecraftServer server) {
+         this.server = server;
+         server.registryAccess()
+             .lookupOrThrow(Registries.WORLD_CLOCK)
+             .listElements()
+-            .forEach(definition -> this.clocks.put(definition, new ServerClockManager.ClockInstance()));
++            .forEach(definition -> this.clocks.put(definition, new ServerClockManager.ClockInstance(definition)));
+         server.registryAccess()
+             .lookupOrThrow(Registries.TIMELINE)
+             .listElements()
+@@ -52,23 +_,27 @@
+         });
+     }
+ 
+-    private void registerTimeMarker(ResourceKey<ClockTimeMarker> timeMarkerId, ClockTimeMarker timeMarker) {
++    private synchronized void registerTimeMarker(ResourceKey<ClockTimeMarker> timeMarkerId, ClockTimeMarker timeMarker) {
+         this.getInstance(timeMarker.clock()).timeMarkers.put(timeMarkerId, timeMarker);
+     }
+ 
+-    public PackedClockStates packState() {
++    public synchronized PackedClockStates packState() {
+         return new PackedClockStates(Util.mapValues(this.clocks, ServerClockManager.ClockInstance::packState));
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
++        if (this.server.overworld() == null) {
++            return; // Neo: Our JUnit ephemeral testserver has no overworld and getGlobalGameRules() would crash
++        }
+         boolean advanceTime = this.server.getGlobalGameRules().get(GameRules.ADVANCE_TIME);
++        // Neo: Custom ticking logic to move the advance time check to be per clock rather than global
++        this.clocks.values().forEach(clock -> clock.tick(advanceTime));
+         if (advanceTime) {
+-            this.clocks.values().forEach(ServerClockManager.ClockInstance::tick);
+             this.setDirty();
+         }
+     }
+ 
+-    private ServerClockManager.ClockInstance getInstance(Holder<WorldClock> definition) {
++    private synchronized ServerClockManager.ClockInstance getInstance(Holder<WorldClock> definition) {
+         ServerClockManager.ClockInstance instance = this.clocks.get(definition);
+         if (instance == null) {
+             throw new IllegalStateException("No clock initialized for definition: " + definition);
+@@ -78,6 +_,10 @@
+     }
+ 
+     public void setTotalTicks(Holder<WorldClock> clock, long totalTicks) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setTotalTicks(clock, totalTicks))) {
++            return;
++        }
++
+         this.modifyClock(clock, instance -> {
+             instance.totalTicks = totalTicks;
+             instance.partialTick = 0.0F;
+@@ -85,6 +_,10 @@
+     }
+ 
+     public boolean moveToTimeMarker(Holder<WorldClock> clock, ResourceKey<ClockTimeMarker> timeMarkerId) {
++        if (this.scheduleGlobalIfRegionized(() -> this.moveToTimeMarker(clock, timeMarkerId))) {
++            return true;
++        }
++
+         MutableBoolean set = new MutableBoolean();
+         this.modifyClock(clock, instance -> {
+             ClockTimeMarker timeMarker = instance.timeMarkers.get(timeMarkerId);
+@@ -98,35 +_,101 @@
+     }
+ 
+     public void addTicks(Holder<WorldClock> clock, int ticks) {
++        if (this.scheduleGlobalIfRegionized(() -> this.addTicks(clock, ticks))) {
++            return;
++        }
++
+         this.modifyClock(clock, instance -> instance.totalTicks = Math.max(instance.totalTicks + ticks, 0L));
+     }
+ 
+     public void setPaused(Holder<WorldClock> clock, boolean paused) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setPaused(clock, paused))) {
++            return;
++        }
++
+         this.modifyClock(clock, instance -> instance.paused = paused);
+     }
+ 
++    /**
++     * This allows mods to set the rate at which a specific clock advances relative to game time.
++     * <p>
++     * This can be sped up for shorter days by giving a higher number, or slowed down for longer days
++     * with a smaller number. A negative value will reset it back to vanilla logic.
++     * <p>
++     * This value can also be changed with the command <code>/neoforge day</code>, where you can set
++     * either the speed or a day length in minutes.
++     * <p>
++     * This has no effect when time progression is stopped.
++     * <p>
++     * While this still technically works when vanilla clients are connected, those will desync and
++     * experience a time jump once per second.
++     */
++    @Override
+     public void setRate(Holder<WorldClock> clock, float rate) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setRate(clock, rate))) {
++            return;
++        }
++
+         this.modifyClock(clock, instance -> instance.rate = rate);
+     }
+ 
+-    private void modifyClock(Holder<WorldClock> clock, Consumer<? super ServerClockManager.ClockInstance> action) {
++    private synchronized void modifyClock(Holder<WorldClock> clock, Consumer<? super ServerClockManager.ClockInstance> action) {
+         ServerClockManager.ClockInstance instance = this.getInstance(clock);
+         action.accept(instance);
+         Map<Holder<WorldClock>, ClockNetworkState> updates = Map.of(clock, instance.packNetworkState(this.server));
+         this.server.getPlayerList().broadcastAll(new ClientboundSetTimePacket(this.getGameTime(), updates));
+         this.setDirty();
++        this.invalidateTickCaches();
++    }
++
++    private void invalidateTickCaches() {
++        if (RegionizedTickContext.isRegionThread()) {
++            if (!this.server.regionizedTaskDispatcher().tryExecuteGlobal(this::invalidateTickCaches)) {
++                throw new IllegalStateException("Cannot invalidate clock tick caches from region worker while region dispatcher is not running");
++            }
++            return;
++        }
+ 
+         for (ServerLevel level : this.server.getAllLevels()) {
+             level.environmentAttributes().invalidateTickCache();
+         }
+     }
+ 
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.server == null) {
++            throw new IllegalStateException("Cannot mutate clock state from region worker without a server");
++        }
++
++        if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate clock state from region worker while region dispatcher is not running");
++    }
++
++    /**
++     * Returns the current ratio between game ticks and clock ticks. This value cannot be 0 or negative.
++     * The default is 1.
++     */
++    public synchronized float getRate(Holder<WorldClock> definition) {
++        return getInstance(definition).rate;
++    }
++
+     @Override
+-    public long getTotalTicks(Holder<WorldClock> definition) {
++    public synchronized long getTotalTicks(Holder<WorldClock> definition) {
+         return this.getInstance(definition).totalTicks;
+     }
+ 
+-    public ClientboundSetTimePacket createFullSyncPacket() {
++    @Override
++    public synchronized float getPartialTick(Holder<WorldClock> definition) {
++        return this.getInstance(definition).partialTick;
++    }
++
++    public synchronized ClientboundSetTimePacket createFullSyncPacket() {
+         return new ClientboundSetTimePacket(this.getGameTime(), Util.mapValues(this.clocks, clock -> clock.packNetworkState(this.server)));
+     }
+ 
+@@ -134,14 +_,17 @@
+         return this.server.overworld().getGameTime();
+     }
+ 
+-    public boolean isAtTimeMarker(Holder<WorldClock> clock, ResourceKey<ClockTimeMarker> timeMarkerId) {
++    public synchronized boolean isAtTimeMarker(Holder<WorldClock> clock, ResourceKey<ClockTimeMarker> timeMarkerId) {
+         ServerClockManager.ClockInstance clockInstance = this.getInstance(clock);
+         ClockTimeMarker timeMarker = clockInstance.timeMarkers.get(timeMarkerId);
+         return timeMarker != null && timeMarker.occursAt(clockInstance.totalTicks);
+     }
+ 
+-    public Stream<ResourceKey<ClockTimeMarker>> commandTimeMarkersForClock(Holder<WorldClock> clock) {
+-        return this.getInstance(clock).timeMarkers.entrySet().stream().filter(entry -> entry.getValue().showInCommands()).map(Entry::getKey);
++    public synchronized Stream<ResourceKey<ClockTimeMarker>> commandTimeMarkersForClock(Holder<WorldClock> clock) {
++        return List.copyOf(this.getInstance(clock).timeMarkers.entrySet())
++            .stream()
++            .filter(entry -> entry.getValue().showInCommands())
++            .map(Entry::getKey);
+     }
+ 
+     private static class ClockInstance {
+@@ -150,6 +_,17 @@
+         private float partialTick;
+         private float rate = 1.0F;
+         private boolean paused;
++        private final @org.jspecify.annotations.Nullable Holder<WorldClock> holder;
++
++        public ClockInstance(Holder<WorldClock> holder) {
++            this.holder = holder;
++        }
++
++        /// @deprecated Neo: Use [#ClockInstance(Holder)] instead
++        @Deprecated
++        public ClockInstance() {
++            holder = null;
++        }
+ 
+         public void loadFrom(ClockState state) {
+             this.totalTicks = state.totalTicks();
+@@ -158,8 +_,16 @@
+             this.paused = state.paused();
+         }
+ 
++        /// @deprecated Neo: Use [#tick(boolean)], Passing in if time is advancing
++        @Deprecated
+         public void tick() {
+-            if (!this.paused) {
++            // Neo: Call the new method with the vanilla value
++            // Vanilla calls this inside of 'GameRules.ADVANCE_TIME == true' check
++            this.tick(true);
++        }
++
++        public void tick(boolean advanceTime) {
++            if (this.ticking(advanceTime)) {
+                 this.partialTick = this.partialTick + this.rate;
+                 int fullTicks = Mth.floor(this.partialTick);
+                 this.partialTick -= fullTicks;
+@@ -173,8 +_,21 @@
+ 
+         public ClockNetworkState packNetworkState(MinecraftServer server) {
+             boolean advanceTime = server.getGlobalGameRules().get(GameRules.ADVANCE_TIME);
+-            boolean paused = this.paused || !advanceTime;
++            // Neo: Use the corrected pause value
++            boolean paused = !this.ticking(advanceTime);
+             return new ClockNetworkState(this.totalTicks, this.partialTick, paused ? 0.0F : this.rate);
++        }
++
++        private boolean ticking(boolean advanceTime) {
++            if (this.paused && !this.hasTag(net.neoforged.neoforge.common.Tags.WorldClocks.IGNORES_PAUSE_COMMAND)) {
++                return false;
++            }
++
++            return advanceTime || this.hasTag(net.neoforged.neoforge.common.Tags.WorldClocks.IGNORES_ADVANCE_TIME_RULE);
++        }
++
++        private boolean hasTag(net.minecraft.tags.TagKey<WorldClock> tag) {
++            return this.holder != null && this.holder.is(tag);
+         }
+     }
+ }

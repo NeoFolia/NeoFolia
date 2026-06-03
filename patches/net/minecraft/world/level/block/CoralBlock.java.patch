@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/level/block/CoralBlock.java
++++ b/net/minecraft/world/level/block/CoralBlock.java
+@@ -10,11 +_,13 @@
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.item.context.BlockPlaceContext;
+ import net.minecraft.world.level.BlockGetter;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.ScheduledTickAccess;
+ import net.minecraft.world.level.block.state.BlockBehaviour;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.material.FluidState;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CoralBlock extends Block {
+@@ -60,9 +_,10 @@
+     }
+ 
+     protected boolean scanForWater(BlockGetter level, BlockPos blockPos) {
++        BlockState state = level.getBlockState(blockPos);
+         for (Direction direction : Direction.values()) {
+             FluidState fluidState = level.getFluidState(blockPos.relative(direction));
+-            if (fluidState.is(FluidTags.WATER)) {
++            if (state.canBeHydrated(level, blockPos, fluidState, blockPos.relative(direction))) {
+                 return true;
+             }
+         }
+@@ -73,9 +_,13 @@
+     @Override
+     public @Nullable BlockState getStateForPlacement(BlockPlaceContext context) {
+         if (!this.scanForWater(context.getLevel(), context.getClickedPos())) {
+-            context.getLevel().scheduleTick(context.getClickedPos(), this, 60 + context.getLevel().getRandom().nextInt(40));
++            context.getLevel().scheduleTick(context.getClickedPos(), this, 60 + coralRandom(context.getLevel()).nextInt(40));
+         }
+ 
+         return this.defaultBlockState();
++    }
++
++    private static RandomSource coralRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ }

@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/Digging.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/Digging.java
+@@ -15,15 +_,15 @@
+         super(ImmutableMap.of(MemoryModuleType.ATTACK_TARGET, MemoryStatus.VALUE_ABSENT, MemoryModuleType.WALK_TARGET, MemoryStatus.VALUE_ABSENT), ticks);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, E body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, E body, long timestamp) {
+         return body.getRemovalReason() == null;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, E body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, E body) {
+         return body.onGround() || body.isInWater() || body.isInLava();
+     }
+ 
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+         if (body.onGround()) {
+             body.setPose(Pose.DIGGING);
+             body.playSound(SoundEvents.WARDEN_DIG, 5.0F, 1.0F);
+@@ -33,7 +_,7 @@
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, E body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, E body, long timestamp) {
+         if (body.getRemovalReason() == null) {
+             body.remove(Entity.RemovalReason.DISCARDED);
+         }

@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetLookAndInteract.java
++++ b/net/minecraft/world/entity/ai/behavior/SetLookAndInteract.java
+@@ -8,7 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.NearestVisibleLivingEntities;
+ 
+ public class SetLookAndInteract {
+-    public static BehaviorControl<LivingEntity> create(EntityType<?> type, int interactionRange) {
++    public static synchronized BehaviorControl<LivingEntity> create(EntityType<?> type, int interactionRange) {
+         int interactionRangeSqr = interactionRange * interactionRange;
+         return BehaviorBuilder.create(
+             i -> i.group(
+@@ -20,11 +_,11 @@
+                     i,
+                     (lookTarget, interactionTarget, nearestEntities) -> (level, body, timestamp) -> {
+                         Optional<LivingEntity> closest = i.<NearestVisibleLivingEntities>get(nearestEntities)
+-                            .findClosest(e -> e.distanceToSqr(body) <= interactionRangeSqr && e.is(type));
++                            .findClosest(e -> BehaviorUtils.regionSafeEntity(body, e) != null && e.distanceToSqr(body) <= interactionRangeSqr && e.is(type));
+                         if (closest.isEmpty()) {
+                             return false;
+                         } else {
+-                            LivingEntity closestEntity = closest.get();
++                            LivingEntity closestEntity = closest.orElseThrow();
+                             interactionTarget.set(closestEntity);
+                             lookTarget.set(new EntityTracker(closestEntity, true));
+                             return true;

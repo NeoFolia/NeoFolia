@@ -1,0 +1,67 @@
+--- a/net/minecraft/world/level/block/entity/trialspawner/PlayerDetector.java
++++ b/net/minecraft/world/level/block/entity/trialspawner/PlayerDetector.java
+@@ -19,17 +_,18 @@
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.CollisionContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public interface PlayerDetector {
+     PlayerDetector NO_CREATIVE_PLAYERS = (level, selector, pos, requiredPlayerRange, requireLineOfSight) -> selector.getPlayers(
+-            level, p -> p.blockPosition().closerThan(pos, requiredPlayerRange) && !p.isCreative() && !p.isSpectator()
++            level, p -> canReadBlock(level, p.blockPosition()) && p.blockPosition().closerThan(pos, requiredPlayerRange) && !p.isCreative() && !p.isSpectator()
+         )
+         .stream()
+         .filter(player -> !requireLineOfSight || inLineOfSight(level, pos.getCenter(), player.getEyePosition()))
+         .map(Entity::getUUID)
+         .toList();
+     PlayerDetector INCLUDING_CREATIVE_PLAYERS = (level, selector, pos, requiredPlayerRange, requireLineOfSight) -> selector.getPlayers(
+-            level, p -> p.blockPosition().closerThan(pos, requiredPlayerRange) && !p.isSpectator()
++            level, p -> canReadBlock(level, p.blockPosition()) && p.blockPosition().closerThan(pos, requiredPlayerRange) && !p.isSpectator()
+         )
+         .stream()
+         .filter(player -> !requireLineOfSight || inLineOfSight(level, pos.getCenter(), player.getEyePosition()))
+@@ -53,20 +_,29 @@
+     );
+ 
+     private static boolean inLineOfSight(Level level, Vec3 origin, Vec3 dest) {
++        if (!canReadBlock(level, BlockPos.containing(origin)) || !canReadBlock(level, BlockPos.containing(dest))) {
++            return false;
++        }
++
+         BlockHitResult hitResult = level.clip(new ClipContext(dest, origin, ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, CollisionContext.empty()));
+         return hitResult.getBlockPos().equals(BlockPos.containing(origin)) || hitResult.getType() == HitResult.Type.MISS;
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     public interface EntitySelector {
+         PlayerDetector.EntitySelector SELECT_FROM_LEVEL = new PlayerDetector.EntitySelector() {
+             @Override
+             public List<ServerPlayer> getPlayers(ServerLevel level, Predicate<? super Player> selector) {
+-                return level.getPlayers(selector);
++                return level.getPlayers(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null && selector.test(player));
+             }
+ 
+             @Override
+             public <T extends Entity> List<T> getEntities(ServerLevel level, EntityTypeTest<Entity, T> type, AABB aabb, Predicate<? super T> selector) {
+-                return level.getEntities(type, aabb, selector);
++                AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, aabb);
++                return regionBox == null ? List.of() : level.getEntities(type, regionBox, selector);
+             }
+         };
+ 
+@@ -84,7 +_,10 @@
+             return new PlayerDetector.EntitySelector() {
+                 @Override
+                 public List<Player> getPlayers(ServerLevel level, Predicate<? super Player> selector) {
+-                    return players.stream().filter(selector).toList();
++                    return players.stream()
++                        .filter(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null)
++                        .filter(selector)
++                        .toList();
+                 }
+ 
+                 @Override

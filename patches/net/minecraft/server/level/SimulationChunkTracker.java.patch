@@ -1,0 +1,37 @@
+--- a/net/minecraft/server/level/SimulationChunkTracker.java
++++ b/net/minecraft/server/level/SimulationChunkTracker.java
+@@ -18,21 +_,21 @@
+     }
+ 
+     @Override
+-    protected int getLevelFromSource(long to) {
++    protected synchronized int getLevelFromSource(long to) {
+         return this.ticketStorage.getTicketLevelAt(to, true);
+     }
+ 
+-    public int getLevel(ChunkPos node) {
++    public synchronized int getLevel(ChunkPos node) {
+         return this.getLevel(node.pack());
+     }
+ 
+     @Override
+-    protected int getLevel(long node) {
++    protected synchronized int getLevel(long node) {
+         return this.chunks.get(node);
+     }
+ 
+     @Override
+-    protected void setLevel(long node, int level) {
++    protected synchronized void setLevel(long node, int level) {
+         if (level >= 33) {
+             this.chunks.remove(node);
+         } else {
+@@ -40,7 +_,7 @@
+         }
+     }
+ 
+-    public void runAllUpdates() {
++    public synchronized void runAllUpdates() {
+         this.runUpdates(Integer.MAX_VALUE);
+     }
+ }

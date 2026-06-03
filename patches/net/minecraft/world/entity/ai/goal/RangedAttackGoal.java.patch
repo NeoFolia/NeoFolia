@@ -1,0 +1,89 @@
+--- a/net/minecraft/world/entity/ai/goal/RangedAttackGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RangedAttackGoal.java
+@@ -5,6 +_,7 @@
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.entity.monster.RangedAttackMob;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class RangedAttackGoal extends Goal {
+@@ -39,8 +_,8 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        LivingEntity bestTarget = this.mob.getTarget();
++    public synchronized boolean canUse() {
++        LivingEntity bestTarget = this.regionSafeTarget(this.mob.getTarget());
+         if (bestTarget != null && bestTarget.isAlive()) {
+             this.target = bestTarget;
+             return true;
+@@ -50,26 +_,31 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.canUse() || this.target.isAlive() && !this.mob.getNavigation().isDone();
++    public synchronized boolean canContinueToUse() {
++        LivingEntity currentTarget = this.regionSafeTarget(this.target);
++        return this.canUse() || currentTarget != null && currentTarget.isAlive() && !this.mob.getNavigation().isDone();
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.target = null;
+         this.seeTime = 0;
+         this.attackTime = -1;
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
+-        double targetDistSqr = this.mob.distanceToSqr(this.target.getX(), this.target.getY(), this.target.getZ());
+-        boolean hasLineOfSight = this.mob.getSensing().hasLineOfSight(this.target);
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        if (target == null) {
++            return;
++        }
++        double targetDistSqr = this.mob.distanceToSqr(target.getX(), target.getY(), target.getZ());
++        boolean hasLineOfSight = this.mob.getSensing().hasLineOfSight(target);
+         if (hasLineOfSight) {
+             this.seeTime++;
+         } else {
+@@ -79,10 +_,10 @@
+         if (!(targetDistSqr > this.attackRadiusSqr) && this.seeTime >= 5) {
+             this.mob.getNavigation().stop();
+         } else {
+-            this.mob.getNavigation().moveTo(this.target, this.speedModifier);
++            this.mob.getNavigation().moveTo(target, this.speedModifier);
+         }
+ 
+-        this.mob.getLookControl().setLookAt(this.target, 30.0F, 30.0F);
++        this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+         if (--this.attackTime == 0) {
+             if (!hasLineOfSight) {
+                 return;
+@@ -90,10 +_,14 @@
+ 
+             float dist = (float)Math.sqrt(targetDistSqr) / this.attackRadius;
+             float power = Mth.clamp(dist, 0.1F, 1.0F);
+-            this.rangedAttackMob.performRangedAttack(this.target, power);
++            this.rangedAttackMob.performRangedAttack(target, power);
+             this.attackTime = Mth.floor(dist * (this.attackIntervalMax - this.attackIntervalMin) + this.attackIntervalMin);
+         } else if (this.attackTime < 0) {
+             this.attackTime = Mth.floor(Mth.lerp(Math.sqrt(targetDistSqr) / this.attackRadius, (double)this.attackIntervalMin, (double)this.attackIntervalMax));
+         }
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

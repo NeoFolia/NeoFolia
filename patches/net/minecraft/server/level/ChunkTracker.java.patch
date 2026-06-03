@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/level/ChunkTracker.java
++++ b/net/minecraft/server/level/ChunkTracker.java
+@@ -68,7 +_,7 @@
+ 
+     protected abstract int getLevelFromSource(long to);
+ 
+-    public void update(long node, int newLevelFrom, boolean onlyDecreased) {
++    public synchronized void update(long node, int newLevelFrom, boolean onlyDecreased) {
+         this.checkEdge(ChunkPos.INVALID_CHUNK_POS, node, newLevelFrom, onlyDecreased);
+     }
+ }

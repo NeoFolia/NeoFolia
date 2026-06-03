@@ -1,0 +1,87 @@
+--- a/net/minecraft/world/level/pathfinder/SwimNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/SwimNodeEvaluator.java
+@@ -23,31 +_,31 @@
+     }
+ 
+     @Override
+-    public void prepare(PathNavigationRegion level, Mob entity) {
++    public synchronized void prepare(PathNavigationRegion level, Mob entity) {
+         super.prepare(level, entity);
+         this.pathTypesByPosCache.clear();
+     }
+ 
+     @Override
+-    public void done() {
++    public synchronized void done() {
+         super.done();
+         this.pathTypesByPosCache.clear();
+     }
+ 
+     @Override
+-    public Node getStart() {
++    public synchronized Node getStart() {
+         return this.getNode(
+             Mth.floor(this.mob.getBoundingBox().minX), Mth.floor(this.mob.getBoundingBox().minY + 0.5), Mth.floor(this.mob.getBoundingBox().minZ)
+         );
+     }
+ 
+     @Override
+-    public Target getTarget(double x, double y, double z) {
++    public synchronized Target getTarget(double x, double y, double z) {
+         return this.getTargetNodeAt(x, y, z);
+     }
+ 
+     @Override
+-    public int getNeighbors(Node[] neighbors, Node pos) {
++    public synchronized int getNeighbors(Node[] neighbors, Node pos) {
+         int count = 0;
+         Map<Direction, Node> nodes = Maps.newEnumMap(Direction.class);
+ 
+@@ -74,7 +_,7 @@
+         return count;
+     }
+ 
+-    protected boolean isNodeValid(@Nullable Node node) {
++    protected synchronized boolean isNodeValid(@Nullable Node node) {
+         return node != null && !node.closed;
+     }
+ 
+@@ -82,7 +_,7 @@
+         return node != null && node.costMalus >= 0.0F;
+     }
+ 
+-    protected @Nullable Node findAcceptedNode(int x, int y, int z) {
++    protected synchronized @Nullable Node findAcceptedNode(int x, int y, int z) {
+         Node best = null;
+         PathType pathType = this.getCachedBlockType(x, y, z);
+         if (this.allowBreaching && pathType == PathType.BREACH || pathType == PathType.WATER) {
+@@ -91,7 +_,7 @@
+                 best = this.getNode(x, y, z);
+                 best.type = pathType;
+                 best.costMalus = Math.max(best.costMalus, pathCost);
+-                if (this.currentContext.level().getFluidState(new BlockPos(x, y, z)).isEmpty()) {
++                if (this.currentContext.getBlockState(new BlockPos(x, y, z)).getFluidState().isEmpty()) {
+                     best.costMalus += 8.0F;
+                 }
+             }
+@@ -100,17 +_,17 @@
+         return best;
+     }
+ 
+-    protected PathType getCachedBlockType(int x, int y, int z) {
++    protected synchronized PathType getCachedBlockType(int x, int y, int z) {
+         return this.pathTypesByPosCache.computeIfAbsent(BlockPos.asLong(x, y, z), k -> this.getPathType(this.currentContext, x, y, z));
+     }
+ 
+     @Override
+-    public PathType getPathType(PathfindingContext context, int x, int y, int z) {
++    public synchronized PathType getPathType(PathfindingContext context, int x, int y, int z) {
+         return this.getPathTypeOfMob(context, x, y, z, this.mob);
+     }
+ 
+     @Override
+-    public PathType getPathTypeOfMob(PathfindingContext context, int x, int y, int z, Mob mob) {
++    public synchronized PathType getPathTypeOfMob(PathfindingContext context, int x, int y, int z, Mob mob) {
+         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+ 
+         for (int xx = x; xx < x + this.entityWidth; xx++) {

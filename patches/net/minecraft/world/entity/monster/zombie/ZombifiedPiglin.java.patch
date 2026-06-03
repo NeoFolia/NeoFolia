@@ -1,0 +1,88 @@
+--- a/net/minecraft/world/entity/monster/zombie/ZombifiedPiglin.java
++++ b/net/minecraft/world/entity/monster/zombie/ZombifiedPiglin.java
+@@ -43,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ZombifiedPiglin extends Zombie implements NeutralMob {
+@@ -108,7 +_,7 @@
+         }
+ 
+         this.updatePersistentAnger(level, true);
+-        if (this.getTarget() != null) {
++        if (this.regionSafeTarget(this.getTarget()) != null) {
+             this.maybeAlertOthers();
+         }
+ 
+@@ -128,7 +_,8 @@
+         if (this.ticksUntilNextAlert > 0) {
+             this.ticksUntilNextAlert--;
+         } else {
+-            if (this.getSensing().hasLineOfSight(this.getTarget())) {
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
++            if (target != null && this.getSensing().hasLineOfSight(target)) {
+                 this.alertOthers();
+             }
+ 
+@@ -137,15 +_,23 @@
+     }
+ 
+     private void alertOthers() {
++        LivingEntity target = this.regionSafeTarget(this.getTarget());
++        if (target == null) {
++            return;
++        }
+         double within = this.getAttributeValue(Attributes.FOLLOW_RANGE);
+         AABB searchAabb = AABB.unitCubeFromLowerCorner(this.position()).inflate(within, 10.0, within);
++        searchAabb = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), searchAabb);
++        if (searchAabb == null) {
++            return;
++        }
+         this.level()
+             .getEntitiesOfClass(ZombifiedPiglin.class, searchAabb, EntitySelector.NO_SPECTATORS)
+             .stream()
+             .filter(other -> other != this)
+             .filter(other -> other.getTarget() == null)
+-            .filter(other -> !other.isAlliedTo(this.getTarget()))
+-            .forEach(other -> other.setTarget(this.getTarget()));
++            .filter(other -> !other.isAlliedTo(target))
++            .forEach(other -> other.setTarget(target));
+     }
+ 
+     private void playAngerSound() {
+@@ -154,7 +_,7 @@
+ 
+     @Override
+     public void setTarget(@Nullable LivingEntity target) {
+-        if (this.getTarget() == null && target != null) {
++        if (this.regionSafeTarget(this.getTarget()) == null && target != null) {
+             this.playFirstAngerSoundIn = FIRST_ANGER_SOUND_DELAY.sample(this.random);
+             this.ticksUntilNextAlert = ALERT_INTERVAL.sample(this.random);
+         }
+@@ -170,7 +_,12 @@
+     public static boolean checkZombifiedPiglinSpawnRules(
+         EntityType<ZombifiedPiglin> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return level.getDifficulty() != Difficulty.PEACEFUL && !level.getBlockState(pos.below()).is(Blocks.NETHER_WART_BLOCK);
++        BlockPos below = pos.below();
++        return level.getDifficulty() != Difficulty.PEACEFUL && canReadBlock(level, below) && !level.getBlockState(below).is(Blocks.NETHER_WART_BLOCK);
++    }
++
++    private static boolean canReadBlock(LevelAccessor level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override
+@@ -243,5 +_,9 @@
+     @Override
+     public boolean wantsToPickUp(ServerLevel level, ItemStack itemStack) {
+         return this.canHoldItem(itemStack);
++    }
++
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
+     }
+ }

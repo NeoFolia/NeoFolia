@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/ChiseledBookShelfBlock.java
++++ b/net/minecraft/world/level/block/ChiseledBookShelfBlock.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.world.Containers;
+ import net.minecraft.world.InteractionHand;
+@@ -115,7 +_,7 @@
+ 
+     private static void addBook(Level level, BlockPos pos, Player player, ChiseledBookShelfBlockEntity bookshelfBlock, ItemStack itemStack, int slot) {
+         if (!level.isClientSide()) {
+-            player.awardStat(Stats.ITEM_USED.get(itemStack.getItem()));
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(itemStack.getItem()));
+             SoundEvent soundEvent = itemStack.is(Items.ENCHANTED_BOOK)
+                 ? SoundEvents.CHISELED_BOOKSHELF_INSERT_ENCHANTED
+                 : SoundEvents.CHISELED_BOOKSHELF_INSERT;

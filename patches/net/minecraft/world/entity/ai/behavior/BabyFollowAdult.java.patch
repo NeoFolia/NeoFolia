@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
++++ b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
+@@ -8,11 +_,11 @@
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
+ 
+ public class BabyFollowAdult {
+-    public static OneShot<LivingEntity> create(UniformInt followRange, float speedModifier) {
++    public static synchronized OneShot<LivingEntity> create(UniformInt followRange, float speedModifier) {
+         return create(followRange, mob -> speedModifier, MemoryModuleType.NEAREST_VISIBLE_ADULT, false);
+     }
+ 
+-    public static OneShot<LivingEntity> create(
++    public static synchronized OneShot<LivingEntity> create(
+         UniformInt followRange, Function<LivingEntity, Float> speedModifier, MemoryModuleType<? extends LivingEntity> nearestVisibleType, boolean targetEye
+     ) {
+         return BehaviorBuilder.create(
+@@ -23,7 +_,11 @@
+                         if (!body.isBaby()) {
+                             return false;
+                         } else {
+-                            LivingEntity adult = i.get(nearestAdult);
++                            LivingEntity adult = BehaviorUtils.regionSafeEntity(body, i.get(nearestAdult));
++                            if (adult == null) {
++                                return false;
++                            }
++
+                             if (body.closerThan(adult, followRange.maxInclusive() + 1) && !body.closerThan(adult, followRange.minInclusive())) {
+                                 WalkTarget target = new WalkTarget(
+                                     new EntityTracker(adult, targetEye, targetEye), speedModifier.apply(body), followRange.minInclusive() - 1

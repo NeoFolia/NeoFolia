@@ -1,0 +1,42 @@
+--- a/net/minecraft/world/item/WindChargeItem.java
++++ b/net/minecraft/world/item/WindChargeItem.java
+@@ -15,6 +_,8 @@
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.DispenserBlock;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class WindChargeItem extends Item implements ProjectileItem {
+     public static final float PROJECTILE_SHOOT_POWER = 1.5F;
+@@ -46,16 +_,16 @@
+             SoundEvents.WIND_CHARGE_THROW,
+             SoundSource.NEUTRAL,
+             0.5F,
+-            0.4F / (level.getRandom().nextFloat() * 0.4F + 0.8F)
++            0.4F / (player.getRandom().nextFloat() * 0.4F + 0.8F)
+         );
+-        player.awardStat(Stats.ITEM_USED.get(this));
++        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+         stack.consume(1, player);
+         return InteractionResult.SUCCESS;
+     }
+ 
+     @Override
+     public Projectile asProjectile(Level level, Position position, ItemStack itemStack, Direction direction) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = windChargeRandom(level);
+         double dirX = random.triangle((double)direction.getStepX(), 0.11485000000000001);
+         double dirY = random.triangle((double)direction.getStepY(), 0.11485000000000001);
+         double dirZ = random.triangle((double)direction.getStepZ(), 0.11485000000000001);
+@@ -63,6 +_,10 @@
+         WindCharge windCharge = new WindCharge(level, position.x(), position.y(), position.z(), dir);
+         windCharge.setDeltaMovement(dir);
+         return windCharge;
++    }
++
++    private static RandomSource windChargeRandom(Level level) {
++        return level instanceof ServerLevel serverLevel ? RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()) : level.getRandom();
+     }
+ 
+     @Override

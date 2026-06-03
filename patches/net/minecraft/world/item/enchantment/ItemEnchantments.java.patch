@@ -1,0 +1,40 @@
+--- a/net/minecraft/world/item/enchantment/ItemEnchantments.java
++++ b/net/minecraft/world/item/enchantment/ItemEnchantments.java
+@@ -1,9 +_,9 @@
+ package net.minecraft.world.item.enchantment;
+ 
+ import com.mojang.serialization.Codec;
++import it.unimi.dsi.fastutil.objects.Object2IntMap;
+ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.Object2IntMap.Entry;
+-import java.util.Collections;
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.Set;
+@@ -41,9 +_,9 @@
+     private final Object2IntOpenHashMap<Holder<Enchantment>> enchantments;
+ 
+     private ItemEnchantments(Object2IntOpenHashMap<Holder<Enchantment>> enchantments) {
+-        this.enchantments = enchantments;
++        this.enchantments = new Object2IntOpenHashMap<>(enchantments);
+ 
+-        for (Entry<Holder<Enchantment>> entry : enchantments.object2IntEntrySet()) {
++        for (Entry<Holder<Enchantment>> entry : this.enchantments.object2IntEntrySet()) {
+             int level = entry.getIntValue();
+             if (level < 0 || level > 255) {
+                 throw new IllegalArgumentException("Enchantment " + entry.getKey() + " has invalid level " + level);
+@@ -87,11 +_,12 @@
+     }
+ 
+     public Set<Holder<Enchantment>> keySet() {
+-        return Collections.unmodifiableSet(this.enchantments.keySet());
++        return Set.copyOf(this.enchantments.keySet());
+     }
+ 
+     public Set<Entry<Holder<Enchantment>>> entrySet() {
+-        return Collections.unmodifiableSet(this.enchantments.object2IntEntrySet());
++        Object2IntMap<Holder<Enchantment>> snapshot = new Object2IntOpenHashMap<>(this.enchantments);
++        return Set.copyOf(snapshot.object2IntEntrySet());
+     }
+ 
+     public int size() {

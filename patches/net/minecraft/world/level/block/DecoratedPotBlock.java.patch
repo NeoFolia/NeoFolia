@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/DecoratedPotBlock.java
++++ b/net/minecraft/world/level/block/DecoratedPotBlock.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.tags.EnchantmentTags;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.RandomSource;
+@@ -104,7 +_,7 @@
+                 if (!itemStack.isEmpty()
+                     && (potItem.isEmpty() || ItemStack.isSameItemSameComponents(potItem, itemStack) && potItem.getCount() < potItem.getMaxStackSize())) {
+                     decoratedPot.wobble(DecoratedPotBlockEntity.WobbleStyle.POSITIVE);
+-                    player.awardStat(Stats.ITEM_USED.get(itemStack.getItem()));
++                    RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(itemStack.getItem()));
+                     ItemStack awardedItem = itemStack.consumeAndReturn(1, player);
+                     float pitchBend;
+                     if (decoratedPot.isEmpty()) {

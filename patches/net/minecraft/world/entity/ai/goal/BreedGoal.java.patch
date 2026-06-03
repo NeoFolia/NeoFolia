@@ -1,0 +1,84 @@
+--- a/net/minecraft/world/entity/ai/goal/BreedGoal.java
++++ b/net/minecraft/world/entity/ai/goal/BreedGoal.java
+@@ -5,6 +_,8 @@
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+ import net.minecraft.world.entity.animal.Animal;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BreedGoal extends Goal {
+@@ -29,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (!this.animal.isInLove()) {
+             return false;
+         } else {
+@@ -39,29 +_,36 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.partner.isAlive() && this.partner.isInLove() && this.loveTime < 60 && !this.partner.isPanicking();
++    public synchronized boolean canContinueToUse() {
++        Animal target = this.regionSafePartner(this.partner);
++        return target != null && target.isAlive() && target.isInLove() && this.loveTime < 60 && !target.isPanicking();
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.partner = null;
+         this.loveTime = 0;
+     }
+ 
+     @Override
+-    public void tick() {
+-        this.animal.getLookControl().setLookAt(this.partner, 10.0F, this.animal.getMaxHeadXRot());
+-        this.animal.getNavigation().moveTo(this.partner, this.speedModifier);
++    public synchronized void tick() {
++        Animal target = this.regionSafePartner(this.partner);
++        if (target == null) {
++            return;
++        }
++        this.animal.getLookControl().setLookAt(target, 10.0F, this.animal.getMaxHeadXRot());
++        this.animal.getNavigation().moveTo(target, this.speedModifier);
+         this.loveTime++;
+-        if (this.loveTime >= this.adjustedTickDelay(60) && this.animal.distanceToSqr(this.partner) < 9.0) {
++        if (this.loveTime >= this.adjustedTickDelay(60) && this.animal.distanceToSqr(target) < 9.0) {
+             this.breed();
+         }
+     }
+ 
+-    private @Nullable Animal getFreePartner() {
+-        List<? extends Animal> animals = this.level
+-            .getNearbyEntities(this.partnerClass, PARTNER_TARGETING, this.animal, this.animal.getBoundingBox().inflate(8.0));
++    private synchronized @Nullable Animal getFreePartner() {
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level, this.animal.getBoundingBox().inflate(8.0));
++        List<? extends Animal> animals = searchBox == null
++            ? List.of()
++            : List.copyOf(this.level.getNearbyEntities(this.partnerClass, PARTNER_TARGETING, this.animal, searchBox));
+         double dist = Double.MAX_VALUE;
+         Animal partner = null;
+ 
+@@ -75,7 +_,14 @@
+         return partner;
+     }
+ 
+-    protected void breed() {
+-        this.animal.spawnChildFromBreeding(this.level, this.partner);
++    protected synchronized void breed() {
++        Animal target = this.regionSafePartner(this.partner);
++        if (target != null) {
++            this.animal.spawnChildFromBreeding(this.level, target);
++        }
++    }
++
++    private synchronized @Nullable Animal regionSafePartner(@Nullable Animal partner) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.animal.level(), partner);
+     }
+ }

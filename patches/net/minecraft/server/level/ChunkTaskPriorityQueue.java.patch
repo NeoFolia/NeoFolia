@@ -1,0 +1,56 @@
+--- a/net/minecraft/server/level/ChunkTaskPriorityQueue.java
++++ b/net/minecraft/server/level/ChunkTaskPriorityQueue.java
+@@ -19,7 +_,7 @@
+         this.name = name;
+     }
+ 
+-    protected void resortChunkTasks(int oldPriority, ChunkPos pos, int newPriority) {
++    protected synchronized void resortChunkTasks(int oldPriority, ChunkPos pos, int newPriority) {
+         if (oldPriority < PRIORITY_LEVEL_COUNT) {
+             Long2ObjectLinkedOpenHashMap<List<Runnable>> oldQueue = this.queuesPerPriority.get(oldPriority);
+             List<Runnable> oldTasks = oldQueue.remove(pos.pack());
+@@ -36,12 +_,12 @@
+         }
+     }
+ 
+-    protected void submit(Runnable task, long chunkPos, int level) {
++    protected synchronized void submit(Runnable task, long chunkPos, int level) {
+         this.queuesPerPriority.get(level).computeIfAbsent(chunkPos, p -> Lists.newArrayList()).add(task);
+         this.topPriorityQueueIndex = Math.min(this.topPriorityQueueIndex, level);
+     }
+ 
+-    protected void release(long pos, boolean unschedule) {
++    protected synchronized void release(long pos, boolean unschedule) {
+         for (Long2ObjectLinkedOpenHashMap<List<Runnable>> queue : this.queuesPerPriority) {
+             List<Runnable> tasks = queue.get(pos);
+             if (tasks != null) {
+@@ -60,7 +_,7 @@
+         }
+     }
+ 
+-    public ChunkTaskPriorityQueue.@Nullable TasksForChunk pop() {
++    public synchronized ChunkTaskPriorityQueue.@Nullable TasksForChunk pop() {
+         if (!this.hasWork()) {
+             return null;
+         } else {
+@@ -77,15 +_,18 @@
+         }
+     }
+ 
+-    public boolean hasWork() {
++    public synchronized boolean hasWork() {
+         return this.topPriorityQueueIndex < PRIORITY_LEVEL_COUNT;
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return this.name + " " + this.topPriorityQueueIndex + "...";
+     }
+ 
+     public record TasksForChunk(long chunkPos, List<Runnable> tasks) {
++        public TasksForChunk {
++            tasks = List.copyOf(tasks);
++        }
+     }
+ }

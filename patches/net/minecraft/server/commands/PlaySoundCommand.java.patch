@@ -1,0 +1,217 @@
+--- a/net/minecraft/server/commands/PlaySoundCommand.java
++++ b/net/minecraft/server/commands/PlaySoundCommand.java
+@@ -4,6 +_,7 @@
+ import com.mojang.brigadier.arguments.FloatArgumentType;
+ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.ArrayList;
+@@ -25,6 +_,7 @@
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PlaySoundCommand {
+@@ -34,16 +_,7 @@
+         RequiredArgumentBuilder<CommandSourceStack, Identifier> name = Commands.argument("sound", IdentifierArgument.id())
+             .suggests(SuggestionProviders.cast(SuggestionProviders.AVAILABLE_SOUNDS))
+             .executes(
+-                c -> playSound(
+-                    c.getSource(),
+-                    getCallingPlayerAsCollection(c.getSource().getPlayer()),
+-                    IdentifierArgument.getId(c, "sound"),
+-                    SoundSource.MASTER,
+-                    c.getSource().getPosition(),
+-                    1.0F,
+-                    1.0F,
+-                    0.0F
+-                )
++                c -> playSound(c, SoundSource.MASTER, false, false, false, false, false)
+             );
+ 
+         for (SoundSource source : SoundSource.values()) {
+@@ -55,93 +_,53 @@
+ 
+     private static LiteralArgumentBuilder<CommandSourceStack> source(SoundSource source) {
+         return Commands.literal(source.getName())
+-            .executes(
+-                c -> playSound(
+-                    c.getSource(),
+-                    getCallingPlayerAsCollection(c.getSource().getPlayer()),
+-                    IdentifierArgument.getId(c, "sound"),
+-                    source,
+-                    c.getSource().getPosition(),
+-                    1.0F,
+-                    1.0F,
+-                    0.0F
+-                )
+-            )
++            .executes(c -> playSound(c, source, false, false, false, false, false))
+             .then(
+                 Commands.argument("targets", EntityArgument.players())
+-                    .executes(
+-                        c -> playSound(
+-                            c.getSource(),
+-                            EntityArgument.getPlayers(c, "targets"),
+-                            IdentifierArgument.getId(c, "sound"),
+-                            source,
+-                            c.getSource().getPosition(),
+-                            1.0F,
+-                            1.0F,
+-                            0.0F
+-                        )
+-                    )
++                    .executes(c -> playSound(c, source, true, false, false, false, false))
+                     .then(
+                         Commands.argument("pos", Vec3Argument.vec3())
+-                            .executes(
+-                                c -> playSound(
+-                                    c.getSource(),
+-                                    EntityArgument.getPlayers(c, "targets"),
+-                                    IdentifierArgument.getId(c, "sound"),
+-                                    source,
+-                                    Vec3Argument.getVec3(c, "pos"),
+-                                    1.0F,
+-                                    1.0F,
+-                                    0.0F
+-                                )
+-                            )
++                            .executes(c -> playSound(c, source, true, true, false, false, false))
+                             .then(
+                                 Commands.argument("volume", FloatArgumentType.floatArg(0.0F))
+-                                    .executes(
+-                                        c -> playSound(
+-                                            c.getSource(),
+-                                            EntityArgument.getPlayers(c, "targets"),
+-                                            IdentifierArgument.getId(c, "sound"),
+-                                            source,
+-                                            Vec3Argument.getVec3(c, "pos"),
+-                                            c.getArgument("volume", Float.class),
+-                                            1.0F,
+-                                            0.0F
+-                                        )
+-                                    )
++                                    .executes(c -> playSound(c, source, true, true, true, false, false))
+                                     .then(
+                                         Commands.argument("pitch", FloatArgumentType.floatArg(0.0F, 2.0F))
+-                                            .executes(
+-                                                c -> playSound(
+-                                                    c.getSource(),
+-                                                    EntityArgument.getPlayers(c, "targets"),
+-                                                    IdentifierArgument.getId(c, "sound"),
+-                                                    source,
+-                                                    Vec3Argument.getVec3(c, "pos"),
+-                                                    c.getArgument("volume", Float.class),
+-                                                    c.getArgument("pitch", Float.class),
+-                                                    0.0F
+-                                                )
+-                                            )
++                                            .executes(c -> playSound(c, source, true, true, true, true, false))
+                                             .then(
+                                                 Commands.argument("minVolume", FloatArgumentType.floatArg(0.0F, 1.0F))
+-                                                    .executes(
+-                                                        c -> playSound(
+-                                                            c.getSource(),
+-                                                            EntityArgument.getPlayers(c, "targets"),
+-                                                            IdentifierArgument.getId(c, "sound"),
+-                                                            source,
+-                                                            Vec3Argument.getVec3(c, "pos"),
+-                                                            c.getArgument("volume", Float.class),
+-                                                            c.getArgument("pitch", Float.class),
+-                                                            c.getArgument("minVolume", Float.class)
+-                                                        )
+-                                                    )
++                                                    .executes(c -> playSound(c, source, true, true, true, true, true))
+                                             )
+                                     )
+                             )
+                     )
+             );
++    }
++
++    private static int playSound(
++        CommandContext<CommandSourceStack> context,
++        SoundSource soundSource,
++        boolean hasTargets,
++        boolean hasPosition,
++        boolean hasVolume,
++        boolean hasPitch,
++        boolean hasMinVolume
++    ) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> playSound(context, soundSource, hasTargets, hasPosition, hasVolume, hasPitch, hasMinVolume))) {
++            return 0;
++        }
++
++        return playSound(
++            source,
++            hasTargets ? EntityArgument.getPlayers(context, "targets") : getCallingPlayerAsCollection(source.getPlayer()),
++            IdentifierArgument.getId(context, "sound"),
++            soundSource,
++            hasPosition ? Vec3Argument.getVec3(context, "pos") : source.getPosition(),
++            hasVolume ? context.getArgument("volume", Float.class) : 1.0F,
++            hasPitch ? context.getArgument("pitch", Float.class) : 1.0F,
++            hasMinVolume ? context.getArgument("minVolume", Float.class) : 0.0F
++        );
+     }
+ 
+     private static Collection<ServerPlayer> getCallingPlayerAsCollection(@Nullable ServerPlayer player) {
+@@ -162,10 +_,14 @@
+         double maxDistSqr = Mth.square(soundHolder.value().getRange(volume));
+         ServerLevel level = source.getLevel();
+         long seed = level.getRandom().nextLong();
+-        List<ServerPlayer> playedFor = new ArrayList<>();
++        List<Component> playedFor = new ArrayList<>();
+ 
+         for (ServerPlayer player : players) {
+-            if (player.level() == level) {
++            Component playedForPlayer = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                if (player.level() != level) {
++                    return null;
++                }
++
+                 double deltaX = position.x - player.getX();
+                 double deltaY = position.y - player.getY();
+                 double deltaZ = position.z - player.getZ();
+@@ -174,7 +_,7 @@
+                 float localVolume = volume;
+                 if (distSqr > maxDistSqr) {
+                     if (minVolume <= 0.0F) {
+-                        continue;
++                        return null;
+                     }
+ 
+                     double distance = Math.sqrt(distSqr);
+@@ -184,11 +_,14 @@
+                     localVolume = minVolume;
+                 }
+ 
+-                player.connection
+-                    .send(
+-                        new ClientboundSoundPacket(soundHolder, soundSource, localPosition.x(), localPosition.y(), localPosition.z(), localVolume, pitch, seed)
+-                    );
+-                playedFor.add(player);
++                RegionizedWorldGuard.sendToPlayer(
++                    player,
++                    new ClientboundSoundPacket(soundHolder, soundSource, localPosition.x(), localPosition.y(), localPosition.z(), localVolume, pitch, seed)
++                );
++                return player.getDisplayName();
++            });
++            if (playedForPlayer != null) {
++                playedFor.add(playedForPlayer);
+             }
+         }
+ 
+@@ -198,7 +_,7 @@
+         } else {
+             if (count == 1) {
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.playsound.success.single", Component.translationArg(sound), playedFor.getFirst().getDisplayName()),
++                    () -> Component.translatable("commands.playsound.success.single", Component.translationArg(sound), playedFor.getFirst()),
+                     true
+                 );
+             } else {

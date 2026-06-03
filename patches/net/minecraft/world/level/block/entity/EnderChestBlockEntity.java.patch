@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/level/block/entity/EnderChestBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/EnderChestBlockEntity.java
+@@ -2,14 +_,17 @@
+ 
+ import java.util.Objects;
+ import net.minecraft.core.BlockPos;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.entity.ContainerUser;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class EnderChestBlockEntity extends BlockEntity implements LidBlockEntity {
+     private final ChestLidController chestLidController = new ChestLidController();
+@@ -28,7 +_,7 @@
+                 SoundEvents.ENDER_CHEST_OPEN,
+                 SoundSource.BLOCKS,
+                 0.5F,
+-                level.getRandom().nextFloat() * 0.1F + 0.9F
++                enderChestRandom(level).nextFloat() * 0.1F + 0.9F
+             );
+         }
+ 
+@@ -42,7 +_,7 @@
+                 SoundEvents.ENDER_CHEST_CLOSE,
+                 SoundSource.BLOCKS,
+                 0.5F,
+-                level.getRandom().nextFloat() * 0.1F + 0.9F
++                enderChestRandom(level).nextFloat() * 0.1F + 0.9F
+             );
+         }
+ 
+@@ -103,5 +_,9 @@
+     @Override
+     public float getOpenNess(float a) {
+         return this.chestLidController.getOpenness(a);
++    }
++
++    private static RandomSource enderChestRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ }

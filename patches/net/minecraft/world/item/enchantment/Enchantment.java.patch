@@ -1,0 +1,226 @@
+--- a/net/minecraft/world/item/enchantment/Enchantment.java
++++ b/net/minecraft/world/item/enchantment/Enchantment.java
+@@ -55,6 +_,8 @@
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+ import net.minecraft.world.level.storage.loot.predicates.LootItemCondition;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.mutable.MutableFloat;
+ 
+ public record Enchantment(Component description, Enchantment.EnchantmentDefinition definition, HolderSet<Enchantment> exclusiveSet, DataComponentMap effects) {
+@@ -119,6 +_,10 @@
+         return itemStacks;
+     }
+ 
++    /**
++     * @deprecated Neo: Use {@link ItemStack#supportsEnchantment(Holder)}
++     */
++    @Deprecated
+     public HolderSet<Item> getSupportedItems() {
+         return this.definition.supportedItems();
+     }
+@@ -127,10 +_,20 @@
+         return this.definition.slots().stream().anyMatch(group -> group.test(slot));
+     }
+ 
++    /**
++     * @deprecated Neo: Use {@link ItemStack#isPrimaryItemFor(Holder)}
++     *
++     * This method does not respect {@link ItemStack#supportsEnchantment(Holder)} since the {@link Holder} is not available, which makes the result of calling it invalid.
++     */
++    @Deprecated
+     public boolean isPrimaryItem(ItemStack item) {
+         return this.isSupportedItem(item) && (this.definition.primaryItems.isEmpty() || item.is(this.definition.primaryItems.get()));
+     }
+ 
++    /**
++     * @deprecated Neo: Use {@link ItemStack#supportsEnchantment(Holder)}
++     */
++    @Deprecated
+     public boolean isSupportedItem(ItemStack item) {
+         return item.is(this.definition.supportedItems);
+     }
+@@ -183,6 +_,10 @@
+         return result;
+     }
+ 
++    /**
++     * @deprecated Neo: Use {@link ItemStack#supportsEnchantment(Holder)}
++     */
++    @Deprecated
+     public boolean canEnchant(ItemStack itemStack) {
+         return this.definition.supportedItems().contains(itemStack.typeHolder());
+     }
+@@ -298,8 +_,8 @@
+     ) {
+         if (effect.matches(damageContext(serverLevel, enchantmentLevel, victim, damageSource))) {
+             Entity target = switch (effect.affected()) {
+-                case ATTACKER -> damageSource.getEntity();
+-                case DAMAGING_ENTITY -> damageSource.getDirectEntity();
++                case ATTACKER -> RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, damageSource.getEntity());
++                case DAMAGING_ENTITY -> RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, damageSource.getDirectEntity());
+                 case VICTIM -> victim;
+             };
+             if (target != null) {
+@@ -370,8 +_,12 @@
+             this.getEffects(effectType),
+             itemContext(serverLevel, enchantmentLevel, itemStack),
+             value,
+-            (e, v) -> e.process(enchantmentLevel, serverLevel.getRandom(), v)
++            (e, v) -> e.process(enchantmentLevel, enchantmentRandom(serverLevel), v)
+         );
++    }
++
++    private static RandomSource enchantmentRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
+     }
+ 
+     public void modifyEntityFilteredValue(
+@@ -413,8 +_,8 @@
+             .withParameter(LootContextParams.ENCHANTMENT_LEVEL, enchantmentLevel)
+             .withParameter(LootContextParams.ORIGIN, victim.position())
+             .withParameter(LootContextParams.DAMAGE_SOURCE, source)
+-            .withOptionalParameter(LootContextParams.ATTACKING_ENTITY, source.getEntity())
+-            .withOptionalParameter(LootContextParams.DIRECT_ATTACKING_ENTITY, source.getDirectEntity())
++            .withOptionalParameter(LootContextParams.ATTACKING_ENTITY, RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, source.getEntity()))
++            .withOptionalParameter(LootContextParams.DIRECT_ATTACKING_ENTITY, RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, source.getDirectEntity()))
+             .create(LootContextParamSets.ENCHANTED_DAMAGE);
+         return new LootContext.Builder(params).create(Optional.empty());
+     }
+@@ -472,35 +_,37 @@
+         EquipmentSlot slot = item.inSlot();
+         if (slot != null) {
+             Map<Enchantment, Set<EnchantmentLocationBasedEffect>> activeLocationDependentEffects = entity.activeLocationDependentEnchantments(slot);
+-            if (!this.matchingSlot(slot)) {
+-                Set<EnchantmentLocationBasedEffect> activeEffects = activeLocationDependentEffects.remove(this);
+-                if (activeEffects != null) {
+-                    activeEffects.forEach(effectx -> effectx.onDeactivated(item, entity, entity.position(), enchantmentLevel));
+-                }
+-            } else {
+-                Set<EnchantmentLocationBasedEffect> activeEffects = activeLocationDependentEffects.get(this);
+-
+-                for (ConditionalEffect<EnchantmentLocationBasedEffect> filteredEffect : this.getEffects(EnchantmentEffectComponents.LOCATION_CHANGED)) {
+-                    EnchantmentLocationBasedEffect effect = filteredEffect.effect();
+-                    boolean wasActive = activeEffects != null && activeEffects.contains(effect);
+-                    if (filteredEffect.matches(locationContext(serverLevel, enchantmentLevel, entity, wasActive))) {
+-                        if (!wasActive) {
+-                            if (activeEffects == null) {
+-                                activeEffects = new ObjectArraySet<>();
+-                                activeLocationDependentEffects.put(this, activeEffects);
++            synchronized (activeLocationDependentEffects) {
++                if (!this.matchingSlot(slot)) {
++                    Set<EnchantmentLocationBasedEffect> activeEffects = activeLocationDependentEffects.remove(this);
++                    if (activeEffects != null) {
++                        activeEffects.forEach(effectx -> effectx.onDeactivated(item, entity, entity.position(), enchantmentLevel));
++                    }
++                } else {
++                    Set<EnchantmentLocationBasedEffect> activeEffects = activeLocationDependentEffects.get(this);
++
++                    for (ConditionalEffect<EnchantmentLocationBasedEffect> filteredEffect : this.getEffects(EnchantmentEffectComponents.LOCATION_CHANGED)) {
++                        EnchantmentLocationBasedEffect effect = filteredEffect.effect();
++                        boolean wasActive = activeEffects != null && activeEffects.contains(effect);
++                        if (filteredEffect.matches(locationContext(serverLevel, enchantmentLevel, entity, wasActive))) {
++                            if (!wasActive) {
++                                if (activeEffects == null) {
++                                    activeEffects = new ObjectArraySet<>();
++                                    activeLocationDependentEffects.put(this, activeEffects);
++                                }
++
++                                activeEffects.add(effect);
+                             }
+ 
+-                            activeEffects.add(effect);
++                            effect.onChangedBlock(serverLevel, enchantmentLevel, item, entity, entity.position(), !wasActive);
++                        } else if (activeEffects != null && activeEffects.remove(effect)) {
++                            effect.onDeactivated(item, entity, entity.position(), enchantmentLevel);
+                         }
+-
+-                        effect.onChangedBlock(serverLevel, enchantmentLevel, item, entity, entity.position(), !wasActive);
+-                    } else if (activeEffects != null && activeEffects.remove(effect)) {
+-                        effect.onDeactivated(item, entity, entity.position(), enchantmentLevel);
+-                    }
+-                }
+-
+-                if (activeEffects != null && activeEffects.isEmpty()) {
+-                    activeLocationDependentEffects.remove(this);
++                    }
++
++                    if (activeEffects != null && activeEffects.isEmpty()) {
++                        activeLocationDependentEffects.remove(this);
++                    }
+                 }
+             }
+         }
+@@ -509,10 +_,13 @@
+     public void stopLocationBasedEffects(int enchantmentLevel, EnchantedItemInUse item, LivingEntity entity) {
+         EquipmentSlot slot = item.inSlot();
+         if (slot != null) {
+-            Set<EnchantmentLocationBasedEffect> activeEffects = entity.activeLocationDependentEnchantments(slot).remove(this);
+-            if (activeEffects != null) {
+-                for (EnchantmentLocationBasedEffect effect : activeEffects) {
+-                    effect.onDeactivated(item, entity, entity.position(), enchantmentLevel);
++            Map<Enchantment, Set<EnchantmentLocationBasedEffect>> activeLocationDependentEffects = entity.activeLocationDependentEnchantments(slot);
++            synchronized (activeLocationDependentEffects) {
++                Set<EnchantmentLocationBasedEffect> activeEffects = activeLocationDependentEffects.remove(this);
++                if (activeEffects != null) {
++                    for (EnchantmentLocationBasedEffect effect : activeEffects) {
++                        effect.onDeactivated(item, entity, entity.position(), enchantmentLevel);
++                    }
+                 }
+             }
+         }
+@@ -522,12 +_,26 @@
+         return new Enchantment.Builder(definition);
+     }
+ 
++//    TODO: Reimplement. Not sure if we want to patch EnchantmentDefinition or hack this in as an EnchantmentEffectComponent.
++//    /**
++//     * Is this enchantment allowed to be enchanted on books via Enchantment Table
++//     * @return false to disable the vanilla feature
++//     */
++//    public boolean isAllowedOnBooks() {
++//        return true;
++//    }
++
+     public static class Builder {
+         private final Enchantment.EnchantmentDefinition definition;
+         private HolderSet<Enchantment> exclusiveSet = HolderSet.empty();
+         private final Map<DataComponentType<?>, List<?>> effectLists = new HashMap<>();
+         private final DataComponentMap.Builder effectMapBuilder = DataComponentMap.builder();
+ 
++        /**
++         * Neo: Allow customizing or changing the {@link Component} created by the enchantment builder.
++         */
++        protected java.util.function.UnaryOperator<MutableComponent> nameFactory = java.util.function.UnaryOperator.identity();
++
+         public Builder(Enchantment.EnchantmentDefinition definition) {
+             this.definition = definition;
+         }
+@@ -580,6 +_,16 @@
+             return this;
+         }
+ 
++        /**
++         * Allows specifying an operator that can customize the default {@link Component} created by {@link #build(Identifier)}.
++         *
++         * @return this
++         */
++        public Enchantment.Builder withCustomName(java.util.function.UnaryOperator<MutableComponent> nameFactory) {
++            this.nameFactory = nameFactory;
++            return this;
++        }
++
+         private <E> List<E> getEffectsList(DataComponentType<List<E>> type) {
+             return (List<E>)this.effectLists.computeIfAbsent(type, k -> {
+                 ArrayList<E> newList = new ArrayList<>();
+@@ -590,7 +_,8 @@
+ 
+         public Enchantment build(Identifier descriptionKey) {
+             return new Enchantment(
+-                Component.translatable(Util.makeDescriptionId("enchantment", descriptionKey)),
++                // Neo: permit custom name components instead of a single hardcoded translatable component.
++                this.nameFactory.apply(Component.translatable(Util.makeDescriptionId("enchantment", descriptionKey))),
+                 this.definition,
+                 this.exclusiveSet,
+                 this.effectMapBuilder.build()

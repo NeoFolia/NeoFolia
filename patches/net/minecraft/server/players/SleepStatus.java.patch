@@ -1,0 +1,78 @@
+--- a/net/minecraft/server/players/SleepStatus.java
++++ b/net/minecraft/server/players/SleepStatus.java
+@@ -3,48 +_,59 @@
+ import java.util.List;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.Mth;
+-import net.minecraft.world.entity.player.Player;
+ 
+ public class SleepStatus {
+     private int activePlayers;
+     private int sleepingPlayers;
++    private int deepSleepingPlayers;
+ 
+-    public boolean areEnoughSleeping(int sleepPercentageNeeded) {
++    public synchronized boolean areEnoughSleeping(int sleepPercentageNeeded) {
+         return this.sleepingPlayers >= this.sleepersNeeded(sleepPercentageNeeded);
+     }
+ 
+-    public boolean areEnoughDeepSleeping(int sleepPercentageNeeded, List<ServerPlayer> players) {
+-        int deepSleepers = (int)players.stream().filter(Player::isSleepingLongEnough).count();
+-        return deepSleepers >= this.sleepersNeeded(sleepPercentageNeeded);
++    public synchronized boolean areEnoughDeepSleeping(int sleepPercentageNeeded) {
++        return this.deepSleepingPlayers >= this.sleepersNeeded(sleepPercentageNeeded);
+     }
+ 
+-    public int sleepersNeeded(int sleepPercentageNeeded) {
++    public synchronized int sleepersNeeded(int sleepPercentageNeeded) {
+         return Math.max(1, Mth.ceil(this.activePlayers * sleepPercentageNeeded / 100.0F));
+     }
+ 
+-    public void removeAllSleepers() {
++    public synchronized void removeAllSleepers() {
+         this.sleepingPlayers = 0;
++        this.deepSleepingPlayers = 0;
+     }
+ 
+-    public int amountSleeping() {
++    public synchronized int amountSleeping() {
+         return this.sleepingPlayers;
+     }
+ 
+-    public boolean update(List<ServerPlayer> players) {
+-        int oldActivePlayers = this.activePlayers;
+-        int oldSleepingPlayers = this.sleepingPlayers;
+-        this.activePlayers = 0;
+-        this.sleepingPlayers = 0;
+-
++    public synchronized boolean update(List<ServerPlayer> players) {
++        int activePlayers = 0;
++        int sleepingPlayers = 0;
++        int deepSleepingPlayers = 0;
+         for (ServerPlayer player : players) {
+             if (!player.isSpectator()) {
+-                this.activePlayers++;
++                activePlayers++;
+                 if (player.isSleeping()) {
+-                    this.sleepingPlayers++;
++                    sleepingPlayers++;
++                }
++
++                if (player.isSleepingLongEnough()) {
++                    deepSleepingPlayers++;
+                 }
+             }
+         }
+ 
++        return this.update(activePlayers, sleepingPlayers, deepSleepingPlayers);
++    }
++
++    public synchronized boolean update(int activePlayers, int sleepingPlayers, int deepSleepingPlayers) {
++        int oldActivePlayers = this.activePlayers;
++        int oldSleepingPlayers = this.sleepingPlayers;
++        this.activePlayers = activePlayers;
++        this.sleepingPlayers = sleepingPlayers;
++        this.deepSleepingPlayers = deepSleepingPlayers;
+         return (oldSleepingPlayers > 0 || this.sleepingPlayers > 0) && (oldActivePlayers != this.activePlayers || oldSleepingPlayers != this.sleepingPlayers);
+     }
+ }

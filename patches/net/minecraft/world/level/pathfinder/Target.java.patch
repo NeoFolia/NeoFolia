@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/level/pathfinder/Target.java
++++ b/net/minecraft/world/level/pathfinder/Target.java
+@@ -15,22 +_,22 @@
+         super(x, y, z);
+     }
+ 
+-    public void updateBest(float heuristic, Node node) {
++    public synchronized void updateBest(float heuristic, Node node) {
+         if (heuristic < this.bestHeuristic) {
+             this.bestHeuristic = heuristic;
+             this.bestNode = node;
+         }
+     }
+ 
+-    public Node getBestNode() {
++    public synchronized Node getBestNode() {
+         return this.bestNode;
+     }
+ 
+-    public void setReached() {
++    public synchronized void setReached() {
+         this.reached = true;
+     }
+ 
+-    public boolean isReached() {
++    public synchronized boolean isReached() {
+         return this.reached;
+     }
+ 

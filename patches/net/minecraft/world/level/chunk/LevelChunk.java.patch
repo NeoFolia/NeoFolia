@@ -1,0 +1,276 @@
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.server.level.FullChunkStatus;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.ProblemReporter;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.util.debug.DebugStructureInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+@@ -61,6 +_,7 @@
+ import net.minecraft.world.level.storage.TagValueInput;
+ import net.minecraft.world.ticks.LevelChunkTicks;
+ import net.minecraft.world.ticks.TickContainerAccess;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -155,6 +_,7 @@
+         this.setAllStarts(protoChunk.getAllStarts());
+         this.setAllReferences(protoChunk.getAllReferences());
+ 
++        net.neoforged.neoforge.attachment.AttachmentInternals.copyChunkAttachmentsOnPromotion(level.registryAccess(), protoChunk.getAttachmentHolder(), this.getAttachmentHolder());
+         for (Entry<Heightmap.Types, Heightmap> entry : protoChunk.getHeightmaps()) {
+             if (ChunkStatus.FULL.heightmapsAfter().contains(entry.getKey())) {
+                 this.setHeightmap(entry.getKey(), entry.getValue().getRawData());
+@@ -291,7 +_,7 @@
+                     this.level.getChunkSource().onSectionEmptinessChanged(this.chunkPos.x(), SectionPos.blockToSectionCoord(y), this.chunkPos.z(), isEmpty);
+                 }
+ 
+-                if (LightEngine.hasDifferentLightProperties(oldState, state)) {
++                if (LightEngine.hasDifferentLightProperties(this, pos, oldState, state)) {
+                     ProfilerFiller profiler = Profiler.get();
+                     profiler.push("updateSkyLightSources");
+                     this.skyLightSources.update(this, localX, y, localZ);
+@@ -323,7 +_,7 @@
+                 if (!section.getBlockState(localX, localY, localZ).is(newBlock)) {
+                     return null;
+                 } else {
+-                    if (!this.level.isClientSide() && (flags & 512) == 0) {
++                    if (!this.level.isClientSide() && !this.level.isCapturingBlockSnapshots() && (flags & 512) == 0) {
+                         state.onPlace(this.level, pos, oldState, movedByPiston);
+                     }
+ 
+@@ -368,8 +_,12 @@
+         return this.getBlockEntity(pos, LevelChunk.EntityCreationType.CHECK);
+     }
+ 
+-    public @Nullable BlockEntity getBlockEntity(BlockPos pos, LevelChunk.EntityCreationType creationType) {
++    public synchronized @Nullable BlockEntity getBlockEntity(BlockPos pos, LevelChunk.EntityCreationType creationType) {
+         BlockEntity blockEntity = this.blockEntities.get(pos);
++        if (blockEntity != null && blockEntity.isRemoved()) {
++            blockEntities.remove(pos);
++            blockEntity = null;
++        }
+         if (blockEntity == null) {
+             CompoundTag tag = this.pendingBlockEntities.remove(pos);
+             if (tag != null) {
+@@ -387,9 +_,6 @@
+                     this.addAndRegisterBlockEntity(blockEntity);
+                 }
+             }
+-        } else if (blockEntity.isRemoved()) {
+-            this.blockEntities.remove(pos);
+-            return null;
+         }
+ 
+         return blockEntity;
+@@ -404,6 +_,7 @@
+ 
+             this.level.onBlockEntityAdded(blockEntity);
+             this.updateBlockEntityTicker(blockEntity);
++            this.level.addFreshBlockEntities(java.util.List.of(blockEntity));
+         }
+     }
+ 
+@@ -422,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void setBlockEntity(BlockEntity blockEntity) {
++    public synchronized void setBlockEntity(BlockEntity blockEntity) {
+         BlockPos pos = blockEntity.getBlockPos();
+         BlockState blockState = this.getBlockState(pos);
+         if (!blockState.hasBlockEntity()) {
+@@ -447,17 +_,23 @@
+             BlockEntity previousEntry = this.blockEntities.put(pos.immutable(), blockEntity);
+             if (previousEntry != null && previousEntry != blockEntity) {
+                 previousEntry.setRemoved();
++                auxLightManager.removeLightAt(pos);
+             }
+         }
+     }
+ 
+     @Override
+-    public @Nullable CompoundTag getBlockEntityNbtForSaving(BlockPos blockPos, HolderLookup.Provider registryAccess) {
++    public synchronized @Nullable CompoundTag getBlockEntityNbtForSaving(BlockPos blockPos, HolderLookup.Provider registryAccess) {
+         BlockEntity blockEntity = this.getBlockEntity(blockPos);
+         if (blockEntity != null && !blockEntity.isRemoved()) {
++            try {
+             CompoundTag result = blockEntity.saveWithFullMetadata(this.level.registryAccess());
+             result.putBoolean("keepPacked", false);
+             return result;
++            } catch (Exception e) {
++                LOGGER.error("A BlockEntity type {} has thrown an exception trying to write state. It will not persist, Report this to the mod author", blockEntity.getClass().getName(), e);
++                return null;
++            }
+         } else {
+             CompoundTag result = this.pendingBlockEntities.get(blockPos);
+             if (result != null) {
+@@ -471,8 +_,12 @@
+ 
+     @Override
+     public void removeBlockEntity(BlockPos pos) {
++        BlockEntity removeThis = null;
+         if (this.isInLevel()) {
+-            BlockEntity removeThis = this.blockEntities.remove(pos);
++            synchronized (this) {
++                removeThis = this.blockEntities.remove(pos);
++            }
++
+             if (removeThis != null) {
+                 if (this.level instanceof ServerLevel serverLevel) {
+                     this.removeGameEventListener(removeThis, serverLevel);
+@@ -480,6 +_,7 @@
+                 }
+ 
+                 removeThis.setRemoved();
++                auxLightManager.removeLightAt(pos);
+             }
+         }
+ 
+@@ -502,7 +_,7 @@
+         this.gameEventListenerRegistrySections.remove(sectionY);
+     }
+ 
+-    private void removeBlockEntityTicker(BlockPos pos) {
++    private synchronized void removeBlockEntityTicker(BlockPos pos) {
+         LevelChunk.RebindableTickingBlockEntityWrapper ticker = this.tickersInLevel.remove(pos);
+         if (ticker != null) {
+             ticker.rebind(NULL_TICKER);
+@@ -536,7 +_,7 @@
+             blockEntities.accept((pos, type, tag) -> {
+                 BlockEntity blockEntity = this.getBlockEntity(pos, LevelChunk.EntityCreationType.IMMEDIATE);
+                 if (blockEntity != null && tag != null && blockEntity.getType() == type) {
+-                    blockEntity.loadWithComponents(TagValueInput.create(reporter.forChild(blockEntity.problemPath()), this.level.registryAccess(), tag));
++                    blockEntity.handleUpdateTag(TagValueInput.create(reporter.forChild(blockEntity.problemPath()), this.level.registryAccess(), tag));
+                 }
+             });
+         }
+@@ -556,8 +_,8 @@
+         return this.level;
+     }
+ 
+-    public Map<BlockPos, BlockEntity> getBlockEntities() {
+-        return this.blockEntities;
++    public synchronized Map<BlockPos, BlockEntity> getBlockEntities() {
++        return Map.copyOf(this.blockEntities);
+     }
+ 
+     public void postProcessGeneration(ServerLevel level) {
+@@ -575,7 +_,7 @@
+                     }
+ 
+                     if (blockState.getBlock() instanceof LiquidBlock) {
+-                        blockState.tick(level, blockPos, level.getRandom());
++                        blockState.tick(level, blockPos, chunkRandom(level));
+                     } else {
+                         BlockState blockStateNew = Block.updateFromNeighbourShapes(blockState, level, blockPos);
+                         if (blockStateNew != blockState) {
+@@ -596,6 +_,10 @@
+         this.upgradeData.upgrade(this);
+     }
+ 
++    private static RandomSource chunkRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
++    }
++
+     private @Nullable BlockEntity promotePendingBlockEntity(BlockPos pos, CompoundTag tag) {
+         BlockState state = this.getBlockState(pos);
+         BlockEntity blockEntity;
+@@ -675,14 +_,28 @@
+     }
+ 
+     public void clearAllBlockEntities() {
+-        this.blockEntities.values().forEach(BlockEntity::setRemoved);
+-        this.blockEntities.clear();
+-        this.tickersInLevel.values().forEach(ticker -> ticker.rebind(NULL_TICKER));
+-        this.tickersInLevel.clear();
++        List<BlockEntity> blockEntities;
++        List<LevelChunk.RebindableTickingBlockEntityWrapper> tickers;
++        synchronized (this) {
++            blockEntities = List.copyOf(this.blockEntities.values());
++            tickers = List.copyOf(this.tickersInLevel.values());
++            this.blockEntities.clear();
++            this.tickersInLevel.clear();
++        }
++
++        blockEntities.forEach(BlockEntity::onChunkUnloaded);
++        blockEntities.forEach(BlockEntity::setRemoved);
++        tickers.forEach(ticker -> ticker.rebind(NULL_TICKER));
+     }
+ 
+     public void registerAllBlockEntitiesAfterLevelLoad() {
+-        this.blockEntities.values().forEach(blockEntity -> {
++        List<BlockEntity> blockEntities;
++        synchronized (this) {
++            blockEntities = List.copyOf(this.blockEntities.values());
++        }
++
++        this.level.addFreshBlockEntities(blockEntities);
++        blockEntities.forEach(blockEntity -> {
+             if (this.level instanceof ServerLevel serverLevel) {
+                 this.addGameEventListener(blockEntity, serverLevel);
+             }
+@@ -702,7 +_,7 @@
+         }
+     }
+ 
+-    private <T extends BlockEntity> void updateBlockEntityTicker(T blockEntity) {
++    private synchronized <T extends BlockEntity> void updateBlockEntityTicker(T blockEntity) {
+         BlockState state = blockEntity.getBlockState();
+         BlockEntityTicker<T> ticker = state.getTicker(this.level, (BlockEntityType<T>)blockEntity.getType());
+         if (ticker == null) {
+@@ -728,6 +_,19 @@
+         return new LevelChunk.BoundTickingBlockEntity<>(blockEntity, ticker);
+     }
+ 
++    // Neo: Threadsafe lighting system for BlockEntities that change lighting based on dynamic data changing.
++    private final net.neoforged.neoforge.common.world.LevelChunkAuxiliaryLightManager auxLightManager = new net.neoforged.neoforge.common.world.LevelChunkAuxiliaryLightManager(this);
++
++    @Override
++    public net.neoforged.neoforge.common.world.LevelChunkAuxiliaryLightManager getAuxLightManager(ChunkPos pos) {
++        return auxLightManager;
++    }
++
++    @Override
++    public final void syncData(net.neoforged.neoforge.attachment.AttachmentType<?> type) {
++        net.neoforged.neoforge.attachment.AttachmentSync.syncChunkUpdate(this, getAttachmentHolder(), type);
++    }
++
+     private class BoundTickingBlockEntity<T extends BlockEntity> implements TickingBlockEntity {
+         private final T blockEntity;
+         private final BlockEntityTicker<T> ticker;
+@@ -747,6 +_,7 @@
+                 if (LevelChunk.this.isTicking(pos)) {
+                     try {
+                         ProfilerFiller profiler = Profiler.get();
++                        net.neoforged.neoforge.server.timings.TimeTracker.BLOCK_ENTITY_UPDATE.trackStart(blockEntity);
+                         profiler.push(this::getType);
+                         BlockState blockState = LevelChunk.this.getBlockState(pos);
+                         if (this.blockEntity.getType().isValid(blockState)) {
+@@ -768,7 +_,14 @@
+                         CrashReport report = CrashReport.forThrowable(var5, "Ticking block entity");
+                         CrashReportCategory category = report.addCategory("Block entity being ticked");
+                         this.blockEntity.fillCrashReportCategory(category);
++                        if (net.neoforged.neoforge.common.config.NeoForgeServerConfig.INSTANCE.removeErroringBlockEntities.get()) {
++                            LOGGER.error("{}", report.getFriendlyReport(net.minecraft.ReportType.CRASH));
++                            blockEntity.setRemoved();
++                            LevelChunk.this.removeBlockEntity(blockEntity.getBlockPos());
++                        } else
+                         throw new ReportedException(report);
++                    } finally {
++                        net.neoforged.neoforge.server.timings.TimeTracker.BLOCK_ENTITY_UPDATE.trackEnd(blockEntity);
+                     }
+                 }
+             }
+@@ -807,7 +_,7 @@
+     }
+ 
+     private static class RebindableTickingBlockEntityWrapper implements TickingBlockEntity {
+-        private TickingBlockEntity ticker;
++        private volatile TickingBlockEntity ticker;
+ 
+         private RebindableTickingBlockEntityWrapper(TickingBlockEntity ticker) {
+             this.ticker = ticker;

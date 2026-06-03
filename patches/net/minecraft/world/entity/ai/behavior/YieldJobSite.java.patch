@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/ai/behavior/YieldJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/YieldJobSite.java
+@@ -15,7 +_,7 @@
+ import net.minecraft.world.level.pathfinder.Path;
+ 
+ public class YieldJobSite {
+-    public static BehaviorControl<Villager> create(float speedModifier) {
++    public static synchronized BehaviorControl<Villager> create(float speedModifier) {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.present(MemoryModuleType.POTENTIAL_JOB_SITE),
+@@ -37,12 +_,13 @@
+                             if (poiType.isEmpty()) {
+                                 return true;
+                             } else {
+-                                i.<List<LivingEntity>>get(nearestEntities)
++                                Holder<PoiType> poiTypeValue = poiType.orElseThrow();
++                                List.copyOf(i.<List<LivingEntity>>get(nearestEntities))
+                                     .stream()
+                                     .filter(v -> v instanceof Villager && v != body)
+                                     .map(v -> (Villager)v)
+                                     .filter(LivingEntity::isAlive)
+-                                    .filter(v -> nearbyWantsJobsite(poiType.get(), v, poiPos))
++                                    .filter(v -> nearbyWantsJobsite(poiTypeValue, v, poiPos))
+                                     .findFirst()
+                                     .ifPresent(nearbyVillager -> {
+                                         walkTarget.erase();
+@@ -62,7 +_,7 @@
+         );
+     }
+ 
+-    private static boolean nearbyWantsJobsite(Holder<PoiType> type, Villager nearbyVillager, BlockPos poiPos) {
++    private static synchronized boolean nearbyWantsJobsite(Holder<PoiType> type, Villager nearbyVillager, BlockPos poiPos) {
+         boolean nearbyHasPotentialJobSite = nearbyVillager.getBrain().getMemory(MemoryModuleType.POTENTIAL_JOB_SITE).isPresent();
+         if (nearbyHasPotentialJobSite) {
+             return false;
+@@ -72,14 +_,14 @@
+             if (nearbyProfession.value().heldJobSite().test(type)) {
+                 return nearbyVillagerJobSiteMemory.isEmpty()
+                     ? canReachPos(nearbyVillager, poiPos, type.value())
+-                    : nearbyVillagerJobSiteMemory.get().pos().equals(poiPos);
++                    : nearbyVillagerJobSiteMemory.map(GlobalPos::pos).map(poiPos::equals).orElse(false);
+             } else {
+                 return false;
+             }
+         }
+     }
+ 
+-    private static boolean canReachPos(PathfinderMob nearbyVillager, BlockPos poiPos, PoiType type) {
++    private static synchronized boolean canReachPos(PathfinderMob nearbyVillager, BlockPos poiPos, PoiType type) {
+         Path path = nearbyVillager.getNavigation().createPath(poiPos, type.validRange());
+         return path != null && path.canReach();
+     }

@@ -1,0 +1,117 @@
+--- a/net/minecraft/world/entity/ai/behavior/PrepareRamNearestTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/PrepareRamNearestTarget.java
+@@ -68,14 +_,14 @@
+         this.getPrepareRamSound = getPrepareRamSound;
+     }
+ 
+-    protected void start(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void start(ServerLevel level, PathfinderMob body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+         brain.getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES)
+-            .flatMap(livingEntities -> livingEntities.findClosest(entity -> this.ramTargeting.test(level, body, entity)))
++            .flatMap(livingEntities -> livingEntities.findClosest(entity -> BehaviorUtils.regionSafeEntity(body, entity) != null && this.ramTargeting.test(level, body, entity)))
+             .ifPresent(livingEntity -> this.chooseRamPosition(body, livingEntity));
+     }
+ 
+-    protected void stop(ServerLevel level, E body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, E body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+         if (!brain.hasMemoryValue(MemoryModuleType.RAM_TARGET)) {
+             level.broadcastEntityEvent(body, (byte)59);
+@@ -83,19 +_,29 @@
+         }
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
+-        return this.ramCandidate.isPresent() && this.ramCandidate.get().getTarget().isAlive();
++    protected synchronized boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
++        return this.ramCandidate.isPresent()
++            && BehaviorUtils.regionSafeEntity(body, this.ramCandidate.get().getTarget()) != null
++            && this.ramCandidate.get().getTarget().isAlive();
+     }
+ 
+-    protected void tick(ServerLevel level, E body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, E body, long timestamp) {
+         if (!this.ramCandidate.isEmpty()) {
++            LivingEntity target = BehaviorUtils.regionSafeEntity(body, this.ramCandidate.get().getTarget());
++            if (target == null) {
++                this.ramCandidate = Optional.empty();
++                body.getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
++                body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
++                return;
++            }
++
+             body.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(this.ramCandidate.get().getStartPosition(), this.walkSpeed, 0));
+-            body.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(this.ramCandidate.get().getTarget(), true));
+-            boolean didTargetMove = !this.ramCandidate.get().getTarget().blockPosition().equals(this.ramCandidate.get().getTargetPosition());
++            body.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(target, true));
++            boolean didTargetMove = !target.blockPosition().equals(this.ramCandidate.get().getTargetPosition());
+             if (didTargetMove) {
+                 level.broadcastEntityEvent(body, (byte)59);
+                 body.getNavigation().stop();
+-                this.chooseRamPosition(body, this.ramCandidate.get().target);
++                this.chooseRamPosition(body, target);
+             } else {
+                 BlockPos startRamPos = body.blockPosition();
+                 if (startRamPos.equals(this.ramCandidate.get().getStartPosition())) {
+@@ -114,14 +_,14 @@
+         }
+     }
+ 
+-    private Vec3 getEdgeOfBlock(BlockPos startRamPos, BlockPos targetPos) {
++    private synchronized Vec3 getEdgeOfBlock(BlockPos startRamPos, BlockPos targetPos) {
+         double offsetDistance = 0.5;
+         double xOffset = 0.5 * Mth.sign(targetPos.getX() - startRamPos.getX());
+         double zOffset = 0.5 * Mth.sign(targetPos.getZ() - startRamPos.getZ());
+         return Vec3.atBottomCenterOf(targetPos).add(xOffset, 0.0, zOffset);
+     }
+ 
+-    private Optional<BlockPos> calculateRammingStartPosition(PathfinderMob body, LivingEntity ramableTarget) {
++    private synchronized Optional<BlockPos> calculateRammingStartPosition(PathfinderMob body, LivingEntity ramableTarget) {
+         BlockPos targetPos = ramableTarget.blockPosition();
+         if (!this.isWalkableBlock(body, targetPos)) {
+             return Optional.empty();
+@@ -152,14 +_,20 @@
+         }
+     }
+ 
+-    private boolean isWalkableBlock(PathfinderMob body, BlockPos targetPos) {
++    private synchronized boolean isWalkableBlock(PathfinderMob body, BlockPos targetPos) {
+         return body.getNavigation().isStableDestination(targetPos) && body.getPathfindingMalus(WalkNodeEvaluator.getPathTypeStatic(body, targetPos)) == 0.0F;
+     }
+ 
+-    private void chooseRamPosition(PathfinderMob body, LivingEntity ramableTarget) {
++    private synchronized void chooseRamPosition(PathfinderMob body, LivingEntity ramableTarget) {
++        LivingEntity safeTarget = BehaviorUtils.regionSafeEntity(body, ramableTarget);
++        if (safeTarget == null) {
++            this.ramCandidate = Optional.empty();
++            return;
++        }
++
+         this.reachedRamPositionTimestamp = Optional.empty();
+-        this.ramCandidate = this.calculateRammingStartPosition(body, ramableTarget)
+-            .map(pos -> new PrepareRamNearestTarget.RamCandidate(pos, ramableTarget.blockPosition(), ramableTarget));
++        this.ramCandidate = this.calculateRammingStartPosition(body, safeTarget)
++            .map(pos -> new PrepareRamNearestTarget.RamCandidate(pos, safeTarget.blockPosition(), safeTarget));
+     }
+ 
+     public static class RamCandidate {
+@@ -173,15 +_,15 @@
+             this.target = target;
+         }
+ 
+-        public BlockPos getStartPosition() {
++        public synchronized BlockPos getStartPosition() {
+             return this.startPosition;
+         }
+ 
+-        public BlockPos getTargetPosition() {
++        public synchronized BlockPos getTargetPosition() {
+             return this.targetPosition;
+         }
+ 
+-        public LivingEntity getTarget() {
++        public synchronized LivingEntity getTarget() {
+             return this.target;
+         }
+     }

@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/entity/NeutralMob.java
++++ b/net/minecraft/world/entity/NeutralMob.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface NeutralMob {
+@@ -51,12 +_,12 @@
+ 
+         if (level instanceof ServerLevel) {
+             this.setPersistentAngerTarget(EntityReference.read(input, "angry_at"));
+-            this.setTarget(EntityReference.getLivingEntity(this.getPersistentAngerTarget(), level));
++            this.setTarget(this.regionSafeTarget(EntityReference.getLivingEntity(this.getPersistentAngerTarget(), level)));
+         }
+     }
+ 
+     default void updatePersistentAnger(ServerLevel level, boolean stayAngryIfTargetPresent) {
+-        LivingEntity previousTarget = this.getTargetUnchecked();
++        LivingEntity previousTarget = this.regionSafeTarget(this.getTargetUnchecked());
+         EntityReference<LivingEntity> persistentAngerTarget = this.getPersistentAngerTarget();
+         if (previousTarget != null
+             && previousTarget.isDeadOrDying()
+@@ -65,7 +_,7 @@
+             && previousTarget instanceof Mob) {
+             this.stopBeingAngry();
+         } else {
+-            LivingEntity target = this.getTarget();
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
+             if (target != null) {
+                 boolean newTarget = persistentAngerTarget == null || !persistentAngerTarget.matches(target);
+                 if (newTarget) {
+@@ -81,18 +_,27 @@
+                 this.stopBeingAngry();
+             }
+ 
+-            if (EntityReference.getLivingEntity(persistentAngerTarget, level) instanceof Player player
++            if (this.regionSafeTarget(EntityReference.getLivingEntity(persistentAngerTarget, level)) instanceof Player player
+                 && (player.isCreative() || player.isSpectator() || level.getDifficulty() == Difficulty.PEACEFUL)) {
+                 this.stopBeingAngry();
+             }
+         }
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     private static boolean isValidPlayerTarget(LivingEntity target) {
+         return target instanceof Player player && !player.isCreative() && !player.isSpectator() && player.level().getDifficulty() != Difficulty.PEACEFUL;
+     }
+ 
+     default boolean isAngryAt(LivingEntity entity, ServerLevel level) {
++        entity = this.regionSafeTarget(entity);
++        if (entity == null) {
++            return false;
++        }
++
+         if (!this.canAttack(entity)) {
+             return false;
+         } else if (isValidPlayerTarget(entity) && this.isAngryAtAllPlayers(level)) {

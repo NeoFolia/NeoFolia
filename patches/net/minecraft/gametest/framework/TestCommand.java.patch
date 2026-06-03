@@ -1,0 +1,19 @@
+--- a/net/minecraft/gametest/framework/TestCommand.java
++++ b/net/minecraft/gametest/framework/TestCommand.java
+@@ -54,6 +_,7 @@
+ import net.minecraft.world.level.block.entity.TestInstanceBlockEntity;
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.phys.BlockHitResult;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.mutable.MutableInt;
+ 
+ public class TestCommand {
+@@ -534,7 +_,7 @@
+                         .withClickEvent(new ClickEvent.CopyToClipboard("final BlockPos " + varName + " = new BlockPos(" + targetPosDescription + ");"))
+                 );
+             source.sendSuccess(() -> Component.translatable("commands.test.relative_position", testName, coords), false);
+-            player.connection.send(new ClientboundGameTestHighlightPosPacket(targetPosAbsolute, targetPosRelative));
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundGameTestHighlightPosPacket(targetPosAbsolute, targetPosRelative));
+             return 1;
+         } else {
+             throw TEST_INSTANCE_COULD_NOT_BE_FOUND.create();

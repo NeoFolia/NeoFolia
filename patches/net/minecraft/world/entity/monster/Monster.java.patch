@@ -1,0 +1,39 @@
+--- a/net/minecraft/world/entity/monster/Monster.java
++++ b/net/minecraft/world/entity/monster/Monster.java
+@@ -27,6 +_,7 @@
+ import net.minecraft.world.level.ServerLevelAccessor;
+ import net.minecraft.world.level.dimension.DimensionType;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class Monster extends PathfinderMob implements Enemy {
+     protected Monster(EntityType<? extends Monster> type, Level level) {
+@@ -115,7 +_,12 @@
+     public static boolean checkSurfaceMonstersSpawnRules(
+         EntityType<? extends Mob> type, ServerLevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return checkMonsterSpawnRules(type, level, spawnReason, pos, random) && (EntitySpawnReason.isSpawner(spawnReason) || level.canSeeSky(pos));
++        return checkMonsterSpawnRules(type, level, spawnReason, pos, random)
++            && (EntitySpawnReason.isSpawner(spawnReason) || canReadBlock(level, pos) && level.canSeeSky(pos));
++    }
++
++    private static boolean canReadBlock(LevelAccessor level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     public static AttributeSupplier.Builder createMonsterAttributes() {
+@@ -139,11 +_,11 @@
+     @Override
+     public ItemStack getProjectile(ItemStack heldWeapon) {
+         if (heldWeapon.getItem() instanceof ProjectileWeaponItem) {
+-            Predicate<ItemStack> supportedProjectiles = ((ProjectileWeaponItem)heldWeapon.getItem()).getSupportedHeldProjectiles();
++            Predicate<ItemStack> supportedProjectiles = ((ProjectileWeaponItem)heldWeapon.getItem()).getSupportedHeldProjectiles(heldWeapon);
+             ItemStack heldProjectile = ProjectileWeaponItem.getHeldProjectile(this, supportedProjectiles);
+-            return heldProjectile.isEmpty() ? new ItemStack(Items.ARROW) : heldProjectile;
++            return net.neoforged.neoforge.common.CommonHooks.getProjectile(this, heldWeapon, heldProjectile.isEmpty() ? new ItemStack(Items.ARROW) : heldProjectile);
+         } else {
+-            return ItemStack.EMPTY;
++            return net.neoforged.neoforge.common.CommonHooks.getProjectile(this, heldWeapon, ItemStack.EMPTY);
+         }
+     }
+ }

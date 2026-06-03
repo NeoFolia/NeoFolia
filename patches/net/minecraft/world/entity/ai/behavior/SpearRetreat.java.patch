@@ -1,0 +1,69 @@
+--- a/net/minecraft/world/entity/ai/behavior/SpearRetreat.java
++++ b/net/minecraft/world/entity/ai/behavior/SpearRetreat.java
+@@ -23,20 +_,24 @@
+         this.speedModifierWhenRepositioning = speedModifierWhenRepositioning;
+     }
+ 
+-    private @Nullable LivingEntity getTarget(PathfinderMob mob) {
+-        return mob.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET).orElse(null);
++    private synchronized @Nullable LivingEntity getTarget(PathfinderMob mob) {
++        return BehaviorUtils.regionSafeEntity(mob, mob.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET).orElse(null));
+     }
+ 
+-    private boolean ableToAttack(PathfinderMob mob) {
++    private synchronized boolean ableToAttack(PathfinderMob mob) {
+         return this.getTarget(mob) != null && mob.getMainHandItem().has(DataComponents.KINETIC_WEAPON);
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, PathfinderMob body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, PathfinderMob body) {
+         if (this.ableToAttack(body) && !body.isUsingItem()) {
+             if (body.getBrain().getMemory(MemoryModuleType.SPEAR_STATUS).orElse(SpearAttack.SpearStatus.APPROACH) != SpearAttack.SpearStatus.RETREAT) {
+                 return false;
+             } else {
+                 LivingEntity target = this.getTarget(body);
++                if (target == null) {
++                    return false;
++                }
++
+                 double targetDistSqr = body.distanceToSqr(target.getX(), target.getY(), target.getZ());
+                 int mountDistance = body.isPassenger() ? 2 : 0;
+                 double distance = Math.sqrt(targetDistSqr);
+@@ -55,21 +_,25 @@
+         }
+     }
+ 
+-    protected void start(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void start(ServerLevel level, PathfinderMob body, long timestamp) {
+         body.setAggressive(true);
+         body.getBrain().setMemory(MemoryModuleType.SPEAR_FLEEING_TIME, 0);
+         super.start(level, body, timestamp);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, PathfinderMob body, long timestamp) {
+         return body.getBrain().getMemory(MemoryModuleType.SPEAR_FLEEING_TIME).orElse(100) < 100
+             && body.getBrain().getMemory(MemoryModuleType.SPEAR_FLEEING_POSITION).isPresent()
+             && !body.getNavigation().isDone()
+             && this.ableToAttack(body);
+     }
+ 
+-    protected void tick(ServerLevel level, PathfinderMob mob, long timestamp) {
++    protected synchronized void tick(ServerLevel level, PathfinderMob mob, long timestamp) {
+         LivingEntity target = this.getTarget(mob);
++        if (target == null) {
++            return;
++        }
++
+         float speedModifier = mob.getRootVehicle() instanceof Mob vehicleMob ? vehicleMob.chargeSpeedModifier() : 1.0F;
+         mob.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(target, true));
+         mob.getBrain().setMemory(MemoryModuleType.SPEAR_FLEEING_TIME, mob.getBrain().getMemory(MemoryModuleType.SPEAR_FLEEING_TIME).orElse(0) + 1);
+@@ -78,7 +_,7 @@
+             .ifPresent(fleePos -> mob.getNavigation().moveTo(fleePos.x, fleePos.y, fleePos.z, speedModifier * this.speedModifierWhenRepositioning));
+     }
+ 
+-    protected void stop(ServerLevel level, PathfinderMob body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, PathfinderMob body, long timestamp) {
+         body.getNavigation().stop();
+         body.setAggressive(false);
+         body.stopUsingItem();

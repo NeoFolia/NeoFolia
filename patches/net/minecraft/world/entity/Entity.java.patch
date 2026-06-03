@@ -1,0 +1,1493 @@
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -154,11 +_,14 @@
+ import net.minecraft.world.scores.Scoreboard;
+ import net.minecraft.world.scores.Team;
+ import net.minecraft.world.waypoints.WaypointTransmitter;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jetbrains.annotations.Contract;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+ public abstract class Entity
++    extends net.neoforged.neoforge.attachment.AttachmentHolder
+     implements Nameable,
+     EntityAccess,
+     ScoreHolder,
+@@ -205,6 +_,7 @@
+     private static final int MAX_BLOCK_ITERATIONS_ALONG_TRAVEL_PER_TICK = 16;
+     private static final double MAX_MOVEMENT_RESETTING_TRACE_DISTANCE = 8.0;
+     private static double viewScale = 1.0;
++    @Deprecated // Neo: Use the getter to allow overriding in mods
+     private final EntityType<?> type;
+     private boolean requiresPrecisePosition;
+     private int id = ENTITY_COUNTER.incrementAndGet();
+@@ -216,15 +_,15 @@
+     public double xo;
+     public double yo;
+     public double zo;
+-    private Vec3 position;
+-    private BlockPos blockPosition;
+-    private ChunkPos chunkPosition;
++    private volatile Vec3 position;
++    private volatile BlockPos blockPosition;
++    private volatile ChunkPos chunkPosition;
+     private Vec3 deltaMovement = Vec3.ZERO;
+     private float yRot;
+     private float xRot;
+     public float yRotO;
+     public float xRotO;
+-    private AABB bb = INITIAL_AABB;
++    private volatile AABB bb = INITIAL_AABB;
+     private boolean onGround;
+     public boolean horizontalCollision;
+     public boolean verticalCollision;
+@@ -296,8 +_,6 @@
+     public static final int MAX_MOVEMENTS_HANDELED_PER_TICK = 100;
+     private final ArrayDeque<Entity.Movement> movementThisTick = new ArrayDeque<>(100);
+     private final List<Entity.Movement> finalMovementsThisTick = new ObjectArrayList<>();
+-    private final LongSet visitedBlocks = new LongOpenHashSet();
+-    private final InsideBlockEffectApplier.StepBasedCollector insideEffectCollector = new InsideBlockEffectApplier.StepBasedCollector();
+     private CustomData customData = CustomData.EMPTY;
+ 
+     public Entity(EntityType<?> type, Level level) {
+@@ -319,7 +_,10 @@
+         this.defineSynchedData(entityDataBuilder);
+         this.entityData = entityDataBuilder.build();
+         this.setPos(0.0, 0.0, 0.0);
++        net.neoforged.neoforge.event.entity.EntityEvent.Size sizeEvent = net.neoforged.neoforge.event.EventHooks.getEntitySizeForge(this, Pose.STANDING, this.dimensions);
++        this.dimensions = sizeEvent.getNewSize();
+         this.eyeHeight = this.dimensions.eyeHeight();
++        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.entity.EntityEvent.EntityConstructing(this));
+     }
+ 
+     public boolean isColliding(BlockPos pos, BlockState state) {
+@@ -341,11 +_,11 @@
+     }
+ 
+     public final void unRide() {
+-        if (this.isVehicle()) {
++        if (this.hasPassengerRelationship()) {
+             this.ejectPassengers();
+         }
+ 
+-        if (this.isPassenger()) {
++        if (this.hasVehicleRelationship()) {
+             this.stopRiding();
+         }
+     }
+@@ -384,15 +_,15 @@
+         this.id = id;
+     }
+ 
+-    public Set<String> entityTags() {
+-        return this.tags;
++    public synchronized Set<String> entityTags() {
++        return Set.copyOf(this.tags);
+     }
+ 
+-    public boolean addTag(String tag) {
++    public synchronized boolean addTag(String tag) {
+         return this.tags.size() >= 1024 ? false : this.tags.add(tag);
+     }
+ 
+-    public boolean removeTag(String tag) {
++    public synchronized boolean removeTag(String tag) {
+         return this.tags.remove(tag);
+     }
+ 
+@@ -463,12 +_,12 @@
+         this.setPos(pos.x(), pos.y(), pos.z());
+     }
+ 
+-    public void setPos(double x, double y, double z) {
++    public synchronized void setPos(double x, double y, double z) {
+         this.setPosRaw(x, y, z);
+         this.setBoundingBox(this.makeBoundingBox());
+     }
+ 
+-    protected final AABB makeBoundingBox() {
++    protected final synchronized AABB makeBoundingBox() {
+         return this.makeBoundingBox(this.position);
+     }
+ 
+@@ -476,7 +_,7 @@
+         return this.dimensions.makeBoundingBox(position);
+     }
+ 
+-    protected void reapplyPosition() {
++    protected synchronized void reapplyPosition() {
+         this.lastKnownPosition = null;
+         this.setPos(this.position.x, this.position.y, this.position.z);
+     }
+@@ -490,8 +_,9 @@
+         this.xRotO += xDelta;
+         this.yRotO += yDelta;
+         this.xRotO = Mth.clamp(this.xRotO, -90.0F, 90.0F);
+-        if (this.vehicle != null) {
+-            this.vehicle.onPassengerTurned(this);
++        Entity vehicle = this.getVehicle();
++        if (vehicle != null) {
++            vehicle.onPassengerTurned(this);
+         }
+     }
+ 
+@@ -507,7 +_,8 @@
+         profiler.push("entityBaseTick");
+         this.computeSpeed();
+         this.inBlockState = null;
+-        if (this.isPassenger() && this.getVehicle().isRemoved()) {
++        Entity vehicle = this.getVehicle();
++        if (vehicle != null && vehicle.isRemoved()) {
+             this.stopRiding();
+         }
+ 
+@@ -542,7 +_,7 @@
+         }
+ 
+         if (this.isInLava()) {
+-            this.fallDistance *= 0.5;
++            this.fallDistance *= this.getFluidFallDistanceModifier(net.neoforged.neoforge.common.NeoForgeMod.LAVA_TYPE.value());
+         }
+ 
+         this.checkBelowWorld();
+@@ -658,7 +_,7 @@
+         return this.level().noCollision(this, box) && !this.level().containsAnyLiquid(box);
+     }
+ 
+-    public void setOnGround(boolean onGround) {
++    public synchronized void setOnGround(boolean onGround) {
+         this.onGround = onGround;
+         this.checkSupportingBlock(onGround, null);
+     }
+@@ -667,17 +_,17 @@
+         this.setOnGroundWithMovement(onGround, this.horizontalCollision, movement);
+     }
+ 
+-    public void setOnGroundWithMovement(boolean onGround, boolean horizontalCollision, Vec3 movement) {
++    public synchronized void setOnGroundWithMovement(boolean onGround, boolean horizontalCollision, Vec3 movement) {
+         this.onGround = onGround;
+         this.horizontalCollision = horizontalCollision;
+         this.checkSupportingBlock(onGround, movement);
+     }
+ 
+-    public boolean isSupportedBy(BlockPos pos) {
++    public synchronized boolean isSupportedBy(BlockPos pos) {
+         return this.mainSupportingBlockPos.isPresent() && this.mainSupportingBlockPos.get().equals(pos);
+     }
+ 
+-    protected void checkSupportingBlock(boolean onGround, @Nullable Vec3 movement) {
++    protected synchronized void checkSupportingBlock(boolean onGround, @Nullable Vec3 movement) {
+         if (onGround) {
+             AABB boundingBox = this.getBoundingBox();
+             AABB testArea = new AABB(boundingBox.minX, boundingBox.minY - 1.0E-6, boundingBox.minZ, boundingBox.maxX, boundingBox.minY, boundingBox.maxZ);
+@@ -699,11 +_,11 @@
+         }
+     }
+ 
+-    public boolean onGround() {
++    public synchronized boolean onGround() {
+         return this.onGround;
+     }
+ 
+-    public void move(MoverType moverType, Vec3 delta) {
++    public synchronized void move(MoverType moverType, Vec3 delta) {
+         if (this.noPhysics) {
+             this.setPos(this.getX() + delta.x, this.getY() + delta.y, this.getZ() + delta.z);
+             this.horizontalCollision = false;
+@@ -767,7 +_,7 @@
+             }
+ 
+             BlockPos effectPos = this.getOnPosLegacy();
+-            BlockState effectState = this.level().getBlockState(effectPos);
++            BlockState effectState = this.getBlockStateIfReadable(effectPos, Blocks.AIR.defaultBlockState());
+             if (this.isLocalInstanceAuthoritative()) {
+                 this.checkFallDamage(movement.y, this.onGround(), effectState, effectPos);
+             }
+@@ -806,7 +_,7 @@
+         float movedDistance = (float)(clippedMovement.length() * 0.6F);
+         float horizontalMovedDistance = (float)(clippedMovement.horizontalDistance() * 0.6F);
+         BlockPos supportingPos = this.getOnPos();
+-        BlockState supportingState = this.level().getBlockState(supportingPos);
++        BlockState supportingState = this.getBlockStateIfReadable(supportingPos, Blocks.AIR.defaultBlockState());
+         boolean climbing = this.isStateClimbable(supportingState);
+         this.moveDist += climbing ? movedDistance : horizontalMovedDistance;
+         this.flyDist += movedDistance;
+@@ -837,23 +_,33 @@
+     }
+ 
+     protected void applyEffectsFromBlocks() {
+-        this.finalMovementsThisTick.clear();
+-        this.finalMovementsThisTick.addAll(this.movementThisTick);
+-        this.movementThisTick.clear();
+-        if (this.finalMovementsThisTick.isEmpty()) {
+-            this.finalMovementsThisTick.add(new Entity.Movement(this.oldPosition(), this.position()));
+-        } else if (this.finalMovementsThisTick.getLast().to.distanceToSqr(this.position()) > 9.9999994E-11F) {
+-            this.finalMovementsThisTick.add(new Entity.Movement(this.finalMovementsThisTick.getLast().to, this.position()));
++        List<Entity.Movement> movements;
++        synchronized (this) {
++            this.finalMovementsThisTick.clear();
++            this.finalMovementsThisTick.addAll(this.movementThisTick);
++            this.movementThisTick.clear();
++            if (this.finalMovementsThisTick.isEmpty()) {
++                this.finalMovementsThisTick.add(new Entity.Movement(this.oldPosition(), this.position()));
++            } else if (this.finalMovementsThisTick.getLast().to.distanceToSqr(this.position()) > 9.9999994E-11F) {
++                this.finalMovementsThisTick.add(new Entity.Movement(this.finalMovementsThisTick.getLast().to, this.position()));
++            }
++
++            movements = List.copyOf(this.finalMovementsThisTick);
+         }
+ 
+-        this.applyEffectsFromBlocks(this.finalMovementsThisTick);
++        this.applyEffectsFromBlocks(movements);
+     }
+ 
+     protected void applyEffectsFromBlocksForLastMovements() {
+-        this.applyEffectsFromBlocks(this.finalMovementsThisTick);
++        List<Entity.Movement> movements;
++        synchronized (this) {
++            movements = List.copyOf(this.finalMovementsThisTick);
++        }
++
++        this.applyEffectsFromBlocks(movements);
+     }
+ 
+-    private void addMovementThisTick(Entity.Movement movement) {
++    private synchronized void addMovementThisTick(Entity.Movement movement) {
+         if (this.movementThisTick.size() >= 100) {
+             Entity.Movement first = this.movementThisTick.removeFirst();
+             Entity.Movement second = this.movementThisTick.removeFirst();
+@@ -864,13 +_,13 @@
+         this.movementThisTick.add(movement);
+     }
+ 
+-    public void removeLatestMovementRecording() {
++    public synchronized void removeLatestMovementRecording() {
+         if (!this.movementThisTick.isEmpty()) {
+             this.movementThisTick.removeLast();
+         }
+     }
+ 
+-    protected void clearMovementThisTick() {
++    protected synchronized void clearMovementThisTick() {
+         this.movementThisTick.clear();
+     }
+ 
+@@ -886,15 +_,16 @@
+         if (this.isAffectedByBlocks()) {
+             if (this.onGround()) {
+                 BlockPos effectPos = this.getOnPosLegacy();
+-                BlockState effectState = this.level().getBlockState(effectPos);
++                BlockState effectState = this.getBlockStateIfReadable(effectPos, Blocks.AIR.defaultBlockState());
+                 effectState.getBlock().stepOn(this.level(), effectPos, effectState, this);
+             }
+ 
+             boolean wasOnFire = this.isOnFire();
+             boolean wasFreezing = this.isFreezing();
+             int previousRemainingFireTicks = this.getRemainingFireTicks();
+-            this.checkInsideBlocks(movements, this.insideEffectCollector);
+-            this.insideEffectCollector.applyAndClear(this);
++            InsideBlockEffectApplier.StepBasedCollector effectCollector = new InsideBlockEffectApplier.StepBasedCollector();
++            this.checkInsideBlocks(movements, effectCollector);
++            effectCollector.applyAndClear(this);
+             if (this.isInRain()) {
+                 this.clearFire();
+             }
+@@ -995,10 +_,8 @@
+             if (!(offset > 1.0E-5F)) {
+                 return getOnPos;
+             } else {
+-                BlockState belowState = this.level().getBlockState(getOnPos);
+-                return (!(offset <= 0.5) || !belowState.is(BlockTags.FENCES))
+-                        && !belowState.is(BlockTags.WALLS)
+-                        && !(belowState.getBlock() instanceof FenceGateBlock)
++                BlockState belowState = this.getBlockStateIfReadable(getOnPos, Blocks.AIR.defaultBlockState());
++                return (!(offset <= 0.5) || !belowState.collisionExtendsVertically(this.level(), getOnPos, this))
+                     ? getOnPos.atY(Mth.floor(this.position.y - offset))
+                     : getOnPos;
+             }
+@@ -1011,17 +_,19 @@
+     }
+ 
+     protected float getBlockJumpFactor() {
+-        float jumpFactorHere = this.level().getBlockState(this.blockPosition()).getBlock().getJumpFactor();
+-        float jumpFactorBelow = this.level().getBlockState(this.getBlockPosBelowThatAffectsMyMovement()).getBlock().getJumpFactor();
++        float jumpFactorHere = this.getBlockStateIfReadable(this.blockPosition(), Blocks.AIR.defaultBlockState()).getBlock().getJumpFactor();
++        float jumpFactorBelow = this.getBlockStateIfReadable(this.getBlockPosBelowThatAffectsMyMovement(), Blocks.AIR.defaultBlockState())
++            .getBlock()
++            .getJumpFactor();
+         return jumpFactorHere == 1.0 ? jumpFactorBelow : jumpFactorHere;
+     }
+ 
+     protected float getBlockSpeedFactor() {
+-        BlockState state = this.level().getBlockState(this.blockPosition());
++        BlockState state = this.getBlockStateIfReadable(this.blockPosition(), Blocks.AIR.defaultBlockState());
+         float speedFactorHere = state.getBlock().getSpeedFactor();
+         if (!state.is(Blocks.WATER) && !state.is(Blocks.BUBBLE_COLUMN)) {
+             return speedFactorHere == 1.0
+-                ? this.level().getBlockState(this.getBlockPosBelowThatAffectsMyMovement()).getBlock().getSpeedFactor()
++                ? this.getBlockStateIfReadable(this.getBlockPosBelowThatAffectsMyMovement(), Blocks.AIR.defaultBlockState()).getBlock().getSpeedFactor()
+                 : speedFactorHere;
+         } else {
+             return speedFactorHere;
+@@ -1186,7 +_,7 @@
+ 
+     private void checkInsideBlocks(List<Entity.Movement> movements, InsideBlockEffectApplier.StepBasedCollector effectCollector) {
+         if (this.isAffectedByBlocks()) {
+-            LongSet visitedBlocks = this.visitedBlocks;
++            LongSet visitedBlocks = new LongOpenHashSet();
+ 
+             for (Entity.Movement movement : movements) {
+                 Vec3 pos = movement.from;
+@@ -1210,7 +_,6 @@
+                 }
+             }
+ 
+-            visitedBlocks.clear();
+         }
+     }
+ 
+@@ -1233,6 +_,10 @@
+                     return false;
+                 } else {
+                     iterations.set(iteration);
++                    if (!this.canReadBlock(blockIntersection)) {
++                        return true;
++                    }
++
+                     BlockState state = this.level().getBlockState(blockIntersection);
+                     if (state.isAir()) {
+                         if (debugEntityBlockIntersections) {
+@@ -1311,8 +_,12 @@
+ 
+     public BlockPos adjustSpawnLocation(ServerLevel level, BlockPos spawnSuggestion) {
+         BlockPos spawnBlockPos = level.getRespawnData().pos();
++        if (!RegionizedWorldGuard.shouldLoadChunk(level, spawnBlockPos.getX() >> 4, spawnBlockPos.getZ() >> 4)) {
++            return spawnSuggestion;
++        }
++
+         Vec3 spawnPos = spawnBlockPos.getCenter();
+-        int spawnHeight = level.getChunkAt(spawnBlockPos).getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawnBlockPos.getX(), spawnBlockPos.getZ()) + 1;
++        int spawnHeight = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawnBlockPos.getX(), spawnBlockPos.getZ()) + 1;
+         return BlockPos.containing(spawnPos.x, spawnHeight, spawnPos.z);
+     }
+ 
+@@ -1345,24 +_,24 @@
+ 
+     protected BlockPos getPrimaryStepSoundBlockPos(BlockPos affectingPos) {
+         BlockPos abovePos = affectingPos.above();
+-        BlockState aboveState = this.level().getBlockState(abovePos);
++        BlockState aboveState = this.getBlockStateIfReadable(abovePos, Blocks.AIR.defaultBlockState());
+         return !aboveState.is(BlockTags.INSIDE_STEP_SOUND_BLOCKS) && !aboveState.is(BlockTags.COMBINATION_STEP_SOUND_BLOCKS) ? affectingPos : abovePos;
+     }
+ 
+-    protected void playCombinationStepSounds(BlockState primaryStepSound, BlockState secondaryStepSound) {
+-        SoundType primaryStepSoundType = primaryStepSound.getSoundType();
+-        this.playSound(primaryStepSoundType.getStepSound(), primaryStepSoundType.getVolume() * 0.15F, primaryStepSoundType.getPitch());
+-        this.playMuffledStepSound(secondaryStepSound);
++    protected void playCombinationStepSounds(BlockState primaryStepSound, BlockState secondaryStepSound, BlockPos primaryPos, BlockPos secondaryPos) {
++        // Neo: Allow the blockstate full control over step sounds
++        primaryStepSound.playStepSound(this.level, primaryPos, this, .15F, 1F);
++        this.playMuffledStepSound(secondaryStepSound, secondaryPos);
+     }
+ 
+-    protected void playMuffledStepSound(BlockState blockState) {
+-        SoundType secondaryStepSoundType = blockState.getSoundType();
+-        this.playSound(secondaryStepSoundType.getStepSound(), secondaryStepSoundType.getVolume() * 0.05F, secondaryStepSoundType.getPitch() * 0.8F);
++    protected void playMuffledStepSound(BlockState blockState, BlockPos pos) {
++        // Neo: Allow the blockstate full control over step sounds
++        blockState.playStepSound(this.level, pos, this, .05F, .8F);
+     }
+ 
+     protected void playStepSound(BlockPos pos, BlockState blockState) {
+-        SoundType soundType = blockState.getSoundType();
+-        this.playSound(soundType.getStepSound(), soundType.getVolume() * 0.15F, soundType.getPitch());
++        // Neo: Allow the blockstate full control over step sounds
++        blockState.playStepSound(this.level(), pos, this, .15F, 1F);
+     }
+ 
+     private boolean shouldPlayAmethystStepSound(BlockState affectingState) {
+@@ -1444,7 +_,7 @@
+         if (!this.touchingUnloadedChunk()) {
+             this.checkSupportingBlock(onGround, new Vec3(xa, ya, za));
+             BlockPos pos = this.getOnPosLegacy();
+-            BlockState state = this.level().getBlockState(pos);
++            BlockState state = this.getBlockStateIfReadable(pos, Blocks.AIR.defaultBlockState());
+             this.checkFallDamage(ya, onGround, state, pos);
+         }
+     }
+@@ -1462,7 +_,10 @@
+                         GameEvent.HIT_GROUND,
+                         this.position,
+                         GameEvent.Context.of(
+-                            this, this.mainSupportingBlockPos.<BlockState>map(blockPos -> this.level().getBlockState(blockPos)).orElse(onState)
++                            this,
++                            this.mainSupportingBlockPos
++                                .<BlockState>map(blockPos -> this.getBlockStateIfReadable(blockPos, onState))
++                                .orElse(onState)
+                         )
+                     );
+             }
+@@ -1536,7 +_,11 @@
+             this.setSwimming(this.isSprinting() && this.isInWater() && !this.isPassenger());
+         } else {
+             this.setSwimming(
+-                this.isSprinting() && this.isUnderWater() && !this.isPassenger() && this.level().getFluidState(this.blockPosition).is(FluidTags.WATER)
++                this.isSprinting()
++                    && this.isUnderWater()
++                    && !this.isPassenger()
++                    && this.canReadBlock(this.blockPosition)
++                    && this.level().getFluidState(this.blockPosition).is(FluidTags.WATER)
+             );
+         }
+     }
+@@ -1602,11 +_,11 @@
+ 
+     @Deprecated
+     protected BlockState getBlockStateOnLegacy() {
+-        return this.level().getBlockState(this.getOnPosLegacy());
++        return this.getBlockStateIfReadable(this.getOnPosLegacy(), Blocks.AIR.defaultBlockState());
+     }
+ 
+     public BlockState getBlockStateOn() {
+-        return this.level().getBlockState(this.getOnPos());
++        return this.getBlockStateIfReadable(this.getOnPos(), Blocks.AIR.defaultBlockState());
+     }
+ 
+     public boolean canSpawnSprintParticle() {
+@@ -1615,7 +_,8 @@
+ 
+     protected void spawnSprintParticle() {
+         BlockPos pos = this.getOnPosLegacy();
+-        BlockState blockState = this.level().getBlockState(pos);
++        BlockState blockState = this.getBlockStateIfReadable(pos, Blocks.AIR.defaultBlockState());
++        if(!blockState.addRunningEffects(level, pos, this))
+         if (blockState.getRenderShape() != RenderShape.INVISIBLE) {
+             Vec3 movement = this.getDeltaMovement();
+             BlockPos entityPosition = this.blockPosition();
+@@ -1630,7 +_,7 @@
+             }
+ 
+             this.level()
+-                .addParticle(new BlockParticleOption(ParticleTypes.BLOCK, blockState), x, this.getY() + 0.1, z, movement.x * -4.0, 1.5, movement.z * -4.0);
++                .addParticle(new BlockParticleOption(ParticleTypes.BLOCK, blockState, pos), x, this.getY() + 0.1, z, movement.x * -4.0, 1.5, movement.z * -4.0);
+         }
+     }
+ 
+@@ -1922,8 +_,15 @@
+     }
+ 
+     public void awardKillScore(Entity victim, DamageSource killingBlow) {
+-        if (victim instanceof ServerPlayer) {
+-            CriteriaTriggers.ENTITY_KILLED_PLAYER.trigger((ServerPlayer)victim, this, killingBlow);
++        if (victim instanceof ServerPlayer player) {
++            this.triggerEntityKilledPlayer(player, killingBlow);
++        }
++    }
++
++    private void triggerEntityKilledPlayer(ServerPlayer player, DamageSource killingBlow) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.ENTITY_KILLED_PLAYER.trigger(player, this, killingBlow));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Entity killed player advancement", trigger)) {
++            trigger.run();
+         }
+     }
+ 
+@@ -1946,7 +_,8 @@
+     }
+ 
+     public boolean saveAsPassenger(ValueOutput output) {
+-        if (this.removalReason != null && !this.removalReason.shouldSave()) {
++        Entity.RemovalReason removalReason = this.getRemovalReason();
++        if (removalReason != null && !removalReason.shouldSave()) {
+             return false;
+         } else {
+             String id = this.getEncodeId();
+@@ -1966,8 +_,9 @@
+ 
+     public void saveWithoutId(ValueOutput output) {
+         try {
+-            if (this.vehicle != null) {
+-                output.store("Pos", Vec3.CODEC, new Vec3(this.vehicle.getX(), this.getY(), this.vehicle.getZ()));
++            Entity vehicle = this.getVehicle();
++            if (vehicle != null) {
++                output.store("Pos", Vec3.CODEC, new Vec3(vehicle.getX(), this.getY(), vehicle.getZ()));
+             } else {
+                 output.store("Pos", Vec3.CODEC, this.position());
+             }
+@@ -2007,14 +_,20 @@
+                 output.putBoolean("HasVisualFire", this.hasVisualFire);
+             }
+ 
+-            if (!this.tags.isEmpty()) {
+-                output.store("Tags", TAG_LIST_CODEC, List.copyOf(this.tags));
++            Set<String> tags = this.entityTags();
++            if (!tags.isEmpty()) {
++                output.store("Tags", TAG_LIST_CODEC, List.copyOf(tags));
+             }
+ 
+             if (!this.customData.isEmpty()) {
+                 output.store("data", CustomData.CODEC, this.customData);
+             }
+ 
++            var attachments = output.child(ATTACHMENTS_NBT_KEY);
++            serializeAttachments(attachments);
++            if (attachments.isEmpty()) output.discard(ATTACHMENTS_NBT_KEY);
++            output.storeNullable("NeoForgeData", net.minecraft.nbt.CompoundTag.CODEC, persistentData);
++
+             this.addAdditionalSaveData(output);
+             if (this.isVehicle()) {
+                 ValueOutput.ValueOutputList passengersList = output.childrenList("Passengers");
+@@ -2077,8 +_,12 @@
+                 this.setTicksFrozen(input.getIntOr("TicksFrozen", 0));
+                 this.hasVisualFire = input.getBooleanOr("HasVisualFire", false);
+                 this.customData = input.read("data", CustomData.CODEC).orElse(CustomData.EMPTY);
+-                this.tags.clear();
+-                input.read("Tags", TAG_LIST_CODEC).ifPresent(this.tags::addAll);
++                input.read("NeoForgeData", net.minecraft.nbt.CompoundTag.CODEC).ifPresent(neoData -> this.persistentData = neoData);
++                input.child(ATTACHMENTS_NBT_KEY).ifPresent(attachments -> this.deserializeAttachments(attachments));
++                synchronized (this) {
++                    this.tags.clear();
++                    input.read("Tags", TAG_LIST_CODEC).ifPresent(this.tags::addAll);
++                }
+                 this.readAdditionalSaveData(input);
+                 if (this.repositionEntityAfterLoad()) {
+                     this.reapplyPosition();
+@@ -2125,6 +_,8 @@
+         } else {
+             ItemEntity entity = new ItemEntity(level, this.getX() + offset.x, this.getY() + offset.y, this.getZ() + offset.z, itemStack);
+             entity.setDefaultPickUpDelay();
++            if (captureDrops() != null) captureDrops().add(entity);
++            else
+             level.addFreshEntity(entity);
+             return entity;
+         }
+@@ -2147,6 +_,10 @@
+             return BlockPos.betweenClosedStream(eyeBb)
+                 .anyMatch(
+                     pos -> {
++                        if (!this.canReadBlock(pos)) {
++                            return false;
++                        }
++
+                         BlockState state = this.level().getBlockState(pos);
+                         return !state.isAir()
+                             && state.isSuffocating(this.level(), pos)
+@@ -2183,11 +_,11 @@
+         }
+ 
+         ItemStack heldItem = player.getItemInHand(hand);
+-        if (heldItem.is(Items.SHEARS) && this.shearOffAllLeashConnections(player)) {
++        if (heldItem.canPerformAction(net.neoforged.neoforge.common.ItemAbilities.SHEARS_HARVEST) && this.shearOffAllLeashConnections(player)) {
+             heldItem.hurtAndBreak(1, player, hand);
+             return InteractionResult.SUCCESS;
+         } else if (this instanceof Mob target
+-            && heldItem.is(Items.SHEARS)
++            && heldItem.canPerformAction(net.neoforged.neoforge.common.ItemAbilities.SHEARS_REMOVE_ARMOR)
+             && target.canShearEquipment(player)
+             && !player.isSecondaryUseActive()
+             && this.attemptToShearEquipment(player, hand, heldItem, target)) {
+@@ -2275,7 +_,9 @@
+                 this.playSound(equippable.shearingSound().value());
+                 if (this.level() instanceof ServerLevel serverLevel) {
+                     this.spawnAtLocation(serverLevel, itemStack, equipmentSpawnOffset);
+-                    CriteriaTriggers.PLAYER_SHEARED_EQUIPMENT.trigger((ServerPlayer)player, itemStack, target);
++                    if (player instanceof ServerPlayer serverPlayer) {
++                        triggerPlayerShearedEquipment(serverPlayer, itemStack, target);
++                    }
+                 }
+ 
+                 return true;
+@@ -2283,6 +_,18 @@
+         }
+ 
+         return false;
++    }
++
++    private static void triggerPlayerShearedEquipment(ServerPlayer player, ItemStack itemStack, Entity target) {
++        ItemStack triggerStack = itemStack.copy();
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.PLAYER_SHEARED_EQUIPMENT.trigger(player, triggerStack, target));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(target.level(), "Player sheared equipment advancement", trigger)) {
++            trigger.run();
++        }
++    }
++
++    private static void triggerStartRiding(ServerPlayer player) {
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.START_RIDING_TRIGGER.trigger(player));
+     }
+ 
+     public boolean canCollideWith(Entity entity) {
+@@ -2295,9 +_,14 @@
+ 
+     public void rideTick() {
+         this.setDeltaMovement(Vec3.ZERO);
+-        this.tick();
+-        if (this.isPassenger()) {
+-            this.getVehicle().positionRider(this);
++        // Neo: Permit cancellation of Entity#tick via EntityTickEvent.Pre
++        if (!net.neoforged.neoforge.event.EventHooks.fireEntityTickPre(this).isCanceled()) {
++            this.tick();
++            net.neoforged.neoforge.event.EventHooks.fireEntityTickPost(this);
++        }
++        Entity vehicle = this.getVehicle();
++        if (vehicle != null) {
++            vehicle.positionRider(this);
+         }
+     }
+ 
+@@ -2317,7 +_,7 @@
+     }
+ 
+     public Vec3 getVehicleAttachmentPoint(Entity vehicle) {
+-        return this.getAttachments().get(EntityAttachment.VEHICLE, 0, this.yRot);
++        return this.getAttachments().get(EntityAttachment.VEHICLE, 0, this.getYRot());
+     }
+ 
+     public Vec3 getPassengerRidingPosition(Entity passenger) {
+@@ -2330,7 +_,7 @@
+ 
+     protected static Vec3 getDefaultPassengerAttachmentPoint(Entity vehicle, Entity passenger, EntityAttachments attachments) {
+         int passengerIndex = vehicle.getPassengers().indexOf(passenger);
+-        return attachments.getClamped(EntityAttachment.PASSENGER, passengerIndex, vehicle.yRot);
++        return attachments.getClamped(EntityAttachment.PASSENGER, passengerIndex, vehicle.getYRot());
+     }
+ 
+     public final boolean startRiding(Entity entity) {
+@@ -2342,32 +_,66 @@
+     }
+ 
+     public boolean startRiding(Entity entityToRide, boolean force, boolean sendEventAndTriggers) {
+-        if (entityToRide == this.vehicle) {
++        if (entityToRide == this.getVehicle()) {
+             return false;
+         } else if (!entityToRide.couldAcceptPassenger()) {
+             return false;
++        } else if (this.level() != entityToRide.level()) {
++            return false;
++        } else if (this.scheduleRelationshipMutationIfRegionized(
++            entityToRide,
++            "Entity mount",
++            () -> this.startRiding(entityToRide, force, sendEventAndTriggers)
++        )) {
++            return false;
+         } else if (!this.level().isClientSide() && !entityToRide.type.canSerialize()) {
+             return false;
+         } else {
+-            for (Entity vehicleEntity = entityToRide; vehicleEntity.vehicle != null; vehicleEntity = vehicleEntity.vehicle) {
+-                if (vehicleEntity.vehicle == this) {
++            for (Entity vehicleEntity = entityToRide; ; ) {
++                Entity nextVehicle = vehicleEntity.getVehicle();
++                if (nextVehicle == null) {
++                    break;
++                }
++                if (nextVehicle == this) {
+                     return false;
+                 }
++                vehicleEntity = nextVehicle;
+             }
+ 
++        if (!net.neoforged.neoforge.event.EventHooks.canMountEntity(this, entityToRide, true)) return false;
+             if (force || this.canRide(entityToRide) && entityToRide.canAddPassenger(this)) {
+                 if (this.isPassenger()) {
+                     this.stopRiding();
+                 }
+ 
+                 this.setPose(Pose.STANDING);
+-                this.vehicle = entityToRide;
+-                this.vehicle.addPassenger(this);
++                synchronized (this) {
++                    if (this.vehicle != null) {
++                        return false;
++                    }
++
++                    this.vehicle = entityToRide;
++                }
++
++                boolean addedPassenger = false;
++                try {
++                    entityToRide.addPassenger(this);
++                    addedPassenger = true;
++                } finally {
++                    if (!addedPassenger) {
++                        synchronized (this) {
++                            if (this.vehicle == entityToRide) {
++                                this.vehicle = null;
++                            }
++                        }
++                    }
++                }
+                 if (sendEventAndTriggers) {
+-                    this.level().gameEvent(this, GameEvent.ENTITY_MOUNT, this.vehicle.position);
++                    this.level().gameEvent(this, GameEvent.ENTITY_MOUNT, entityToRide.position());
+                     entityToRide.getIndirectPassengersStream()
+-                        .filter(e -> e instanceof ServerPlayer)
+-                        .forEach(player -> CriteriaTriggers.START_RIDING_TRIGGER.trigger((ServerPlayer)player));
++                        .filter(ServerPlayer.class::isInstance)
++                        .map(ServerPlayer.class::cast)
++                        .forEach(Entity::triggerStartRiding);
+                 }
+ 
+                 return true;
+@@ -2382,19 +_,36 @@
+     }
+ 
+     public void ejectPassengers() {
+-        for (int i = this.passengers.size() - 1; i >= 0; i--) {
+-            this.passengers.get(i).stopRiding();
++        if (this.schedulePassengerListMutationIfRegionized("Entity eject passengers", this::ejectPassengers)) {
++            return;
++        }
++
++        List<Entity> passengers = this.getPassengers();
++        for (int i = passengers.size() - 1; i >= 0; i--) {
++            passengers.get(i).stopRiding();
+         }
+     }
+ 
+     public void removeVehicle() {
+-        if (this.vehicle != null) {
+-            Entity oldVehicle = this.vehicle;
+-            this.vehicle = null;
++        Entity oldVehicle = this.rawVehicle();
++        if (oldVehicle != null) {
++            if (this.scheduleRelationshipMutationIfRegionized(oldVehicle, "Entity dismount", this::removeVehicle)) {
++                return;
++            }
++
++            if (!net.neoforged.neoforge.event.EventHooks.canMountEntity(this, oldVehicle, false)) return;
++            synchronized (this) {
++                if (this.vehicle != oldVehicle) {
++                    return;
++                }
++
++                this.vehicle = null;
++            }
++
+             oldVehicle.removePassenger(this);
+             Entity.RemovalReason removalReason = this.getRemovalReason();
+             if (removalReason == null || removalReason.shouldDestroy()) {
+-                this.level().gameEvent(this, GameEvent.ENTITY_DISMOUNT, oldVehicle.position);
++                this.level().gameEvent(this, GameEvent.ENTITY_DISMOUNT, oldVehicle.position());
+             }
+         }
+     }
+@@ -2403,10 +_,14 @@
+         this.removeVehicle();
+     }
+ 
+-    protected void addPassenger(Entity passenger) {
++    protected synchronized void addPassenger(Entity passenger) {
+         if (passenger.getVehicle() != this) {
+             throw new IllegalStateException("Use x.startRiding(y), not y.addPassenger(x)");
+         } else {
++            if (this.passengers.contains(passenger)) {
++                return;
++            }
++
+             if (this.passengers.isEmpty()) {
+                 this.passengers = ImmutableList.of(passenger);
+             } else {
+@@ -2422,7 +_,7 @@
+         }
+     }
+ 
+-    protected void removePassenger(Entity passenger) {
++    protected synchronized void removePassenger(Entity passenger) {
+         if (passenger.getVehicle() == this) {
+             throw new IllegalStateException("Use x.stopRiding(y), not y.removePassenger(x)");
+         } else {
+@@ -2432,14 +_,76 @@
+                 this.passengers = this.passengers.stream().filter(p -> p != passenger).collect(ImmutableList.toImmutableList());
+             }
+ 
+-            passenger.boardingCooldown = 60;
++            synchronized (passenger) {
++                passenger.boardingCooldown = 60;
++            }
+         }
+     }
+ 
+-    protected boolean canAddPassenger(Entity passenger) {
++    protected synchronized boolean canAddPassenger(Entity passenger) {
+         return this.passengers.isEmpty();
+     }
+ 
++    private synchronized @Nullable Entity rawVehicle() {
++        return this.vehicle;
++    }
++
++    private synchronized List<Entity> rawPassengers() {
++        return List.copyOf(this.passengers);
++    }
++
++    private boolean scheduleRelationshipMutationIfRegionized(Entity other, String reason, Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (!(this.level() instanceof ServerLevel serverLevel)) {
++            throw new IllegalStateException(reason + " must not run from a region worker in non-server level " + this.level().dimension());
++        }
++
++        if (!RegionizedWorldGuard.isRegionThreadFor(serverLevel, this.blockPosition())) {
++            return RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(this.level(), this, reason, task);
++        }
++
++        if (other.level() == this.level() && RegionizedWorldGuard.isRegionThreadFor(serverLevel, other.blockPosition())) {
++            return false;
++        }
++
++        if (serverLevel.getServer().regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate cross-region entity relationship for " + reason + " while region dispatcher is not running");
++    }
++
++    private boolean schedulePassengerListMutationIfRegionized(String reason, Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (!(this.level() instanceof ServerLevel serverLevel)) {
++            throw new IllegalStateException(reason + " must not run from a region worker in non-server level " + this.level().dimension());
++        }
++
++        if (!RegionizedWorldGuard.isRegionThreadFor(serverLevel, this.blockPosition())) {
++            return RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(this.level(), this, reason, task);
++        }
++
++        for (Entity passenger : this.rawPassengers()) {
++            if (passenger.level() != this.level() || !RegionizedWorldGuard.isRegionThreadFor(serverLevel, passenger.blockPosition())) {
++                if (serverLevel.getServer().regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++                    return true;
++                }
++
++                throw new IllegalStateException("Cannot mutate cross-region passenger list for " + reason + " while region dispatcher is not running");
++            }
++        }
++
++        return false;
++    }
++
++    /** @deprecated Forge: Use {@link #canBeRiddenUnderFluidType(net.neoforged.neoforge.fluids.FluidType, Entity) rider sensitive version} */
++    @Deprecated
+     protected boolean couldAcceptPassenger() {
+         return true;
+     }
+@@ -2531,13 +_,8 @@
+                 if (this.portalProcess.processPortalTeleportation(level, this, this.canUsePortal(false))) {
+                     ProfilerFiller profiler = Profiler.get();
+                     profiler.push("portal");
+-                    this.setPortalCooldown();
+-                    TeleportTransition teleportTransition = this.portalProcess.getPortalDestination(level, this);
+-                    if (teleportTransition != null) {
+-                        ServerLevel newLevel = teleportTransition.newLevel();
+-                        if (level.isAllowedToEnterPortal(newLevel) && (newLevel.dimension() == level.dimension() || this.canTeleport(level, newLevel))) {
+-                            this.teleport(teleportTransition);
+-                        }
++                    if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(level, "Portal teleport", () -> this.completePortalTeleport(level))) {
++                        this.completePortalTeleport(level);
+                     }
+ 
+                     profiler.pop();
+@@ -2548,6 +_,21 @@
+         }
+     }
+ 
++    private void completePortalTeleport(ServerLevel level) {
++        if (this.isRemoved() || this.level() != level || this.portalProcess == null) {
++            return;
++        }
++
++        this.setPortalCooldown();
++        TeleportTransition teleportTransition = this.portalProcess.getPortalDestination(level, this);
++        if (teleportTransition != null) {
++            ServerLevel newLevel = teleportTransition.newLevel();
++            if (level.isAllowedToEnterPortal(newLevel) && (newLevel.dimension() == level.dimension() || this.canTeleport(level, newLevel))) {
++                this.teleport(teleportTransition);
++            }
++        }
++    }
++
+     public int getDimensionChangingDelay() {
+         Entity firstPassenger = this.getFirstPassenger();
+         return firstPassenger instanceof ServerPlayer ? firstPassenger.getDimensionChangingDelay() : 300;
+@@ -2579,7 +_,7 @@
+         return this.getVehicle() != null;
+     }
+ 
+-    public boolean isVehicle() {
++    public synchronized boolean isVehicle() {
+         return !this.passengers.isEmpty();
+     }
+ 
+@@ -2752,7 +_,7 @@
+             this.igniteForSeconds(8.0F);
+         }
+ 
+-        this.hurtServer(level, this.damageSources().lightningBolt(), 5.0F);
++        this.hurt(this.damageSources().lightningBolt(), lightningBolt.getDamage());
+     }
+ 
+     public void onAboveBubbleColumn(boolean dragDown, BlockPos pos) {
+@@ -2774,7 +_,7 @@
+ 
+     protected static void sendBubbleColumnParticles(Level level, BlockPos pos) {
+         if (level instanceof ServerLevel serverLevel) {
+-            RandomSource random = level.getRandom();
++            RandomSource random = RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom());
+ 
+             for (int i = 0; i < 2; i++) {
+                 serverLevel.sendParticles(
+@@ -2827,7 +_,7 @@
+ 
+         for (Direction direction : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST, Direction.UP}) {
+             neighborPos.setWithOffset(pos, direction);
+-            if (!this.level().getBlockState(neighborPos).isCollisionShapeFullBlock(this.level(), neighborPos)) {
++            if (this.canReadBlock(neighborPos) && !this.level().getBlockState(neighborPos).isCollisionShapeFullBlock(this.level(), neighborPos)) {
+                 double d = delta.get(direction.getAxis());
+                 double orientedDelta = direction.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1.0 - d : d;
+                 if (orientedDelta < closest) {
+@@ -2871,7 +_,7 @@
+     }
+ 
+     protected Component getTypeName() {
+-        return this.type.getDescription();
++        return this.getType().getDescription(); // Forge: Use getter to allow overriding by mods
+     }
+ 
+     public boolean is(Entity other) {
+@@ -2899,7 +_,8 @@
+     @Override
+     public String toString() {
+         String levelId = this.level() == null ? "~NULL~" : this.level().toString();
+-        return this.removalReason != null
++        Entity.RemovalReason removalReason = this.getRemovalReason();
++        return removalReason != null
+             ? String.format(
+                 Locale.ROOT,
+                 "%s['%s'/%d, l='%s', x=%.2f, y=%.2f, z=%.2f, removed=%s]",
+@@ -2910,7 +_,7 @@
+                 this.getX(),
+                 this.getY(),
+                 this.getZ(),
+-                this.removalReason
++                removalReason
+             )
+             : String.format(
+                 Locale.ROOT,
+@@ -2926,10 +_,11 @@
+     }
+ 
+     protected final boolean isInvulnerableToBase(DamageSource source) {
+-        return this.isRemoved()
++        boolean isVanillaInvulnerable = this.isRemoved()
+             || this.invulnerable && !source.is(DamageTypeTags.BYPASSES_INVULNERABILITY) && !source.isCreativePlayer()
+             || source.is(DamageTypeTags.IS_FIRE) && this.fireImmune()
+             || source.is(DamageTypeTags.IS_FALL) && this.is(EntityTypeTags.FALL_DAMAGE_IMMUNE);
++        return net.neoforged.neoforge.common.CommonHooks.isEntityInvulnerableTo(this, source, isVanillaInvulnerable);
+     }
+ 
+     public boolean isInvulnerable() {
+@@ -2956,6 +_,20 @@
+     }
+ 
+     public @Nullable Entity teleport(TeleportTransition transition) {
++        if (this.level() instanceof ServerLevel serverLevel
++            && transition.newLevel().dimension() != serverLevel.dimension()
++            && RegionizedTickContext.isRegionThread()) {
++            if (serverLevel.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> {
++                if (!this.isRemoved()) {
++                    this.teleport(transition);
++                }
++            })) {
++                return null;
++            }
++            throw new IllegalStateException("Cannot execute cross-dimension teleport from region worker while region dispatcher is not running");
++        }
++
++        if (!net.neoforged.neoforge.common.CommonHooks.onTravelToDimension(this, transition.newLevel().dimension())) return null;
+         if (this.level() instanceof ServerLevel serverLevel && !this.isRemoved()) {
+             ServerLevel newLevel = transition.newLevel();
+             boolean otherDimension = newLevel.dimension() != serverLevel.dimension();
+@@ -3023,11 +_,23 @@
+     }
+ 
+     protected void teleportSpectators(TeleportTransition transition, ServerLevel oldLevel) {
+-        for (ServerPlayer serverPlayer : List.copyOf(oldLevel.players())) {
+-            if (serverPlayer.getCamera() == this) {
+-                serverPlayer.teleport(transition);
+-                serverPlayer.setCamera(null);
++        if (RegionizedWorldGuard.scheduleGlobalIfRegionized(oldLevel, "Spectator teleport", () -> this.teleportSpectators(transition, oldLevel))) {
++            return;
++        }
++
++        for (ServerPlayer serverPlayer : oldLevel.getServer().getPlayerList().getAllPlayers()) {
++            if (serverPlayer.level() != oldLevel) {
++                continue;
+             }
++
++            RegionizedWorldGuard.callOnPlayerRegionAndWait(serverPlayer, "Spectator teleport", () -> {
++                if (serverPlayer.level() == oldLevel && serverPlayer.getCamera() == this) {
++                    serverPlayer.teleport(transition);
++                    serverPlayer.setCamera(null);
++                }
++
++                return true;
++            });
+         }
+     }
+ 
+@@ -3050,12 +_,15 @@
+         for (Entity passenger : this.getIndirectPassengers()) {
+             if (passenger instanceof ServerPlayer player) {
+                 if (controller != null && player.getId() == controller.getId()) {
+-                    player.connection
+-                        .send(
+-                            ClientboundTeleportEntityPacket.teleport(this.getId(), PositionMoveRotation.of(transition), transition.relatives(), this.onGround)
+-                        );
++                    RegionizedWorldGuard.sendToPlayer(
++                        player,
++                        ClientboundTeleportEntityPacket.teleport(this.getId(), PositionMoveRotation.of(transition), transition.relatives(), this.onGround())
++                    );
+                 } else {
+-                    player.connection.send(ClientboundTeleportEntityPacket.teleport(this.getId(), PositionMoveRotation.of(this), Set.of(), this.onGround));
++                    RegionizedWorldGuard.sendToPlayer(
++                        player,
++                        ClientboundTeleportEntityPacket.teleport(this.getId(), PositionMoveRotation.of(this), Set.of(), this.onGround())
++                    );
+                 }
+             }
+         }
+@@ -3178,6 +_,7 @@
+         return this.stringUUID;
+     }
+ 
++    @Deprecated // Forge: Use FluidType sensitive version
+     public boolean isPushedByFluid() {
+         return true;
+     }
+@@ -3250,7 +_,7 @@
+ 
+     private void teleportPassengers() {
+         this.getSelfAndPassengers().forEach(entity -> {
+-            for (Entity passenger : entity.passengers) {
++            for (Entity passenger : entity.getPassengers()) {
+                 entity.positionRider(passenger, Entity::snapTo);
+             }
+         });
+@@ -3287,6 +_,8 @@
+         EntityDimensions oldDim = this.dimensions;
+         Pose pose = this.getPose();
+         EntityDimensions newDim = this.getDimensions(pose);
++        net.neoforged.neoforge.event.entity.EntityEvent.Size sizeEvent = net.neoforged.neoforge.event.EventHooks.getEntitySizeForge(this, pose, oldDim, newDim);
++        newDim = sizeEvent.getNewSize();
+         this.dimensions = newDim;
+         this.eyeHeight = newDim.eyeHeight();
+         this.reapplyPosition();
+@@ -3408,21 +_,40 @@
+         return this.getControllingPassenger() != null;
+     }
+ 
+-    public final List<Entity> getPassengers() {
+-        return this.passengers;
+-    }
+-
+-    public @Nullable Entity getFirstPassenger() {
+-        return this.passengers.isEmpty() ? null : this.passengers.get(0);
+-    }
+-
+-    public boolean hasPassenger(Entity entity) {
+-        return this.passengers.contains(entity);
+-    }
+-
+-    public boolean hasPassenger(Predicate<Entity> test) {
+-        for (Entity passenger : this.passengers) {
+-            if (test.test(passenger)) {
++    public final synchronized List<Entity> getPassengers() {
++        if (RegionizedTickContext.isRegionThread()) {
++            return this.passengers
++                .stream()
++                .filter(passenger -> this.regionSafeRelatedEntity(passenger) != null)
++                .collect(ImmutableList.toImmutableList());
++        }
++
++        return List.copyOf(this.passengers);
++    }
++
++    public synchronized @Nullable Entity getFirstPassenger() {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return this.passengers.isEmpty() ? null : this.passengers.get(0);
++        }
++
++        for (Entity passenger : this.passengers) {
++            Entity safePassenger = this.regionSafeRelatedEntity(passenger);
++            if (safePassenger != null) {
++                return safePassenger;
++            }
++        }
++
++        return null;
++    }
++
++    public synchronized boolean hasPassenger(Entity entity) {
++        return this.passengers.contains(entity) && this.regionSafeRelatedEntity(entity) != null;
++    }
++
++    public synchronized boolean hasPassenger(Predicate<Entity> test) {
++        for (Entity passenger : this.passengers) {
++            Entity safePassenger = this.regionSafeRelatedEntity(passenger);
++            if (safePassenger != null && test.test(safePassenger)) {
+                 return true;
+             }
+         }
+@@ -3430,8 +_,8 @@
+         return false;
+     }
+ 
+-    private Stream<Entity> getIndirectPassengersStream() {
+-        return this.passengers.stream().flatMap(Entity::getSelfAndPassengers);
++    private synchronized Stream<Entity> getIndirectPassengersStream() {
++        return this.getPassengers().stream().flatMap(Entity::getSelfAndPassengers);
+     }
+ 
+     @Override
+@@ -3441,7 +_,7 @@
+ 
+     @Override
+     public Stream<Entity> getPassengersAndSelf() {
+-        return Stream.concat(this.passengers.stream().flatMap(Entity::getPassengersAndSelf), Stream.of(this));
++        return Stream.concat(this.getPassengers().stream().flatMap(Entity::getPassengersAndSelf), Stream.of(this));
+     }
+ 
+     public Iterable<Entity> getIndirectPassengers() {
+@@ -3460,7 +_,12 @@
+         Entity result = this;
+ 
+         while (result.isPassenger()) {
+-            result = result.getVehicle();
++            Entity vehicle = result.getVehicle();
++            if (vehicle == null) {
++                break;
++            }
++
++            result = vehicle;
+         }
+ 
+         return result;
+@@ -3475,6 +_,10 @@
+             return false;
+         } else {
+             Entity ridden = entity.getVehicle();
++            if (ridden == null) {
++                return false;
++            }
++
+             return ridden == this ? true : this.hasIndirectPassenger(ridden);
+         }
+     }
+@@ -3513,12 +_,25 @@
+         return new Vec3(this.getX(), this.getBoundingBox().maxY, this.getZ());
+     }
+ 
+-    public @Nullable Entity getVehicle() {
+-        return this.vehicle;
++    public synchronized @Nullable Entity getVehicle() {
++        return this.regionSafeRelatedEntity(this.vehicle);
++    }
++
++    public synchronized boolean hasVehicleRelationship() {
++        return this.vehicle != null;
++    }
++
++    public synchronized boolean hasPassengerRelationship() {
++        return !this.passengers.isEmpty();
++    }
++
++    private @Nullable Entity regionSafeRelatedEntity(@Nullable Entity entity) {
++        return entity == null ? null : RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), entity);
+     }
+ 
+     public @Nullable Entity getControlledVehicle() {
+-        return this.vehicle != null && this.vehicle.getControllingPassenger() == this ? this.vehicle : null;
++        Entity vehicle = this.getVehicle();
++        return vehicle != null && vehicle.getControllingPassenger() == this ? vehicle : null;
+     }
+ 
+     public PushReaction getPistonPushReaction() {
+@@ -3617,7 +_,7 @@
+ 
+     public BlockState getInBlockState() {
+         if (this.inBlockState == null) {
+-            this.inBlockState = this.level().getBlockState(this.blockPosition());
++            this.inBlockState = this.getBlockStateIfReadable(this.blockPosition(), Blocks.AIR.defaultBlockState());
+         }
+ 
+         return this.inBlockState;
+@@ -3627,11 +_,11 @@
+         return this.chunkPosition;
+     }
+ 
+-    public Vec3 getDeltaMovement() {
++    public synchronized Vec3 getDeltaMovement() {
+         return this.deltaMovement;
+     }
+ 
+-    public void setDeltaMovement(Vec3 deltaMovement) {
++    public synchronized void setDeltaMovement(Vec3 deltaMovement) {
+         if (deltaMovement.isFinite()) {
+             this.deltaMovement = deltaMovement;
+         }
+@@ -3647,11 +_,11 @@
+         this.setDeltaMovement(new Vec3(xd, yd, zd));
+     }
+ 
+-    public final int getBlockX() {
++    public final synchronized int getBlockX() {
+         return this.blockPosition.getX();
+     }
+ 
+-    public final double getX() {
++    public final synchronized double getX() {
+         return this.position.x;
+     }
+ 
+@@ -3663,11 +_,11 @@
+         return this.getX((2.0 * this.random.nextDouble() - 1.0) * spread);
+     }
+ 
+-    public final int getBlockY() {
++    public final synchronized int getBlockY() {
+         return this.blockPosition.getY();
+     }
+ 
+-    public final double getY() {
++    public final synchronized double getY() {
+         return this.position.y;
+     }
+ 
+@@ -3687,11 +_,11 @@
+         return this.position.y + this.eyeHeight;
+     }
+ 
+-    public final int getBlockZ() {
++    public final synchronized int getBlockZ() {
+         return this.blockPosition.getZ();
+     }
+ 
+-    public final double getZ() {
++    public final synchronized double getZ() {
+         return this.position.z;
+     }
+ 
+@@ -3703,7 +_,7 @@
+         return this.getZ((2.0 * this.random.nextDouble() - 1.0) * spread);
+     }
+ 
+-    public final void setPosRaw(double x, double y, double z) {
++    public final synchronized void setPosRaw(double x, double y, double z) {
+         if (this.position.x != x || this.position.y != y || this.position.z != z) {
+             this.position = new Vec3(x, y, z);
+             int fx = Mth.floor(x);
+@@ -3728,6 +_,22 @@
+                 }
+             }
+         }
++        // Neo: ensure target chunk is loaded.
++        if (this.isAddedToLevel() && !this.level.isClientSide() && !this.isRemoved()) {
++            int chunkX = (int)Math.floor(x) >> 4;
++            int chunkZ = (int)Math.floor(z) >> 4;
++            if (RegionizedWorldGuard.shouldLoadChunk(this.level, chunkX, chunkZ)) {
++                this.level.getChunk(chunkX, chunkZ);
++            }
++        }
++    }
++
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
++    private BlockState getBlockStateIfReadable(BlockPos pos, BlockState fallback) {
++        return this.canReadBlock(pos) ? this.level().getBlockState(pos) : fallback;
+     }
+ 
+     public void checkDespawn() {
+@@ -3779,7 +_,7 @@
+         return this.getTicksFrozen() > 0;
+     }
+ 
+-    public float getYRot() {
++    public synchronized float getYRot() {
+         return this.yRot;
+     }
+ 
+@@ -3788,7 +_,7 @@
+         return this.getYRot();
+     }
+ 
+-    public void setYRot(float yRot) {
++    public synchronized void setYRot(float yRot) {
+         if (!Float.isFinite(yRot)) {
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
+         } else {
+@@ -3796,11 +_,11 @@
+         }
+     }
+ 
+-    public float getXRot() {
++    public synchronized float getXRot() {
+         return this.xRot;
+     }
+ 
+-    public void setXRot(float xRot) {
++    public synchronized void setXRot(float xRot) {
+         if (!Float.isFinite(xRot)) {
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
+         } else {
+@@ -3820,30 +_,37 @@
+     }
+ 
+     @Override
+-    public final boolean isRemoved() {
++    public final synchronized boolean isRemoved() {
+         return this.removalReason != null;
+     }
+ 
+-    public Entity.@Nullable RemovalReason getRemovalReason() {
++    public synchronized Entity.@Nullable RemovalReason getRemovalReason() {
+         return this.removalReason;
+     }
+ 
+     @Override
+     public final void setRemoved(Entity.RemovalReason reason) {
+-        if (this.removalReason == null) {
+-            this.removalReason = reason;
++        List<Entity> passengers;
++        boolean shouldDestroy;
++        synchronized (this) {
++            if (this.removalReason == null) {
++                this.removalReason = reason;
++            }
++
++            shouldDestroy = this.removalReason.shouldDestroy();
++            passengers = this.getPassengers();
+         }
+ 
+-        if (this.removalReason.shouldDestroy()) {
++        if (shouldDestroy) {
+             this.stopRiding();
+         }
+ 
+-        this.getPassengers().forEach(Entity::stopRiding);
++        passengers.forEach(Entity::stopRiding);
+         this.levelCallback.onRemove(reason);
+         this.onRemoval(reason);
+     }
+ 
+-    protected void unsetRemoved() {
++    protected synchronized void unsetRemoved() {
+         this.removalReason = null;
+     }
+ 
+@@ -3854,7 +_,8 @@
+ 
+     @Override
+     public boolean shouldBeSaved() {
+-        if (this.removalReason != null && !this.removalReason.shouldSave()) {
++        Entity.RemovalReason removalReason = this.getRemovalReason();
++        if (removalReason != null && !removalReason.shouldSave()) {
+             return false;
+         } else {
+             return this.isPassenger() ? false : !this.isVehicle() || !this.hasExactlyOnePlayerPassenger();
+@@ -3868,6 +_,90 @@
+ 
+     public boolean mayInteract(ServerLevel level, BlockPos pos) {
+         return true;
++    }
++
++    /**
++     * Neo: Short-lived holder of dropped item entities. Used mainly for Neo hooks and event logic.
++     * <p>
++     * When not null, records all item entities from {@link #spawnAtLocation(ItemStack, float)} and {@link net.minecraft.server.level.ServerPlayer#drop(ItemStack, boolean, boolean)} instead of adding them to the world.
++     */
++    private java.util.@Nullable Collection<ItemEntity> captureDrops = null;
++
++    @Override
++    public java.util.@Nullable Collection<ItemEntity> captureDrops() {
++        return captureDrops;
++    }
++
++    @Override
++    public java.util.@Nullable Collection<ItemEntity> captureDrops(java.util.@Nullable Collection<ItemEntity> value) {
++        java.util.Collection<ItemEntity> ret = captureDrops;
++        this.captureDrops = value;
++        return ret;
++    }
++
++    // Neo: Injected ability to store arbitrary nbt onto entities in ways that allow inter-mod compat without compile-time dependencies
++    private net.minecraft.nbt.@Nullable CompoundTag persistentData;
++
++    @Override
++    public net.minecraft.nbt.CompoundTag getPersistentData() {
++        if (persistentData == null)
++            persistentData = new net.minecraft.nbt.CompoundTag();
++        return persistentData;
++    }
++
++    // Neo: Set the default behavior for trampling on Farmland
++    @Override
++    public boolean canTrample(ServerLevel level, BlockState state, BlockPos pos, double fallDistance) {
++        return this.getRandom().nextFloat() < fallDistance - 0.5F
++             && this instanceof LivingEntity
++             && (this instanceof Player || net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, this))
++             && this.getBbWidth() * this.getBbWidth() * this.getBbHeight() > 0.512F;
++    }
++
++    /**
++     * Neo: Internal use for keeping track of entities that are tracked by a world, to
++     * allow guarantees that entity position changes will force a chunk load, avoiding
++     * potential issues with entity desyncing and bad chunk data.
++     */
++    private boolean isAddedToLevel;
++
++    @Override
++    public final boolean isAddedToLevel() { return this.isAddedToLevel; }
++
++    @Override
++    public void onAddedToLevel() { this.isAddedToLevel = true; }
++
++    @Override
++    public void onRemovedFromLevel() { this.isAddedToLevel = false; }
++
++    // Neo: Helper method to stop an entity from being removed if already marked for removal
++    @Override
++    public void revive() {
++        this.unsetRemoved();
++    }
++
++    // Neo: Hookup Attachment data setting
++    @Override
++    @Nullable
++    public final <T> T setData(net.neoforged.neoforge.attachment.AttachmentType<T> type, T data) {
++        // Entities are always saved, no setChanged() call is necessary.
++        return super.setData(type, data);
++    }
++
++    @Override
++    public final void syncData(net.neoforged.neoforge.attachment.AttachmentType<?> type) {
++        net.neoforged.neoforge.attachment.AttachmentSync.syncEntityUpdate(this, type);
++    }
++
++    // Neo: Hookup Capabilities getters to entities
++    @Nullable
++    public final <T, C extends @org.jspecify.annotations.Nullable Object> T getCapability(net.neoforged.neoforge.capabilities.EntityCapability<T, C> capability, C context) {
++        return capability.getCapability(this, context);
++    }
++
++    @Nullable
++    public final <T> T getCapability(net.neoforged.neoforge.capabilities.EntityCapability<T, @org.jspecify.annotations.Nullable Void> capability) {
++        return capability.getCapability(this, null);
+     }
+ 
+     public boolean isFlyingVehicle() {

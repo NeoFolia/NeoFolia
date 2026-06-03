@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/entity/ai/goal/RemoveBlockGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RemoveBlockGoal.java
+@@ -14,6 +_,7 @@
+ import net.minecraft.world.level.LevelAccessor;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.block.Block;
++import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.status.ChunkStatus;
+ import net.minecraft.world.level.gamerules.GameRules;
+@@ -34,7 +_,7 @@
+ 
+     @Override
+     public boolean canUse() {
+-        if (!getServerLevel(this.removerMob).getGameRules().get(GameRules.MOB_GRIEFING)) {
++        if (!net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(this.removerMob.level()), this.removerMob)) {
+             return false;
+         } else if (this.nextStartTick > 0) {
+             this.nextStartTick--;
+@@ -119,13 +_,17 @@
+     }
+ 
+     private @Nullable BlockPos getPosWithBlock(BlockPos pos, BlockGetter level) {
++        if (!this.canReadBlock(pos)) {
++            return null;
++        }
++
+         if (level.getBlockState(pos).is(this.blockToRemove)) {
+             return pos;
+         } else {
+             BlockPos[] neighbours = new BlockPos[]{pos.below(), pos.west(), pos.east(), pos.north(), pos.south(), pos.below().below()};
+ 
+             for (BlockPos neighborPos : neighbours) {
+-                if (level.getBlockState(neighborPos).is(this.blockToRemove)) {
++                if (this.canReadBlock(neighborPos) && level.getBlockState(neighborPos).is(this.blockToRemove)) {
+                     return neighborPos;
+                 }
+             }
+@@ -136,9 +_,21 @@
+ 
+     @Override
+     protected boolean isValidTarget(LevelReader level, BlockPos pos) {
++        BlockPos above = pos.above();
++        BlockPos aboveTwo = pos.above(2);
++        if (!this.canReadBlock(pos) || !this.canReadBlock(above) || !this.canReadBlock(aboveTwo)) {
++            return false;
++        }
++
+         ChunkAccess chunk = level.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()), ChunkStatus.FULL, false);
+-        return chunk == null
+-            ? false
+-            : chunk.getBlockState(pos).is(this.blockToRemove) && chunk.getBlockState(pos.above()).isAir() && chunk.getBlockState(pos.above(2)).isAir();
++        if (chunk == null) {
++            return false;
++        }
++
++        BlockState state = chunk.getBlockState(pos);
++        return state.canEntityDestroy(level, pos, this.removerMob)
++            && state.is(this.blockToRemove)
++            && chunk.getBlockState(above).isAir()
++            && chunk.getBlockState(aboveTwo).isAir();
+     }
+ }

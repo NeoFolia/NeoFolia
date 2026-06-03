@@ -1,0 +1,458 @@
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -90,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.ticks.ContainerSingleItem;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUser, Leashable {
+@@ -130,7 +_,7 @@
+     public final GoalSelector targetSelector;
+     private @Nullable LivingEntity target;
+     private final Sensing sensing;
+-    private DropChances dropChances = DropChances.DEFAULT;
++    private volatile DropChances dropChances = DropChances.DEFAULT;
+     private boolean canPickUpLoot = false;
+     private boolean persistenceRequired = false;
+     private final Map<PathType, Float> pathfindingMalus = Maps.newEnumMap(PathType.class);
+@@ -139,6 +_,11 @@
+     private Leashable.@Nullable LeashData leashData;
+     private BlockPos homePosition = BlockPos.ZERO;
+     private int homeRadius = -1;
++    @Nullable
++    private EntitySpawnReason spawnType;
++    private boolean spawnCancelled = false;
++    /** Neo: Prevent immediate spawning from conversions to capture conversion results for events */
++    protected boolean preventConversionSpawns = false;
+ 
+     protected Mob(EntityType<? extends Mob> type, Level level) {
+         super(type, level);
+@@ -171,25 +_,24 @@
+     }
+ 
+     public float getPathfindingMalus(PathType pathType) {
+-        Mob inheritFrom;
+         if (this.getControlledVehicle() instanceof Mob riding && riding.shouldPassengersInheritMalus()) {
+-            inheritFrom = riding;
+-        } else {
+-            inheritFrom = this;
++            return riding.getPathfindingMalus(pathType);
+         }
+ 
+-        Float malus = inheritFrom.pathfindingMalus.get(pathType);
+-        return malus == null ? pathType.getMalus() : malus;
++        synchronized (this) {
++            Float malus = this.pathfindingMalus.get(pathType);
++            return malus == null ? pathType.getMalus() : malus;
++        }
+     }
+ 
+-    public void setPathfindingMalus(PathType pathType, float cost) {
++    public synchronized void setPathfindingMalus(PathType pathType, float cost) {
+         this.pathfindingMalus.put(pathType, cost);
+     }
+ 
+-    public void onPathfindingStart() {
++    public synchronized void onPathfindingStart() {
+     }
+ 
+-    public void onPathfindingDone() {
++    public synchronized void onPathfindingDone() {
+     }
+ 
+     protected BodyRotationControl createBodyControl() {
+@@ -197,19 +_,35 @@
+     }
+ 
+     public LookControl getLookControl() {
+-        return this.lookControl;
++        synchronized (this) {
++            return this.lookControl;
++        }
+     }
+ 
+     public MoveControl getMoveControl() {
+-        return this.getControlledVehicle() instanceof Mob riding ? riding.getMoveControl() : this.moveControl;
++        Entity controlledVehicle = this.getControlledVehicle();
++        if (controlledVehicle instanceof Mob riding) {
++            return riding.getMoveControl();
++        }
++
++        synchronized (this) {
++            return this.moveControl;
++        }
+     }
+ 
+     public JumpControl getJumpControl() {
+-        return this.jumpControl;
++        synchronized (this) {
++            return this.jumpControl;
++        }
+     }
+ 
+     public PathNavigation getNavigation() {
+-        return this.getControlledVehicle() instanceof Mob riding ? riding.getNavigation() : this.navigation;
++        Entity controlledVehicle = this.getControlledVehicle();
++        if (controlledVehicle instanceof Mob riding) {
++            return riding.getNavigation();
++        }
++
++        return this.navigation;
+     }
+ 
+     @Override
+@@ -219,19 +_,32 @@
+     }
+ 
+     public Sensing getSensing() {
+-        return this.sensing;
++        synchronized (this) {
++            return this.sensing;
++        }
+     }
+ 
+     @Override
+     public @Nullable LivingEntity getTarget() {
+-        return this.asValidTarget(this.target);
++        LivingEntity currentTarget;
++        synchronized (this) {
++            currentTarget = this.target;
++        }
++
++        return this.asValidTarget(currentTarget);
+     }
+ 
+     public @Nullable LivingEntity getTargetUnchecked() {
+-        return this.target;
++        LivingEntity currentTarget;
++        synchronized (this) {
++            currentTarget = this.target;
++        }
++
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), currentTarget);
+     }
+ 
+     protected @Nullable LivingEntity asValidTarget(@Nullable LivingEntity target) {
++        target = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
+         if (target instanceof Player player && (player.isCreative() || player.isSpectator())) {
+             return null;
+         } else {
+@@ -244,7 +_,13 @@
+     }
+ 
+     public void setTarget(@Nullable LivingEntity target) {
+-        this.target = this.asValidTarget(target);
++        target = this.asValidTarget(target);
++        net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent changeTargetEvent = net.neoforged.neoforge.common.CommonHooks.onLivingChangeTarget(this, target, net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent.LivingTargetType.MOB_TARGET);
++        if(!changeTargetEvent.isCanceled()) {
++            synchronized (this) {
++             this.target = changeTargetEvent.getNewAboutToBeSetTarget();
++            }
++        }
+     }
+ 
+     @Override
+@@ -305,7 +_,7 @@
+             for (EquipmentSlot slot : EquipmentSlot.VALUES) {
+                 if (slot.canIncreaseExperience()) {
+                     ItemStack item = this.getItemBySlot(slot);
+-                    if (!item.isEmpty() && this.dropChances.byEquipment(slot) <= 1.0F) {
++                    if (!item.isEmpty() && this.getDropChance(slot) <= 1.0F) {
+                         result += 1 + this.random.nextInt(3);
+                     }
+                 }
+@@ -340,6 +_,12 @@
+         if (!this.level().isClientSide() && this.tickCount % 5 == 0) {
+             this.updateControlFlags();
+         }
++
++        // Neo: Animal armor tick patch
++        if (this.canUseSlot(EquipmentSlot.BODY)) {
++            ItemStack stack = this.getBodyArmorItem();
++            if (stack.has(DataComponents.EQUIPPABLE)) stack.onAnimalArmorTick(level(), this);
++        }
+     }
+ 
+     protected void updateControlFlags() {
+@@ -364,8 +_,9 @@
+         super.addAdditionalSaveData(output);
+         output.putBoolean("CanPickUpLoot", this.canPickUpLoot());
+         output.putBoolean("PersistenceRequired", this.persistenceRequired);
+-        if (!this.dropChances.equals(DropChances.DEFAULT)) {
+-            output.store("drop_chances", DropChances.CODEC, this.dropChances);
++        DropChances dropChances = this.getDropChances();
++        if (!dropChances.equals(DropChances.DEFAULT)) {
++            output.store("drop_chances", DropChances.CODEC, dropChances);
+         }
+ 
+         this.writeLeashData(output, this.leashData);
+@@ -383,6 +_,9 @@
+         if (this.isNoAi()) {
+             output.putBoolean("NoAI", this.isNoAi());
+         }
++        if (this.spawnType != null) {
++            output.putString("neoforge:spawn_type", this.spawnType.name());
++        }
+     }
+ 
+     @Override
+@@ -390,7 +_,7 @@
+         super.readAdditionalSaveData(input);
+         this.setCanPickUpLoot(input.getBooleanOr("CanPickUpLoot", false));
+         this.persistenceRequired = input.getBooleanOr("PersistenceRequired", false);
+-        this.dropChances = input.read("drop_chances", DropChances.CODEC).orElse(DropChances.DEFAULT);
++        this.setDropChances(input.read("drop_chances", DropChances.CODEC).orElse(DropChances.DEFAULT));
+         this.readLeashData(input);
+         this.homeRadius = input.getIntOr("home_radius", -1);
+         if (this.homeRadius >= 0) {
+@@ -401,6 +_,14 @@
+         this.lootTable = input.read("DeathLootTable", LootTable.KEY_CODEC);
+         this.lootTableSeed = input.getLongOr("DeathLootTableSeed", 0L);
+         this.setNoAi(input.getBooleanOr("NoAI", false));
++
++        input.getString("neoforge:spawn_type")
++                .ifPresent(spawnType -> {
++                    try {
++                        this.spawnType = EntitySpawnReason.valueOf(spawnType);
++                    } catch (Exception ignored) {
++                    }
++                });
+     }
+ 
+     @Override
+@@ -459,13 +_,17 @@
+             && this.canPickUpLoot()
+             && this.isAlive()
+             && !this.dead
+-            && serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
++            && net.neoforged.neoforge.event.EventHooks.canEntityGrief(serverLevel, this)) {
+             Vec3i pickupReach = this.getPickupReach();
++            AABB pickupBox = RegionizedWorldGuard.restrictToCurrentRegion(
++                this.level(), this.getBoundingBox().inflate(pickupReach.getX(), pickupReach.getY(), pickupReach.getZ())
++            );
+ 
+-            for (ItemEntity entity : this.level()
+-                .getEntitiesOfClass(ItemEntity.class, this.getBoundingBox().inflate(pickupReach.getX(), pickupReach.getY(), pickupReach.getZ()))) {
+-                if (!entity.isRemoved() && !entity.getItem().isEmpty() && !entity.hasPickUpDelay() && this.wantsToPickUp(serverLevel, entity.getItem())) {
+-                    this.pickUpItem(serverLevel, entity);
++            if (pickupBox != null) {
++                for (ItemEntity entity : this.level().getEntitiesOfClass(ItemEntity.class, pickupBox)) {
++                    if (!entity.isRemoved() && !entity.getItem().isEmpty() && !entity.hasPickUpDelay() && this.wantsToPickUp(serverLevel, entity.getItem())) {
++                        this.pickUpItem(serverLevel, entity);
++                    }
+                 }
+             }
+         }
+@@ -501,7 +_,11 @@
+             float br = this.getLightLevelDependentMagicValue();
+             BlockPos roundedPos = BlockPos.containing(this.getX(), this.getEyeY(), this.getZ());
+             boolean isInNonBurnableBlock = this.isInWaterOrRain() || this.isInPowderSnow || this.wasInPowderSnow;
+-            if (br > 0.5F && this.random.nextFloat() * 30.0F < (br - 0.4F) * 2.0F && !isInNonBurnableBlock && this.level().canSeeSky(roundedPos)) {
++            if (br > 0.5F
++                && this.random.nextFloat() * 30.0F < (br - 0.4F) * 2.0F
++                && !isInNonBurnableBlock
++                && RegionizedWorldGuard.shouldLoadChunk(this.level(), roundedPos.getX() >> 4, roundedPos.getZ() >> 4)
++                && this.level().canSeeSky(roundedPos)) {
+                 return true;
+             }
+         }
+@@ -540,7 +_,7 @@
+             }
+ 
+             if (canReplace && this.canHoldItem(itemStack)) {
+-                double dropChance = this.dropChances.byEquipment(slot);
++                double dropChance = this.getDropChance(slot);
+                 if (!current.isEmpty() && Math.max(this.random.nextFloat() - 0.1F, 0.0F) < dropChance) {
+                     this.spawnAtLocation(level, current);
+                 }
+@@ -565,7 +_,7 @@
+     }
+ 
+     public void setGuaranteedDrop(EquipmentSlot slot) {
+-        this.dropChances = this.dropChances.withGuaranteedDrop(slot);
++        this.setDropChance(slot, DropChances.PRESERVE_ITEM_DROP_CHANCE);
+     }
+ 
+     protected boolean canReplaceCurrentItem(ItemStack newItemStack, ItemStack currentItemStack, EquipmentSlot slot) {
+@@ -614,6 +_,8 @@
+     private double getApproximateAttributeWith(ItemStack itemStack, Holder<Attribute> attribute, EquipmentSlot slot) {
+         double baseValue = this.getAttributes().hasAttribute(attribute) ? this.getAttributeBaseValue(attribute) : 0.0;
+         ItemAttributeModifiers attributeModifiers = itemStack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
++        // Neo: Respect gameplay modifiers
++        attributeModifiers = itemStack.getAttributeModifiers();
+         return attributeModifiers.compute(attribute, baseValue, slot);
+     }
+ 
+@@ -653,6 +_,7 @@
+ 
+     @Override
+     public void checkDespawn() {
++        if (net.neoforged.neoforge.event.EventHooks.checkMobDespawn(this)) return;
+         if (this.level().getDifficulty() == Difficulty.PEACEFUL && !this.getType().isAllowedInPeaceful()) {
+             this.discard();
+         } else if (!this.isPersistenceRequired() && !this.requiresCustomPersistence()) {
+@@ -868,10 +_,12 @@
+ 
+         for (EquipmentSlot slot : EquipmentSlot.VALUES) {
+             ItemStack itemStack = this.getItemBySlot(slot);
+-            float dropChance = this.dropChances.byEquipment(slot);
++            DropChances dropChances = this.getDropChances();
++            float dropChance = dropChances.byEquipment(slot);
+             if (dropChance != 0.0F) {
+-                boolean preserve = this.dropChances.isPreserved(slot);
+-                if (source.getEntity() instanceof LivingEntity livingSource && this.level() instanceof ServerLevel serverLevel) {
++                boolean preserve = dropChances.isPreserved(slot);
++                Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++                if (sourceEntity instanceof LivingEntity livingSource && this.level() instanceof ServerLevel serverLevel) {
+                     dropChance = EnchantmentHelper.processEquipmentDropChance(serverLevel, livingSource, source, dropChance);
+                 }
+ 
+@@ -893,7 +_,7 @@
+     }
+ 
+     public DropChances getDropChances() {
+-        return this.dropChances;
++        return this.dropChancesSnapshot();
+     }
+ 
+     public void dropPreservedEquipment(ServerLevel level) {
+@@ -908,7 +_,7 @@
+             if (!itemStack.isEmpty()) {
+                 if (!shouldDrop.test(itemStack)) {
+                     slotsPreventedFromDropping.add(slot);
+-                } else if (this.dropChances.isPreserved(slot)) {
++                } else if (this.isDropChancePreserved(slot)) {
+                     this.setItemSlot(slot, ItemStack.EMPTY);
+                     this.spawnAtLocation(level, itemStack);
+                 }
+@@ -1054,10 +_,15 @@
+         }
+     }
+ 
++    /**
++     * @deprecated Override-Only. External callers should call via {@link net.neoforged.neoforge.event.EventHooks#finalizeMobSpawn}.
++     */
++    @Deprecated
++    @org.jetbrains.annotations.ApiStatus.OverrideOnly
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         AttributeInstance followRange = Objects.requireNonNull(this.getAttribute(Attributes.FOLLOW_RANGE));
+         if (!followRange.hasModifier(RANDOM_SPAWN_BONUS_ID)) {
+             followRange.addPermanentModifier(
+@@ -1066,6 +_,7 @@
+         }
+ 
+         this.setLeftHanded(random.nextFloat() < 0.05F);
++        this.spawnType = spawnReason;
+         return groupData;
+     }
+ 
+@@ -1074,10 +_,27 @@
+     }
+ 
+     @Override
+-    public void setDropChance(EquipmentSlot slot, float percent) {
++    public synchronized void setDropChance(EquipmentSlot slot, float percent) {
+         this.dropChances = this.dropChances.withEquipmentChance(slot, percent);
+     }
+ 
++    private synchronized void setDropChances(DropChances dropChances) {
++        this.dropChances = dropChances;
++    }
++
++    private float getDropChance(EquipmentSlot slot) {
++        return this.dropChances.byEquipment(slot);
++    }
++
++    private boolean isDropChancePreserved(EquipmentSlot slot) {
++        return this.dropChances.isPreserved(slot);
++    }
++
++    private DropChances dropChancesSnapshot() {
++        DropChances dropChances = this.dropChances;
++        return new DropChances(Map.copyOf(dropChances.byEquipment()));
++    }
++
+     @Override
+     public boolean canPickUpLoot() {
+         return this.canPickUpLoot;
+@@ -1212,6 +_,7 @@
+             } else {
+                 params.type().convert(this, newMob, params);
+                 afterConversion.finalizeConversion(newMob);
++                if (!preventConversionSpawns)
+                 if (this.level() instanceof ServerLevel serverLevel) {
+                     serverLevel.addFreshEntity(newMob);
+                 }
+@@ -1375,14 +_,24 @@
+     }
+ 
+     @Override
++    @Deprecated // FORGE: use jumpInFluid instead
+     protected void jumpInLiquid(TagKey<Fluid> type) {
++        this.jumpInLiquidInternal(() -> super.jumpInLiquid(type));
++    }
++
++    private void jumpInLiquidInternal(Runnable onSuper) {
+         if (this.getNavigation().canFloat()) {
+-            super.jumpInLiquid(type);
++            onSuper.run();
+         } else {
+             this.setDeltaMovement(this.getDeltaMovement().add(0.0, 0.3, 0.0));
+         }
+     }
+ 
++    @Override
++    public void jumpInFluid(net.neoforged.neoforge.fluids.FluidType type) {
++        this.jumpInLiquidInternal(() -> super.jumpInFluid(type));
++    }
++
+     @VisibleForTesting
+     public void removeFreeWill() {
+         this.removeAllGoals(goal -> true);
+@@ -1442,5 +_,40 @@
+ 
+     public float chargeSpeedModifier() {
+         return 1.0F;
++    }
++
++    /**
++     * Returns the type of spawn that created this mob, if applicable.
++     * If it could not be determined, this will return null.
++     * <p>
++     * This is set via {@link Mob#finalizeSpawn}, so you should not call this from within that method, instead using the parameter.
++     */
++    @Nullable
++    public final EntitySpawnReason getSpawnType() {
++        return this.spawnType;
++    }
++
++    /**
++     * This method exists so that spawns can be cancelled from the {@link net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent FinalizeSpawnEvent}
++     * without needing to hook up an additional handler for the {@link net.neoforged.neoforge.event.entity.EntityJoinLevelEvent EntityJoinLevelEvent}.
++     * @return if this mob will be blocked from spawning during {@link Level#addFreshEntity(Entity)}
++     * @apiNote Not public-facing API.
++     */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public final boolean isSpawnCancelled() {
++        return this.spawnCancelled;
++    }
++
++    /**
++     * Marks this mob as being disallowed to spawn during {@link Level#addFreshEntity(Entity)}.<p>
++     * @throws UnsupportedOperationException if this entity has already been {@link Entity#isAddedToLevel()} added to the level.
++     * @apiNote Not public-facing API.
++     */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public final void setSpawnCancelled(boolean cancel) {
++        if (this.isAddedToLevel()) {
++            throw new UnsupportedOperationException("Late invocations of Mob#setSpawnCancelled are not permitted.");
++        }
++        this.spawnCancelled = cancel;
+     }
+ }

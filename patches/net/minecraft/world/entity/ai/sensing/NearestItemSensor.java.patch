@@ -1,0 +1,45 @@
+--- a/net/minecraft/world/entity/ai/sensing/NearestItemSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/NearestItemSensor.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.world.entity.ai.sensing;
+ 
+ import com.google.common.collect.ImmutableSet;
++import java.util.ArrayList;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.Optional;
+@@ -10,6 +_,8 @@
+ import net.minecraft.world.entity.ai.Brain;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.item.ItemEntity;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class NearestItemSensor extends Sensor<Mob> {
+     private static final long XZ_RANGE = 32L;
+@@ -17,13 +_,22 @@
+     public static final int MAX_DISTANCE_TO_WANTED_ITEM = 32;
+ 
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return ImmutableSet.of(MemoryModuleType.NEAREST_VISIBLE_WANTED_ITEM);
+     }
+ 
+-    protected void doTick(ServerLevel level, Mob body) {
++    protected synchronized void doTick(ServerLevel level, Mob body) {
+         Brain<?> brain = body.getBrain();
+-        List<ItemEntity> items = level.getEntitiesOfClass(ItemEntity.class, body.getBoundingBox().inflate(32.0, 16.0, 32.0), item -> true);
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, body.getBoundingBox().inflate(32.0, 16.0, 32.0));
++        List<ItemEntity> items = searchBox == null
++            ? new ArrayList<>()
++            : new ArrayList<>(
++                level.getEntitiesOfClass(
++                    ItemEntity.class,
++                    searchBox,
++                    item -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, item) != null
++                )
++            );
+         items.sort(Comparator.comparingDouble(body::distanceToSqr));
+         Optional<ItemEntity> nearestVisibleLovedItem = items.stream()
+             .filter(itemEntity -> body.wantsToPickUp(level, itemEntity.getItem()))

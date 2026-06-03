@@ -1,0 +1,11 @@
+--- a/net/minecraft/server/chase/ChaseClient.java
++++ b/net/minecraft/server/chase/ChaseClient.java
+@@ -147,7 +_,7 @@
+         this.server
+             .execute(
+                 () -> {
+-                    List<ServerPlayer> players = this.server.getPlayerList().getPlayers();
++                    List<ServerPlayer> players = this.server.getPlayerList().getAllPlayers();
+                     if (!players.isEmpty()) {
+                         ServerPlayer player = players.get(0);
+                         ServerLevel level = this.server.overworld();

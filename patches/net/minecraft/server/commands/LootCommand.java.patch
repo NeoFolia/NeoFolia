@@ -1,0 +1,447 @@
+--- a/net/minecraft/server/commands/LootCommand.java
++++ b/net/minecraft/server/commands/LootCommand.java
+@@ -64,48 +_,24 @@
+                                     .then(
+                                         Commands.argument("pos", BlockPosArgument.blockPos())
+                                             .executes(
+-                                                c -> dropFishingLoot(
+-                                                    c,
+-                                                    ResourceOrIdArgument.getLootTable(c, "loot_table"),
+-                                                    BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                    ItemStack.EMPTY,
+-                                                    output
+-                                                )
++                                                c -> dropFishingLoot(c, LootCommand.ToolMode.EMPTY, output)
+                                             )
+                                             .then(
+                                                 Commands.argument("tool", ItemArgument.item(context))
+                                                     .executes(
+-                                                        c -> dropFishingLoot(
+-                                                            c,
+-                                                            ResourceOrIdArgument.getLootTable(c, "loot_table"),
+-                                                            BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                            ItemArgument.getItem(c, "tool").createItemStack(1),
+-                                                            output
+-                                                        )
++                                                        c -> dropFishingLoot(c, LootCommand.ToolMode.ARGUMENT, output)
+                                                     )
+                                             )
+                                             .then(
+                                                 Commands.literal("mainhand")
+                                                     .executes(
+-                                                        c -> dropFishingLoot(
+-                                                            c,
+-                                                            ResourceOrIdArgument.getLootTable(c, "loot_table"),
+-                                                            BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                            getSourceHandItem(c.getSource(), EquipmentSlot.MAINHAND),
+-                                                            output
+-                                                        )
++                                                        c -> dropFishingLoot(c, LootCommand.ToolMode.MAINHAND, output)
+                                                     )
+                                             )
+                                             .then(
+                                                 Commands.literal("offhand")
+                                                     .executes(
+-                                                        c -> dropFishingLoot(
+-                                                            c,
+-                                                            ResourceOrIdArgument.getLootTable(c, "loot_table"),
+-                                                            BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                            getSourceHandItem(c.getSource(), EquipmentSlot.OFFHAND),
+-                                                            output
+-                                                        )
++                                                        c -> dropFishingLoot(c, LootCommand.ToolMode.OFFHAND, output)
+                                                     )
+                                             )
+                                     )
+@@ -115,49 +_,37 @@
+                         Commands.literal("loot")
+                             .then(
+                                 Commands.argument("loot_table", ResourceOrIdArgument.lootTable(context))
+-                                    .executes(c -> dropChestLoot(c, ResourceOrIdArgument.getLootTable(c, "loot_table"), output))
++                                    .executes(c -> dropChestLoot(c, output))
+                             )
+                     )
+                     .then(
+                         Commands.literal("kill")
+                             .then(
+                                 Commands.argument("target", EntityArgument.entity())
+-                                    .executes(c -> dropKillLoot(c, EntityArgument.getEntity(c, "target"), output))
++                                    .executes(c -> dropKillLoot(c, output))
+                             )
+                     )
+                     .then(
+                         Commands.literal("mine")
+                             .then(
+                                 Commands.argument("pos", BlockPosArgument.blockPos())
+-                                    .executes(c -> dropBlockLoot(c, BlockPosArgument.getLoadedBlockPos(c, "pos"), ItemStack.EMPTY, output))
++                                    .executes(c -> dropBlockLoot(c, LootCommand.ToolMode.EMPTY, output))
+                                     .then(
+                                         Commands.argument("tool", ItemArgument.item(context))
+                                             .executes(
+-                                                c -> dropBlockLoot(
+-                                                    c, BlockPosArgument.getLoadedBlockPos(c, "pos"), ItemArgument.getItem(c, "tool").createItemStack(1), output
+-                                                )
++                                                c -> dropBlockLoot(c, LootCommand.ToolMode.ARGUMENT, output)
+                                             )
+                                     )
+                                     .then(
+                                         Commands.literal("mainhand")
+                                             .executes(
+-                                                c -> dropBlockLoot(
+-                                                    c,
+-                                                    BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                    getSourceHandItem(c.getSource(), EquipmentSlot.MAINHAND),
+-                                                    output
+-                                                )
++                                                c -> dropBlockLoot(c, LootCommand.ToolMode.MAINHAND, output)
+                                             )
+                                     )
+                                     .then(
+                                         Commands.literal("offhand")
+                                             .executes(
+-                                                c -> dropBlockLoot(
+-                                                    c,
+-                                                    BlockPosArgument.getLoadedBlockPos(c, "pos"),
+-                                                    getSourceHandItem(c.getSource(), EquipmentSlot.OFFHAND),
+-                                                    output
+-                                                )
++                                                c -> dropBlockLoot(c, LootCommand.ToolMode.OFFHAND, output)
+                                             )
+                                     )
+                             )
+@@ -177,13 +_,14 @@
+                                         tail.construct(
+                                                 Commands.argument("slot", SlotArgument.slot()),
+                                                 (c, drops, callback) -> entityReplace(
+-                                                    EntityArgument.getEntities(c, "entities"), SlotArgument.getSlot(c, "slot"), drops.size(), drops, callback
++                                                    c.getSource(), EntityArgument.getEntities(c, "entities"), SlotArgument.getSlot(c, "slot"), drops.size(), drops, callback
+                                                 )
+                                             )
+                                             .then(
+                                                 tail.construct(
+                                                     Commands.argument("count", IntegerArgumentType.integer(0)),
+                                                     (c, drops, callback) -> entityReplace(
++                                                        c.getSource(),
+                                                         EntityArgument.getEntities(c, "entities"),
+                                                         SlotArgument.getSlot(c, "slot"),
+                                                         IntegerArgumentType.getInteger(c, "count"),
+@@ -242,7 +_,7 @@
+                     .then(
+                         tail.construct(
+                             Commands.argument("players", EntityArgument.players()),
+-                            (c, drops, callback) -> playerGive(EntityArgument.getPlayers(c, "players"), drops, callback)
++                            (c, drops, callback) -> playerGive(c.getSource(), EntityArgument.getPlayers(c, "players"), drops, callback)
+                         )
+                     )
+             )
+@@ -267,15 +_,19 @@
+     }
+ 
+     private static int blockDistribute(CommandSourceStack source, BlockPos pos, List<ItemStack> drops, LootCommand.Callback callback) throws CommandSyntaxException {
+-        Container container = getContainer(source, pos);
+-        List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
++        List<ItemStack> usedItems = RegionizedCommandHelper.callOnRegionThrowing(source, source.getLevel(), pos, () -> {
++            Container container = getContainer(source, pos);
++            List<ItemStack> regionUsedItems = Lists.newArrayListWithCapacity(drops.size());
+ 
+-        for (ItemStack drop : drops) {
+-            if (distributeToContainer(container, drop.copy())) {
+-                container.setChanged();
+-                usedItems.add(drop);
++            for (ItemStack drop : drops) {
++                if (distributeToContainer(container, drop.copy())) {
++                    container.setChanged();
++                    regionUsedItems.add(drop);
++                }
+             }
+-        }
++
++            return regionUsedItems;
++        });
+ 
+         callback.accept(usedItems);
+         return usedItems.size();
+@@ -307,40 +_,48 @@
+     }
+ 
+     private static int blockReplace(CommandSourceStack source, BlockPos pos, int startSlot, int slotCount, List<ItemStack> drops, LootCommand.Callback callback) throws CommandSyntaxException {
+-        Container container = getContainer(source, pos);
+-        int maxSlot = container.getContainerSize();
+-        if (startSlot >= 0 && startSlot < maxSlot) {
+-            List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
++        List<ItemStack> usedItems = RegionizedCommandHelper.callOnRegionThrowing(source, source.getLevel(), pos, () -> {
++            Container container = getContainer(source, pos);
++            int maxSlot = container.getContainerSize();
++            if (startSlot < 0 || startSlot >= maxSlot) {
++                throw ItemCommands.ERROR_TARGET_INAPPLICABLE_SLOT.create(startSlot);
++            }
++
++            List<ItemStack> regionUsedItems = Lists.newArrayListWithCapacity(drops.size());
+ 
+             for (int i = 0; i < slotCount; i++) {
+                 int slot = startSlot + i;
+                 ItemStack toAdd = i < drops.size() ? drops.get(i) : ItemStack.EMPTY;
+                 if (container.canPlaceItem(slot, toAdd)) {
+                     container.setItem(slot, toAdd);
+-                    usedItems.add(toAdd);
++                    regionUsedItems.add(toAdd);
+                 }
+             }
+ 
+-            callback.accept(usedItems);
+-            return usedItems.size();
+-        } else {
+-            throw ItemCommands.ERROR_TARGET_INAPPLICABLE_SLOT.create(startSlot);
+-        }
++            return regionUsedItems;
++        });
++
++        callback.accept(usedItems);
++        return usedItems.size();
+     }
+ 
+     private static boolean canMergeItems(ItemStack a, ItemStack b) {
+         return a.getCount() <= a.getMaxStackSize() && ItemStack.isSameItemSameComponents(a, b);
+     }
+ 
+-    private static int playerGive(Collection<ServerPlayer> players, List<ItemStack> drops, LootCommand.Callback callback) throws CommandSyntaxException {
++    private static int playerGive(CommandSourceStack source, Collection<ServerPlayer> players, List<ItemStack> drops, LootCommand.Callback callback) throws CommandSyntaxException {
+         List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
+ 
+-        for (ItemStack drop : drops) {
+-            for (ServerPlayer player : players) {
++        for (ServerPlayer player : players) {
++            usedItems.addAll(RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                List<ItemStack> playerUsedItems = Lists.newArrayListWithCapacity(drops.size());
++                for (ItemStack drop : drops) {
+                 if (player.getInventory().add(drop.copy())) {
+-                    usedItems.add(drop);
++                        playerUsedItems.add(drop);
++                    }
+                 }
+-            }
++                return playerUsedItems;
++            }));
+         }
+ 
+         callback.accept(usedItems);
+@@ -357,16 +_,20 @@
+         }
+     }
+ 
+-    private static int entityReplace(Collection<? extends Entity> entities, int startSlot, int count, List<ItemStack> drops, LootCommand.Callback callback) throws CommandSyntaxException {
++    private static int entityReplace(
++        CommandSourceStack source, Collection<? extends Entity> entities, int startSlot, int count, List<ItemStack> drops, LootCommand.Callback callback
++    ) throws CommandSyntaxException {
+         List<ItemStack> usedItems = Lists.newArrayListWithCapacity(drops.size());
+ 
+         for (Entity entity : entities) {
+-            if (entity instanceof ServerPlayer player) {
+-                setSlots(entity, drops, startSlot, count, usedItems);
+-                player.containerMenu.broadcastChanges();
+-            } else {
+-                setSlots(entity, drops, startSlot, count, usedItems);
+-            }
++            usedItems.addAll(RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> {
++                List<ItemStack> entityUsedItems = Lists.newArrayListWithCapacity(drops.size());
++                setSlots(entity, drops, startSlot, count, entityUsedItems);
++                if (entity instanceof ServerPlayer player) {
++                    player.broadcastActiveContainerChanges();
++                }
++                return entityUsedItems;
++            }));
+         }
+ 
+         callback.accept(usedItems);
+@@ -375,10 +_,14 @@
+ 
+     private static int dropInWorld(CommandSourceStack source, Vec3 pos, List<ItemStack> drops, LootCommand.Callback callback) throws CommandSyntaxException {
+         ServerLevel level = source.getLevel();
+-        drops.forEach(drop -> {
+-            ItemEntity entity = new ItemEntity(level, pos.x, pos.y, pos.z, drop.copy());
+-            entity.setDefaultPickUpDelay();
+-            level.addFreshEntity(entity);
++        BlockPos blockPos = BlockPos.containing(pos);
++        RegionizedCommandHelper.callOnRegion(source, level, blockPos, () -> {
++            drops.forEach(drop -> {
++                ItemEntity entity = new ItemEntity(level, pos.x, pos.y, pos.z, drop.copy());
++                entity.setDefaultPickUpDelay();
++                level.addFreshEntity(entity);
++            });
++            return null;
+         });
+         callback.accept(drops);
+         return drops.size();
+@@ -411,41 +_,76 @@
+ 
+     private static ItemStack getSourceHandItem(CommandSourceStack source, EquipmentSlot slot) throws CommandSyntaxException {
+         Entity entity = source.getEntityOrException();
+-        if (entity instanceof LivingEntity) {
+-            return ((LivingEntity)entity).getItemBySlot(slot);
+-        } else {
+-            throw ERROR_NO_HELD_ITEMS.create(entity.getDisplayName());
++        return RegionizedCommandHelper.callOnEntityRegionThrowing(source, entity, () -> {
++            if (entity instanceof LivingEntity livingEntity) {
++                return livingEntity.getItemBySlot(slot).copy();
++            } else {
++                throw ERROR_NO_HELD_ITEMS.create(entity.getDisplayName());
++            }
++        });
++    }
++
++    private static ItemInstance getTool(CommandContext<CommandSourceStack> context, LootCommand.ToolMode mode) throws CommandSyntaxException {
++        return switch (mode) {
++            case EMPTY -> ItemStack.EMPTY;
++            case ARGUMENT -> ItemArgument.getItem(context, "tool").createItemStack(1);
++            case MAINHAND -> getSourceHandItem(context.getSource(), EquipmentSlot.MAINHAND);
++            case OFFHAND -> getSourceHandItem(context.getSource(), EquipmentSlot.OFFHAND);
++        };
++    }
++
++    private static int dropBlockLoot(CommandContext<CommandSourceStack> context, LootCommand.ToolMode mode, LootCommand.DropConsumer output)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> dropBlockLoot(context, mode, output))) {
++            return 0;
+         }
++
++        return dropBlockLoot(context, BlockPosArgument.getLoadedBlockPos(context, "pos"), getTool(context, mode), output);
+     }
+ 
+     private static int dropBlockLoot(CommandContext<CommandSourceStack> context, BlockPos pos, ItemInstance tool, LootCommand.DropConsumer output) throws CommandSyntaxException {
+         CommandSourceStack source = context.getSource();
+         ServerLevel level = source.getLevel();
+-        BlockState blockState = level.getBlockState(pos);
+-        BlockEntity blockEntity = level.getBlockEntity(pos);
+-        Optional<ResourceKey<LootTable>> lootTable = blockState.getBlock().getLootTable();
+-        if (lootTable.isEmpty()) {
+-            throw ERROR_NO_BLOCK_LOOT_TABLE.create(blockState.getBlock().getName());
+-        } else {
++        BlockLootResult result = RegionizedCommandHelper.callOnRegionThrowing(source, level, pos, () -> {
++            BlockState blockState = level.getBlockState(pos);
++            BlockEntity blockEntity = level.getBlockEntity(pos);
++            Optional<ResourceKey<LootTable>> lootTable = blockState.getBlock().getLootTable();
++            if (lootTable.isEmpty()) {
++                throw ERROR_NO_BLOCK_LOOT_TABLE.create(blockState.getBlock().getName());
++            }
++
+             LootParams.Builder lootParams = new LootParams.Builder(level)
+                 .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(pos))
+                 .withParameter(LootContextParams.BLOCK_STATE, blockState)
+                 .withOptionalParameter(LootContextParams.BLOCK_ENTITY, blockEntity)
+-                .withOptionalParameter(LootContextParams.THIS_ENTITY, source.getEntity())
++                .withOptionalParameter(LootContextParams.THIS_ENTITY, RegionizedCommandHelper.sourceEntityFor(source, level))
+                 .withParameter(LootContextParams.TOOL, tool);
+-            List<ItemStack> drops = blockState.getDrops(lootParams);
+-            return output.accept(context, drops, usedItems -> callback(source, usedItems, lootTable.get()));
++            return new BlockLootResult(lootTable.get(), blockState.getDrops(lootParams));
++        });
++        return output.accept(context, result.drops(), usedItems -> callback(source, usedItems, result.lootTable()));
++    }
++
++    private static int dropKillLoot(CommandContext<CommandSourceStack> context, LootCommand.DropConsumer output) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> dropKillLoot(context, output))) {
++            return 0;
+         }
++
++        return dropKillLoot(context, EntityArgument.getEntity(context, "target"), output);
+     }
+ 
+     private static int dropKillLoot(CommandContext<CommandSourceStack> context, Entity target, LootCommand.DropConsumer output) throws CommandSyntaxException {
+-        Optional<ResourceKey<LootTable>> lootTableId = target.getLootTable();
+-        if (lootTableId.isEmpty()) {
+-            throw ERROR_NO_ENTITY_LOOT_TABLE.create(target.getDisplayName());
+-        } else {
+-            CommandSourceStack source = context.getSource();
+-            LootParams.Builder builder = new LootParams.Builder(source.getLevel());
+-            Entity killer = source.getEntity();
++        CommandSourceStack source = context.getSource();
++        KillLootResult result = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            Optional<ResourceKey<LootTable>> lootTableId = target.getLootTable();
++            if (lootTableId.isEmpty()) {
++                throw ERROR_NO_ENTITY_LOOT_TABLE.create(target.getDisplayName());
++            }
++
++            ServerLevel targetLevel = (ServerLevel)target.level();
++            LootParams.Builder builder = new LootParams.Builder(targetLevel);
++            Entity killer = RegionizedCommandHelper.sourceEntityFor(source, targetLevel);
+             if (killer instanceof Player player) {
+                 builder.withParameter(LootContextParams.LAST_DAMAGE_PLAYER, player);
+             }
+@@ -457,28 +_,51 @@
+             builder.withParameter(LootContextParams.ORIGIN, source.getPosition());
+             LootParams lootParams = builder.create(LootContextParamSets.ENTITY);
+             LootTable lootTable = source.getServer().reloadableRegistries().getLootTable(lootTableId.get());
+-            List<ItemStack> drops = lootTable.getRandomItems(lootParams);
+-            return output.accept(context, drops, usedItems -> callback(source, usedItems, lootTableId.get()));
++            return new KillLootResult(lootTableId.get(), lootTable.getRandomItems(lootParams));
++        });
++        return output.accept(context, result.drops(), usedItems -> callback(source, usedItems, result.lootTable()));
++    }
++
++    private static int dropChestLoot(CommandContext<CommandSourceStack> context, LootCommand.DropConsumer output) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> dropChestLoot(context, output))) {
++            return 0;
+         }
++
++        return dropChestLoot(context, ResourceOrIdArgument.getLootTable(context, "loot_table"), output);
+     }
+ 
+     private static int dropChestLoot(CommandContext<CommandSourceStack> context, Holder<LootTable> lootTable, LootCommand.DropConsumer output) throws CommandSyntaxException {
+         CommandSourceStack source = context.getSource();
++        ServerLevel level = source.getLevel();
+         LootParams lootParams = new LootParams.Builder(source.getLevel())
+-            .withOptionalParameter(LootContextParams.THIS_ENTITY, source.getEntity())
++            .withOptionalParameter(LootContextParams.THIS_ENTITY, RegionizedCommandHelper.sourceEntityFor(source, level))
+             .withParameter(LootContextParams.ORIGIN, source.getPosition())
+             .create(LootContextParamSets.CHEST);
+         return drop(context, lootTable, lootParams, output);
+     }
+ 
++    private static int dropFishingLoot(CommandContext<CommandSourceStack> context, LootCommand.ToolMode mode, LootCommand.DropConsumer output)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> dropFishingLoot(context, mode, output))) {
++            return 0;
++        }
++
++        return dropFishingLoot(
++            context, ResourceOrIdArgument.getLootTable(context, "loot_table"), BlockPosArgument.getLoadedBlockPos(context, "pos"), getTool(context, mode), output
++        );
++    }
++
+     private static int dropFishingLoot(
+         CommandContext<CommandSourceStack> context, Holder<LootTable> lootTable, BlockPos pos, ItemInstance tool, LootCommand.DropConsumer output
+     ) throws CommandSyntaxException {
+         CommandSourceStack source = context.getSource();
+-        LootParams lootParams = new LootParams.Builder(source.getLevel())
++        ServerLevel level = source.getLevel();
++        LootParams lootParams = new LootParams.Builder(level)
+             .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(pos))
+             .withParameter(LootContextParams.TOOL, tool)
+-            .withOptionalParameter(LootContextParams.THIS_ENTITY, source.getEntity())
++            .withOptionalParameter(LootContextParams.THIS_ENTITY, RegionizedCommandHelper.sourceEntityFor(source, level))
+             .create(LootContextParamSets.FISHING);
+         return drop(context, lootTable, lootParams, output);
+     }
+@@ -502,5 +_,18 @@
+     @FunctionalInterface
+     private interface TailProvider {
+         ArgumentBuilder<CommandSourceStack, ?> construct(final ArgumentBuilder<CommandSourceStack, ?> root, LootCommand.DropConsumer consumer);
++    }
++
++    private record KillLootResult(ResourceKey<LootTable> lootTable, List<ItemStack> drops) {
++    }
++
++    private record BlockLootResult(ResourceKey<LootTable> lootTable, List<ItemStack> drops) {
++    }
++
++    private enum ToolMode {
++        EMPTY,
++        ARGUMENT,
++        MAINHAND,
++        OFFHAND
+     }
+ }

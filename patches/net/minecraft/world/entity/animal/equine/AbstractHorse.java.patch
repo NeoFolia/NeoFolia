@@ -1,0 +1,91 @@
+--- a/net/minecraft/world/entity/animal/equine/AbstractHorse.java
++++ b/net/minecraft/world/entity/animal/equine/AbstractHorse.java
+@@ -75,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class AbstractHorse extends Animal implements PlayerRideableJumping, HasCustomInventoryScreen, OwnableEntity {
+@@ -342,10 +_,11 @@
+     @Override
+     protected void playStepSound(BlockPos pos, BlockState blockState) {
+         if (!blockState.liquid()) {
+-            BlockState aboveState = this.level().getBlockState(pos.above());
+-            SoundType soundType = blockState.getSoundType();
++            SoundType soundType = blockState.getSoundType(level(), pos, this);
++            BlockPos above = pos.above();
++            BlockState aboveState = this.canReadBlock(above) ? this.level().getBlockState(above) : Blocks.AIR.defaultBlockState();
+             if (aboveState.is(Blocks.SNOW)) {
+-                soundType = aboveState.getSoundType();
++                soundType = aboveState.getSoundType(level(), pos, this);
+             }
+ 
+             if (this.isVehicle() && this.canGallop) {
+@@ -545,6 +_,7 @@
+                 if (!this.isEating()
+                     && !this.isVehicle()
+                     && this.random.nextInt(300) == 0
++                    && this.canReadBlock(this.blockPosition().below())
+                     && level.getBlockState(this.blockPosition().below()).is(Blocks.GRASS_BLOCK)) {
+                     this.setEating(true);
+                 }
+@@ -570,6 +_,10 @@
+         }
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     public boolean canEatGrass() {
+         return true;
+     }
+@@ -708,14 +_,21 @@
+     public boolean tameWithName(Player player) {
+         this.setOwner(player);
+         this.setTamed(true);
+-        if (player instanceof ServerPlayer) {
+-            CriteriaTriggers.TAME_ANIMAL.trigger((ServerPlayer)player, this);
++        if (player instanceof ServerPlayer serverPlayer) {
++            this.triggerTameAnimal(serverPlayer);
+         }
+ 
+         this.level().broadcastEntityEvent(this, (byte)7);
+         return true;
+     }
+ 
++    private void triggerTameAnimal(ServerPlayer player) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.TAME_ANIMAL.trigger(player, this));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Tame horse advancement", trigger)) {
++            trigger.run();
++        }
++    }
++
+     @Override
+     protected void tickRidden(Player controller, Vec3 riddenInput) {
+         super.tickRidden(controller, riddenInput);
+@@ -772,6 +_,7 @@
+         Vec3 movement = this.getDeltaMovement();
+         this.setDeltaMovement(movement.x, impulse, movement.z);
+         this.needsSync = true;
++        net.neoforged.neoforge.common.CommonHooks.onLivingJump(this);
+         if (input.z > 0.0) {
+             float sin = Mth.sin(this.getYRot() * (float) (Math.PI / 180.0));
+             float cos = Mth.cos(this.getYRot() * (float) (Math.PI / 180.0));
+@@ -1017,8 +_,13 @@
+             groupData = new AgeableMob.AgeableMobGroupData(0.2F);
+         }
+ 
+-        this.randomizeAttributes(level.getRandom());
++        this.randomizeAttributes(this.getRandom());
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
++    }
++
++    // Neo: Inventory getter
++    public net.minecraft.world.Container getInventory() {
++        return this.inventory;
+     }
+ 
+     public boolean hasInventoryChanged(Container oldInventory) {

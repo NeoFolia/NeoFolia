@@ -1,0 +1,55 @@
+--- a/net/minecraft/world/entity/ai/behavior/LookAndFollowTradingPlayerSink.java
++++ b/net/minecraft/world/entity/ai/behavior/LookAndFollowTradingPlayerSink.java
+@@ -17,37 +_,42 @@
+         this.speedModifier = speedModifier;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+-        Player tradingPlayer = body.getTradingPlayer();
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++        Player tradingPlayer = BehaviorUtils.regionSafeEntity(body, body.getTradingPlayer());
+         return body.isAlive() && tradingPlayer != null && !body.isInWater() && !body.hurtMarked && body.distanceToSqr(tradingPlayer) <= 16.0;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return this.checkExtraStartConditions(level, body);
+     }
+ 
+-    protected void start(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         this.followPlayer(body);
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+         brain.eraseMemory(MemoryModuleType.WALK_TARGET);
+         brain.eraseMemory(MemoryModuleType.LOOK_TARGET);
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
+         this.followPlayer(body);
+     }
+ 
+     @Override
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return false;
+     }
+ 
+-    private void followPlayer(Villager body) {
++    private synchronized void followPlayer(Villager body) {
++        Player tradingPlayer = BehaviorUtils.regionSafeEntity(body, body.getTradingPlayer());
++        if (tradingPlayer == null) {
++            return;
++        }
++
+         Brain<?> brain = body.getBrain();
+-        brain.setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(new EntityTracker(body.getTradingPlayer(), false), this.speedModifier, 2));
+-        brain.setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(body.getTradingPlayer(), true));
++        brain.setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(new EntityTracker(tradingPlayer, false), this.speedModifier, 2));
++        brain.setMemory(MemoryModuleType.LOOK_TARGET, new EntityTracker(tradingPlayer, true));
+     }
+ }

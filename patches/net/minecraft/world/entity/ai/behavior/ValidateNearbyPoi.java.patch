@@ -1,0 +1,97 @@
+--- a/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
++++ b/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
+@@ -9,32 +_,32 @@
+ import net.minecraft.tags.BlockTags;
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
++import net.minecraft.world.entity.ai.behavior.declarative.MemoryAccessor;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.village.poi.PoiType;
+ import net.minecraft.world.entity.npc.villager.Villager;
+ import net.minecraft.world.level.block.BedBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ValidateNearbyPoi {
+     private static final int MAX_DISTANCE = 16;
+ 
+-    public static BehaviorControl<LivingEntity> create(Predicate<Holder<PoiType>> poiType, MemoryModuleType<GlobalPos> memoryType) {
++    public static synchronized BehaviorControl<LivingEntity> create(Predicate<Holder<PoiType>> poiType, MemoryModuleType<GlobalPos> memoryType) {
+         return BehaviorBuilder.create(i -> i.group(i.present(memoryType)).apply(i, memory -> (level, body, timestamp) -> {
+             GlobalPos globalPos = i.get(memory);
+             BlockPos pos = globalPos.pos();
+             if (level.dimension() == globalPos.dimension() && pos.closerToCenterThan(body.position(), 16.0)) {
+-                ServerLevel poiLevel = level.getServer().getLevel(globalPos.dimension());
+-                if (poiLevel == null || !poiLevel.getPoiManager().exists(pos, poiType)) {
+-                    memory.erase();
+-                } else if (bedIsOccupied(poiLevel, pos, body)) {
+-                    memory.erase();
+-                    if (!bedIsOccupiedByVillager(poiLevel, pos)) {
+-                        level.getPoiManager().release(pos);
+-                        level.debugSynchronizers().updatePoi(pos);
+-                    }
++                boolean bodySleeping = body.isSleeping();
++                if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(
++                    level, pos, "Nearby POI validation", () -> validatePoi(level, body, bodySleeping, memory, globalPos, poiType)
++                )) {
++                    return true;
+                 }
+ 
++                validatePoi(level, body, bodySleeping, memory, globalPos, poiType);
++
+                 return true;
+             } else {
+                 return false;
+@@ -42,13 +_,47 @@
+         }));
+     }
+ 
+-    private static boolean bedIsOccupied(ServerLevel poiLevel, BlockPos poiPos, LivingEntity body) {
++    private static synchronized void validatePoi(
++        ServerLevel level,
++        LivingEntity body,
++        boolean bodySleeping,
++        MemoryAccessor<?, GlobalPos> memory,
++        GlobalPos globalPos,
++        Predicate<Holder<PoiType>> poiType
++    ) {
++        ServerLevel poiLevel = level.getServer().getLevel(globalPos.dimension());
++        BlockPos pos = globalPos.pos();
++        if (poiLevel == null || !poiLevel.getPoiManager().exists(pos, poiType)) {
++            eraseMemoryOnEntityRegion(level, body, memory);
++        } else if (bedIsOccupied(poiLevel, pos, bodySleeping)) {
++            eraseMemoryOnEntityRegion(level, body, memory);
++            if (!bedIsOccupiedByVillager(poiLevel, pos)) {
++                poiLevel.getPoiManager().release(pos);
++                poiLevel.debugSynchronizers().updatePoi(pos);
++            }
++        }
++    }
++
++    private static void eraseMemoryOnEntityRegion(ServerLevel level, LivingEntity body, MemoryAccessor<?, GlobalPos> memory) {
++        if (RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(level, body, "Nearby POI memory erase", memory::erase)) {
++            return;
++        }
++
++        memory.erase();
++    }
++
++    private static synchronized boolean bedIsOccupied(ServerLevel poiLevel, BlockPos poiPos, boolean bodySleeping) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(poiLevel, poiPos.getX() >> 4, poiPos.getZ() >> 4)) {
++            return false;
++        }
++
+         BlockState blockState = poiLevel.getBlockState(poiPos);
+-        return blockState.is(BlockTags.BEDS) && blockState.getValue(BedBlock.OCCUPIED) && !body.isSleeping();
++        return blockState.is(BlockTags.BEDS) && blockState.getValue(BedBlock.OCCUPIED) && !bodySleeping;
+     }
+ 
+-    private static boolean bedIsOccupiedByVillager(ServerLevel poiLevel, BlockPos poiPos) {
+-        List<Villager> villagers = poiLevel.getEntitiesOfClass(Villager.class, new AABB(poiPos), LivingEntity::isSleeping);
++    private static synchronized boolean bedIsOccupiedByVillager(ServerLevel poiLevel, BlockPos poiPos) {
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(poiLevel, new AABB(poiPos));
++        List<Villager> villagers = searchBox == null ? List.of() : poiLevel.getEntitiesOfClass(Villager.class, searchBox, LivingEntity::isSleeping);
+         return !villagers.isEmpty();
+     }
+ }

@@ -1,0 +1,174 @@
+--- a/net/minecraft/world/level/block/entity/JukeboxBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/JukeboxBlockEntity.java
+@@ -5,6 +_,8 @@
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.component.DataComponents;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.entity.item.ItemEntity;
+ import net.minecraft.world.item.ItemStack;
+@@ -18,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.ticks.ContainerSingleItem;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class JukeboxBlockEntity extends BlockEntity implements ContainerSingleItem.BlockContainerSingleItem {
+     public static final String SONG_ITEM_TAG_ID = "RecordItem";
+@@ -29,29 +_,29 @@
+         super(BlockEntityType.JUKEBOX, worldPosition, blockState);
+     }
+ 
+-    public JukeboxSongPlayer getSongPlayer() {
++    public synchronized JukeboxSongPlayer getSongPlayer() {
+         return this.jukeboxSongPlayer;
+     }
+ 
+-    public void onSongChanged() {
++    public synchronized void onSongChanged() {
+         this.level.updateNeighborsAt(this.getBlockPos(), this.getBlockState().getBlock());
+         this.setChanged();
+     }
+ 
+-    private void notifyItemChangedInJukebox(boolean wasInserted) {
++    private synchronized void notifyItemChangedInJukebox(boolean wasInserted) {
+         if (this.level != null && this.level.getBlockState(this.getBlockPos()) == this.getBlockState()) {
+             this.level.setBlock(this.getBlockPos(), this.getBlockState().setValue(JukeboxBlock.HAS_RECORD, wasInserted), 2);
+             this.level.gameEvent(GameEvent.BLOCK_CHANGE, this.getBlockPos(), GameEvent.Context.of(this.getBlockState()));
+         }
+     }
+ 
+-    public void popOutTheItem() {
++    public synchronized void popOutTheItem() {
+         if (this.level != null && !this.level.isClientSide()) {
+             BlockPos pos = this.getBlockPos();
+             ItemStack itemBeforePoppingOut = this.getTheItem();
+             if (!itemBeforePoppingOut.isEmpty()) {
+                 this.removeTheItem();
+-                Vec3 itemPos = Vec3.atLowerCornerWithOffset(pos, 0.5, 1.01, 0.5).offsetRandomXZ(this.level.getRandom(), 0.7F);
++                Vec3 itemPos = Vec3.atLowerCornerWithOffset(pos, 0.5, 1.01, 0.5).offsetRandomXZ(jukeboxRandom(this.level), 0.7F);
+                 ItemStack itemStack = itemBeforePoppingOut.copy();
+                 ItemEntity entity = new ItemEntity(this.level, itemPos.x(), itemPos.y(), itemPos.z(), itemStack);
+                 entity.setDefaultPickUpDelay();
+@@ -62,15 +_,17 @@
+     }
+ 
+     public static void tick(Level level, BlockPos blockPos, BlockState blockState, JukeboxBlockEntity jukebox) {
+-        jukebox.jukeboxSongPlayer.tick(level, blockState);
++        synchronized (jukebox) {
++            jukebox.jukeboxSongPlayer.tick(level, blockState);
++        }
+     }
+ 
+-    public int getComparatorOutput() {
++    public synchronized int getComparatorOutput() {
+         return JukeboxSong.fromStack(this.item).map(Holder::value).map(JukeboxSong::comparatorOutput).orElse(0);
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         ItemStack newItem = input.read("RecordItem", ItemStack.CODEC).orElse(ItemStack.EMPTY);
+         if (!this.item.isEmpty() && !ItemStack.isSameItemSameComponents(newItem, this.item)) {
+@@ -86,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         if (!this.getTheItem().isEmpty()) {
+             output.store("RecordItem", ItemStack.CODEC, this.getTheItem());
+@@ -98,20 +_,45 @@
+     }
+ 
+     @Override
+-    public ItemStack getTheItem() {
++    public synchronized ItemStack getTheItem() {
+         return this.item;
+     }
+ 
+     @Override
+-    public ItemStack splitTheItem(int count) {
++    public synchronized ItemStack splitTheItem(int count) {
+         ItemStack retrievedItem = this.item;
+         this.setTheItem(ItemStack.EMPTY);
+         return retrievedItem;
+     }
+ 
+-    @Override
+-    public void setTheItem(ItemStack itemStack) {
++    // Neo: Support deferring non-transactional notification and song player update until the end of a transaction
++    private final net.neoforged.neoforge.transfer.transaction.RootCommitJournal itemChangedJournal =
++            new net.neoforged.neoforge.transfer.transaction.RootCommitJournal(() -> {
++                if (!isRemoved()) {
++                    itemChanged();
++                }
++            });
++    @Override
++    public void onTransfer(int slot, int amountChange, net.neoforged.neoforge.transfer.transaction.TransactionContext transaction) {
++        itemChangedJournal.updateSnapshots(transaction);
++    }
++
++    @Override
++    public synchronized void setItem(int slot, ItemStack stack, boolean insideTransaction) {
++        if (slot == 0) {
++            if (insideTransaction) {
++                this.item = stack;
++            } else {
++                setTheItem(stack);
++            }
++        }
++    }
++    @Override
++    public synchronized void setTheItem(ItemStack itemStack) {
+         this.item = itemStack;
++        itemChanged();
++    }
++    private synchronized void itemChanged() {
+         boolean itemWasInserted = !this.item.isEmpty();
+         Optional<Holder<JukeboxSong>> maybeSong = JukeboxSong.fromStack(this.item);
+         this.notifyItemChangedInJukebox(itemWasInserted);
+@@ -123,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void setRemoved() {
++    public synchronized void setRemoved() {
+         super.setRemoved();
+         this.level.gameEvent(GameEvent.JUKEBOX_STOP_PLAY, this.getBlockPos(), GameEvent.Context.of(this.getBlockState()));
+         this.level.levelEvent(1011, this.getBlockPos(), 0);
+@@ -140,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canPlaceItem(int slot, ItemStack itemStack) {
++    public synchronized boolean canPlaceItem(int slot, ItemStack itemStack) {
+         return itemStack.has(DataComponents.JUKEBOX_PLAYABLE) && this.getItem(slot).isEmpty();
+     }
+ 
+@@ -155,7 +_,7 @@
+     }
+ 
+     @VisibleForTesting
+-    public void setSongItemWithoutPlaying(ItemStack itemStack) {
++    public synchronized void setSongItemWithoutPlaying(ItemStack itemStack) {
+         this.item = itemStack;
+         JukeboxSong.fromStack(itemStack).ifPresent(song -> this.jukeboxSongPlayer.setSongWithoutPlaying((Holder<JukeboxSong>)song, 0L));
+         this.level.updateNeighborsAt(this.getBlockPos(), this.getBlockState().getBlock());
+@@ -163,7 +_,11 @@
+     }
+ 
+     @VisibleForTesting
+-    public void tryForcePlaySong() {
++    public synchronized void tryForcePlaySong() {
+         JukeboxSong.fromStack(this.getTheItem()).ifPresent(song -> this.jukeboxSongPlayer.play(this.level, (Holder<JukeboxSong>)song));
++    }
++
++    private static RandomSource jukeboxRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ }

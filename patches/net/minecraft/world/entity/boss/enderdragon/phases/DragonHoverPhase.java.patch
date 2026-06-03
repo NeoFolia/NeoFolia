@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonHoverPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonHoverPhase.java
+@@ -13,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         if (this.targetLocation == null) {
+             this.targetLocation = this.dragon.position();
+         }
+@@ -25,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.targetLocation = null;
+     }
+ 
+@@ -35,7 +_,7 @@
+     }
+ 
+     @Override
+-    public @Nullable Vec3 getFlyTargetLocation() {
++    public synchronized @Nullable Vec3 getFlyTargetLocation() {
+         return this.targetLocation;
+     }
+ 

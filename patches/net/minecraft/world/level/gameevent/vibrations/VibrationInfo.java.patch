@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/level/gameevent/vibrations/VibrationInfo.java
++++ b/net/minecraft/world/level/gameevent/vibrations/VibrationInfo.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.world.entity.projectile.Projectile;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public record VibrationInfo(
+@@ -39,11 +_,17 @@
+     }
+ 
+     private static @Nullable UUID getProjectileOwner(@Nullable Entity entity) {
+-        return entity instanceof Projectile projectile && projectile.getOwner() != null ? projectile.getOwner().getUUID() : null;
++        if (entity instanceof Projectile projectile) {
++            Entity owner = projectile.getOwner();
++            return owner != null ? owner.getUUID() : null;
++        }
++
++        return null;
+     }
+ 
+     public Optional<Entity> getEntity(ServerLevel level) {
+-        return Optional.ofNullable(this.entity).or(() -> Optional.ofNullable(this.uuid).map(level::getEntity));
++        return Optional.ofNullable(RegionizedWorldGuard.restrictEntityToCurrentRegion(level, this.entity))
++            .or(() -> Optional.ofNullable(this.uuid).map(level::getEntity));
+     }
+ 
+     public Optional<Entity> getProjectileOwner(ServerLevel level) {
+@@ -51,6 +_,7 @@
+             .filter(e -> e instanceof Projectile)
+             .map(e -> (Projectile)e)
+             .map(Projectile::getOwner)
++            .map(owner -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, owner))
+             .or(() -> Optional.ofNullable(this.projectileOwnerUuid).map(level::getEntity));
+     }
+ }

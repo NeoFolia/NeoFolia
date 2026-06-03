@@ -1,0 +1,87 @@
+--- a/net/minecraft/world/entity/ExperienceOrb.java
++++ b/net/minecraft/world/entity/ExperienceOrb.java
+@@ -25,6 +_,8 @@
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ExperienceOrb extends Entity {
+@@ -136,7 +_,10 @@
+             this.applyEffectsFromBlocks();
+             float friction = 0.98F;
+             if (this.onGround()) {
+-                friction = this.level().getBlockState(this.getBlockPosBelowThatAffectsMyMovement()).getBlock().getFriction() * 0.98F;
++                BlockPos pos = this.getBlockPosBelowThatAffectsMyMovement();
++                if (this.canReadBlock(pos)) {
++                    friction = this.level().getBlockState(pos).getFriction(this.level(), pos, this) * 0.98F;
++                }
+             }
+ 
+             this.setDeltaMovement(this.getDeltaMovement().scale(friction));
+@@ -151,9 +_,15 @@
+         }
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private void followNearbyPlayer() {
++        this.followingPlayer = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.followingPlayer);
+         if (this.followingPlayer == null || this.followingPlayer.isSpectator() || this.followingPlayer.distanceToSqr(this) > 64.0) {
+-            Player nearestPlayer = this.level().getNearestPlayer(this, 8.0);
++            Player nearestPlayer = net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.entity.XpOrbTargetingEvent(this, 8.0)).getFollowingPlayer();
++            nearestPlayer = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), nearestPlayer);
+             if (nearestPlayer != null && !nearestPlayer.isSpectator() && !nearestPlayer.isDeadOrDying()) {
+                 this.followingPlayer = nearestPlayer;
+             } else {
+@@ -180,7 +_,12 @@
+ 
+     private void scanForMerges() {
+         if (this.level() instanceof ServerLevel) {
+-            for (ExperienceOrb orb : this.level().getEntities(EntityTypeTest.forClass(ExperienceOrb.class), this.getBoundingBox().inflate(0.5), this::canMerge)) {
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(0.5));
++            if (regionBox == null) {
++                return;
++            }
++
++            for (ExperienceOrb orb : this.level().getEntities(EntityTypeTest.forClass(ExperienceOrb.class), regionBox, this::canMerge)) {
+                 this.merge(orb);
+             }
+         }
+@@ -202,8 +_,13 @@
+ 
+     private static boolean tryMergeToExisting(ServerLevel level, Vec3 pos, int value) {
+         AABB box = AABB.ofSize(pos, 1.0, 1.0, 1.0);
+-        int id = level.getRandom().nextInt(40);
+-        List<ExperienceOrb> orbs = level.getEntities(EntityTypeTest.forClass(ExperienceOrb.class), box, orbx -> canMerge(orbx, id, value));
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, box);
++        if (regionBox == null) {
++            return false;
++        }
++
++        int id = RegionizedTickContext.currentRandom().orElse(level.getRandom()).nextInt(40);
++        List<ExperienceOrb> orbs = level.getEntities(EntityTypeTest.forClass(ExperienceOrb.class), regionBox, orbx -> canMerge(orbx, id, value));
+         if (!orbs.isEmpty()) {
+             ExperienceOrb orb = orbs.get(0);
+             orb.count++;
+@@ -277,6 +_,7 @@
+     public void playerTouch(Player player) {
+         if (player instanceof ServerPlayer serverPlayer) {
+             if (player.takeXpDelay == 0) {
++                if (net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.entity.player.PlayerXpEvent.PickupXp(player, this)).isCanceled()) return;
+                 player.takeXpDelay = 2;
+                 player.take(this, 1);
+                 int remaining = this.repairPlayerItems(serverPlayer, this.getValue());
+@@ -296,7 +_,7 @@
+         Optional<EnchantedItemInUse> selected = EnchantmentHelper.getRandomItemWith(EnchantmentEffectComponents.REPAIR_WITH_XP, player, ItemStack::isDamaged);
+         if (selected.isPresent()) {
+             ItemStack itemStack = selected.get().itemStack();
+-            int toRepairFromXpAmount = EnchantmentHelper.modifyDurabilityToRepairFromXp(player.level(), itemStack, amount);
++            int toRepairFromXpAmount = EnchantmentHelper.modifyDurabilityToRepairFromXp(player.level(), itemStack, (int) (amount * itemStack.getXpRepairRatio()));
+             int repair = Math.min(toRepairFromXpAmount, itemStack.getDamageValue());
+             itemStack.setDamageValue(itemStack.getDamageValue() - repair);
+             if (repair > 0) {

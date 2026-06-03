@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/entity/ai/sensing/WardenEntitySensor.java
++++ b/net/minecraft/world/entity/ai/sensing/WardenEntitySensor.java
+@@ -32,6 +_,7 @@
+     private static Optional<LivingEntity> getClosest(Warden body, Predicate<LivingEntity> test) {
+         return body.getBrain()
+             .getMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES)
++            .map(List::copyOf)
+             .stream()
+             .flatMap(Collection::stream)
+             .filter(body::canTargetEntity)

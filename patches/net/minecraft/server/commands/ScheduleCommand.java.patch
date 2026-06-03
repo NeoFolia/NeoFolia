@@ -1,0 +1,24 @@
+--- a/net/minecraft/server/commands/ScheduleCommand.java
++++ b/net/minecraft/server/commands/ScheduleCommand.java
+@@ -96,6 +_,10 @@
+         int time,
+         boolean replace
+     ) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> schedule(source, callback, time, replace))) {
++            return 0;
++        }
++
+         if (time == 0) {
+             throw ERROR_SAME_TICK.create();
+         } else {
+@@ -132,6 +_,10 @@
+     }
+ 
+     private static int remove(CommandSourceStack source, String id) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> remove(source, id))) {
++            return 0;
++        }
++
+         int count = source.getServer().getScheduledEvents().remove(id);
+         if (count == 0) {
+             throw ERROR_CANT_REMOVE.create(id);

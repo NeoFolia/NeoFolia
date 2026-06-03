@@ -1,0 +1,136 @@
+--- a/net/minecraft/world/level/entity/EntitySectionStorage.java
++++ b/net/minecraft/world/level/entity/EntitySectionStorage.java
+@@ -4,16 +_,14 @@
+ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
+-import it.unimi.dsi.fastutil.longs.LongIterator;
+ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+ import it.unimi.dsi.fastutil.longs.LongSet;
+ import it.unimi.dsi.fastutil.longs.LongSortedSet;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.Objects;
+-import java.util.Spliterators;
+-import java.util.PrimitiveIterator.OfLong;
+ import java.util.stream.LongStream;
+ import java.util.stream.Stream;
+-import java.util.stream.StreamSupport;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.util.AbortableIterationConsumer;
+ import net.minecraft.util.VisibleForDebug;
+@@ -41,38 +_,46 @@
+         int xMax = SectionPos.posToSectionCoord(bb.maxX + 2.0);
+         int yMax = SectionPos.posToSectionCoord(bb.maxY + 0.0);
+         int zMax = SectionPos.posToSectionCoord(bb.maxZ + 2.0);
+-
+-        for (int x = xMin; x <= xMax; x++) {
+-            long lowestAbsoluteSectionKey = SectionPos.asLong(x, 0, 0);
+-            long highestAbsoluteSectionKey = SectionPos.asLong(x, -1, -1);
+-            LongIterator it = this.sectionIds.subSet(lowestAbsoluteSectionKey, highestAbsoluteSectionKey + 1L).iterator();
+-
+-            while (it.hasNext()) {
+-                long sectionKey = it.nextLong();
+-                int y = SectionPos.y(sectionKey);
+-                int z = SectionPos.z(sectionKey);
+-                if (y >= yMin && y <= yMax && z >= zMin && z <= zMax) {
+-                    EntitySection<T> entitySection = this.sections.get(sectionKey);
+-                    if (entitySection != null
+-                        && !entitySection.isEmpty()
+-                        && entitySection.getStatus().isAccessible()
+-                        && output.accept(entitySection).shouldAbort()) {
+-                        return;
++        List<EntitySection<T>> candidates = new ArrayList<>();
++
++        synchronized (this) {
++            for (int x = xMin; x <= xMax; x++) {
++                long lowestAbsoluteSectionKey = SectionPos.asLong(x, 0, 0);
++                long highestAbsoluteSectionKey = SectionPos.asLong(x, -1, -1);
++                long[] sectionKeys = this.sectionIds.subSet(lowestAbsoluteSectionKey, highestAbsoluteSectionKey + 1L).toLongArray();
++
++                for (long sectionKey : sectionKeys) {
++                    int y = SectionPos.y(sectionKey);
++                    int z = SectionPos.z(sectionKey);
++                    if (y >= yMin && y <= yMax && z >= zMin && z <= zMax) {
++                        EntitySection<T> entitySection = this.sections.get(sectionKey);
++                        if (entitySection != null) {
++                            candidates.add(entitySection);
++                        }
+                     }
+                 }
+             }
+         }
++
++        for (EntitySection<T> entitySection : candidates) {
++            if (!entitySection.isEmpty() && entitySection.getStatus().isAccessible() && output.accept(entitySection).shouldAbort()) {
++                return;
++            }
++        }
+     }
+ 
+     public LongStream getExistingSectionPositionsInChunk(long chunkKey) {
+         int x = ChunkPos.getX(chunkKey);
+         int z = ChunkPos.getZ(chunkKey);
+-        LongSortedSet chunkSections = this.getChunkSections(x, z);
+-        if (chunkSections.isEmpty()) {
++        long[] chunkSections;
++        synchronized (this) {
++            chunkSections = this.getChunkSections(x, z).toLongArray();
++        }
++
++        if (chunkSections.length == 0) {
+             return LongStream.empty();
+         } else {
+-            OfLong iterator = chunkSections.iterator();
+-            return StreamSupport.longStream(Spliterators.spliteratorUnknownSize(iterator, 1301), false);
++            return LongStream.of(chunkSections);
+         }
+     }
+ 
+@@ -83,18 +_,18 @@
+     }
+ 
+     public Stream<EntitySection<T>> getExistingSectionsInChunk(long chunkKey) {
+-        return this.getExistingSectionPositionsInChunk(chunkKey).mapToObj(this.sections::get).filter(Objects::nonNull);
++        return this.getExistingSectionPositionsInChunk(chunkKey).mapToObj(this::getSection).filter(Objects::nonNull);
+     }
+ 
+     private static long getChunkKeyFromSectionKey(long sectionPos) {
+         return ChunkPos.pack(SectionPos.x(sectionPos), SectionPos.z(sectionPos));
+     }
+ 
+-    public EntitySection<T> getOrCreateSection(long key) {
++    public synchronized EntitySection<T> getOrCreateSection(long key) {
+         return this.sections.computeIfAbsent(key, this::createSection);
+     }
+ 
+-    public @Nullable EntitySection<T> getSection(long key) {
++    public synchronized @Nullable EntitySection<T> getSection(long key) {
+         return this.sections.get(key);
+     }
+ 
+@@ -105,7 +_,7 @@
+         return new EntitySection<>(this.entityClass, chunkStatus);
+     }
+ 
+-    public LongSet getAllChunksWithExistingSections() {
++    public synchronized LongSet getAllChunksWithExistingSections() {
+         LongSet chunks = new LongOpenHashSet();
+         this.sections.keySet().forEach(sectionKey -> chunks.add(getChunkKeyFromSectionKey(sectionKey)));
+         return chunks;
+@@ -119,13 +_,13 @@
+         this.forEachAccessibleNonEmptySection(bb, section -> section.getEntities(type, bb, consumer));
+     }
+ 
+-    public void remove(long sectionKey) {
++    public synchronized void remove(long sectionKey) {
+         this.sections.remove(sectionKey);
+         this.sectionIds.remove(sectionKey);
+     }
+ 
+     @VisibleForDebug
+-    public int count() {
++    public synchronized int count() {
+         return this.sectionIds.size();
+     }
+ }

@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/item/ServerItemCooldowns.java
++++ b/net/minecraft/world/item/ServerItemCooldowns.java
+@@ -3,6 +_,7 @@
+ import net.minecraft.network.protocol.game.ClientboundCooldownPacket;
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.server.level.ServerPlayer;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ServerItemCooldowns extends ItemCooldowns {
+     private final ServerPlayer player;
+@@ -14,12 +_,12 @@
+     @Override
+     protected void onCooldownStarted(Identifier cooldownGroup, int duration) {
+         super.onCooldownStarted(cooldownGroup, duration);
+-        this.player.connection.send(new ClientboundCooldownPacket(cooldownGroup, duration));
++        RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundCooldownPacket(cooldownGroup, duration));
+     }
+ 
+     @Override
+     protected void onCooldownEnded(Identifier cooldownGroup) {
+         super.onCooldownEnded(cooldownGroup);
+-        this.player.connection.send(new ClientboundCooldownPacket(cooldownGroup, 0));
++        RegionizedWorldGuard.sendToPlayer(this.player, new ClientboundCooldownPacket(cooldownGroup, 0));
+     }
+ }

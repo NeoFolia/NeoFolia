@@ -1,0 +1,51 @@
+--- a/net/minecraft/world/entity/ai/goal/BreakDoorGoal.java
++++ b/net/minecraft/world/entity/ai/goal/BreakDoorGoal.java
+@@ -4,6 +_,7 @@
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.level.block.Block;
++import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gamerules.GameRules;
+ 
+ public class BreakDoorGoal extends DoorInteractGoal {
+@@ -32,7 +_,7 @@
+         if (!super.canUse()) {
+             return false;
+         } else {
+-            return !getServerLevel(this.mob).getGameRules().get(GameRules.MOB_GRIEFING)
++            return !net.neoforged.neoforge.common.CommonHooks.canEntityDestroy(getServerLevel(this.mob.level()), this.doorPos, this.mob)
+                 ? false
+                 : this.isValidDifficulty(this.mob.level().getDifficulty()) && !this.isOpen();
+         }
+@@ -55,11 +_,18 @@
+     @Override
+     public void stop() {
+         super.stop();
+-        this.mob.level().destroyBlockProgress(this.mob.getId(), this.doorPos, -1);
++        if (this.canReadBlock(this.doorPos)) {
++            this.mob.level().destroyBlockProgress(this.mob.getId(), this.doorPos, -1);
++        }
+     }
+ 
+     @Override
+     public void tick() {
++        if (!this.canReadBlock(this.doorPos)) {
++            this.hasDoor = false;
++            return;
++        }
++
+         super.tick();
+         if (this.mob.getRandom().nextInt(20) == 0) {
+             this.mob.level().levelEvent(1019, this.doorPos, 0);
+@@ -76,9 +_,10 @@
+         }
+ 
+         if (this.breakTime == this.getDoorBreakTime() && this.isValidDifficulty(this.mob.level().getDifficulty())) {
++            BlockState doorState = this.mob.level().getBlockState(this.doorPos);
+             this.mob.level().removeBlock(this.doorPos, false);
+             this.mob.level().levelEvent(1021, this.doorPos, 0);
+-            this.mob.level().levelEvent(2001, this.doorPos, Block.getId(this.mob.level().getBlockState(this.doorPos)));
++            this.mob.level().levelEvent(2001, this.doorPos, Block.getId(doorState));
+         }
+     }
+ 

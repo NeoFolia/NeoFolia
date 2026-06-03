@@ -1,0 +1,168 @@
+--- a/net/minecraft/server/commands/SpectateCommand.java
++++ b/net/minecraft/server/commands/SpectateCommand.java
+@@ -1,15 +_,22 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
++import java.util.List;
++import java.util.concurrent.atomic.AtomicReference;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.EntityArgument;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.world.entity.Entity;
++import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class SpectateCommand {
+@@ -25,34 +_,129 @@
+         dispatcher.register(
+             Commands.literal("spectate")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .executes(c -> spectate(c.getSource(), null, c.getSource().getPlayerOrException()))
++                .executes(c -> spectate(c, false, false))
+                 .then(
+                     Commands.argument("target", EntityArgument.entity())
+-                        .executes(c -> spectate(c.getSource(), EntityArgument.getEntity(c, "target"), c.getSource().getPlayerOrException()))
++                        .executes(c -> spectate(c, true, false))
+                         .then(
+                             Commands.argument("player", EntityArgument.player())
+-                                .executes(c -> spectate(c.getSource(), EntityArgument.getEntity(c, "target"), EntityArgument.getPlayer(c, "player")))
++                                .executes(c -> spectate(c, true, true))
+                         )
+                 )
+         );
+     }
+ 
++    private static int spectate(CommandContext<CommandSourceStack> context, boolean hasTarget, boolean hasPlayer) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> spectate(context, hasTarget, hasPlayer))) {
++            return 0;
++        }
++
++        return spectate(
++            source,
++            hasTarget ? EntityArgument.getEntity(context, "target") : null,
++            hasPlayer ? EntityArgument.getPlayer(context, "player") : source.getPlayerOrException()
++        );
++    }
++
+     private static int spectate(CommandSourceStack source, @Nullable Entity target, ServerPlayer player) throws CommandSyntaxException {
++        Component targetName;
++        if (target != null && source.getServer().regionizedTaskDispatcher().isRunning()) {
++            ServerLevel playerLevel = player.level();
++            if (target.level() instanceof ServerLevel targetLevel) {
++                RegionKey playerRegion = RegionizedWorldGuard.regionFor(playerLevel, player.blockPosition());
++                RegionKey targetRegion = RegionizedWorldGuard.regionFor(targetLevel, target.blockPosition());
++                if (!playerRegion.equals(targetRegion)) {
++                    targetName = spectateAcrossRegions(source, target, player, playerRegion, targetRegion);
++                    return sendSuccess(source, targetName);
++                }
++            }
++        }
++
++        targetName = spectateOnOwningRegions(source, target, player);
++        return sendSuccess(source, targetName);
++    }
++
++    private static @Nullable Component spectateAcrossRegions(
++        CommandSourceStack source,
++        Entity target,
++        ServerPlayer player,
++        RegionKey playerRegion,
++        RegionKey targetRegion
++    ) throws CommandSyntaxException {
++        AtomicReference<Component> targetName = new AtomicReference<>();
++        AtomicReference<CommandSyntaxException> failure = new AtomicReference<>();
++        source.getServer().regionizedTaskDispatcher().awaitRegions("spectate command", List.of(playerRegion, targetRegion), playerRegion, () -> {
++            try {
++                targetName.set(spectateOnReservedRegions(target, player));
++            } catch (CommandSyntaxException ex) {
++                failure.set(ex);
++            }
++        });
++        if (failure.get() != null) {
++            throw failure.get();
++        }
++
++        return targetName.get();
++    }
++
++    private static @Nullable Component spectateOnOwningRegions(CommandSourceStack source, @Nullable Entity target, ServerPlayer player)
++        throws CommandSyntaxException {
++        @Nullable SpectateTarget targetState = target == null ? null : targetSnapshot(source, target);
++
++        Component targetName = RegionizedCommandHelper.callOnPlayerRegionThrowing(source, player, () -> {
++            if (player == target) {
++                throw ERROR_SELF.create();
++            } else if (!player.isSpectator()) {
++                throw ERROR_NOT_SPECTATOR.create(player.getDisplayName());
++            } else if (targetState != null && targetState.clientTrackingRange() == 0) {
++                throw ERROR_CANNOT_SPECTATE.create(targetState.name());
++            } else {
++                player.setCamera(target, targetState == null ? null : targetState.level(), targetState == null ? null : targetState.position());
++                return targetState == null ? null : targetState.name();
++            }
++        });
++
++        return targetName;
++    }
++
++    private static @Nullable Component spectateOnReservedRegions(Entity target, ServerPlayer player) throws CommandSyntaxException {
++        SpectateTarget targetState = new SpectateTarget(
++            target.getType().clientTrackingRange(),
++            target.getDisplayName(),
++            (ServerLevel)target.level(),
++            target.position()
++        );
+         if (player == target) {
+             throw ERROR_SELF.create();
+         } else if (!player.isSpectator()) {
+             throw ERROR_NOT_SPECTATOR.create(player.getDisplayName());
+-        } else if (target != null && target.getType().clientTrackingRange() == 0) {
+-            throw ERROR_CANNOT_SPECTATE.create(target.getDisplayName());
++        } else if (targetState.clientTrackingRange() == 0) {
++            throw ERROR_CANNOT_SPECTATE.create(targetState.name());
++        }
++
++        player.setCamera(target, targetState.level(), targetState.position());
++        return targetState.name();
++    }
++
++    private static SpectateTarget targetSnapshot(CommandSourceStack source, Entity target) {
++        return RegionizedCommandHelper.callOnEntityRegion(
++            source,
++            target,
++            () -> new SpectateTarget(target.getType().clientTrackingRange(), target.getDisplayName(), (ServerLevel)target.level(), target.position())
++        );
++    }
++
++    private static int sendSuccess(CommandSourceStack source, @Nullable Component targetName) {
++        if (targetName != null) {
++            source.sendSuccess(() -> Component.translatable("commands.spectate.success.started", targetName), false);
+         } else {
+-            player.setCamera(target);
+-            if (target != null) {
+-                source.sendSuccess(() -> Component.translatable("commands.spectate.success.started", target.getDisplayName()), false);
+-            } else {
+-                source.sendSuccess(() -> Component.translatable("commands.spectate.success.stopped"), false);
+-            }
+-
+-            return 1;
++            source.sendSuccess(() -> Component.translatable("commands.spectate.success.stopped"), false);
+         }
++
++        return 1;
++    }
++
++    private record SpectateTarget(int clientTrackingRange, Component name, ServerLevel level, Vec3 position) {
+     }
+ }

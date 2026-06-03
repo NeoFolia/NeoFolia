@@ -1,0 +1,336 @@
+--- a/net/minecraft/server/waypoints/ServerWaypointManager.java
++++ b/net/minecraft/server/waypoints/ServerWaypointManager.java
+@@ -5,67 +_,122 @@
+ import com.google.common.collect.Sets;
+ import com.google.common.collect.Table;
+ import com.google.common.collect.Tables;
+-import com.google.common.collect.Sets.SetView;
+ import java.util.HashSet;
+ import java.util.Map;
+ import java.util.Set;
+ import java.util.Map.Entry;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.waypoints.WaypointManager;
+ import net.minecraft.world.waypoints.WaypointTransmitter;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ServerWaypointManager implements WaypointManager<WaypointTransmitter> {
++    private final ServerLevel level;
+     private final Set<WaypointTransmitter> waypoints = new HashSet<>();
+     private final Set<ServerPlayer> players = new HashSet<>();
+     private final Table<ServerPlayer, WaypointTransmitter, WaypointTransmitter.Connection> connections = HashBasedTable.create();
+ 
++    public ServerWaypointManager(ServerLevel level) {
++        this.level = level;
++    }
++
+     public void trackWaypoint(WaypointTransmitter waypoint) {
+-        this.waypoints.add(waypoint);
+-
+-        for (ServerPlayer player : this.players) {
++        if (this.scheduleWaypointOperation(waypoint, "Waypoint track", () -> this.trackWaypoint(waypoint))) {
++            return;
++        }
++
++        Set<ServerPlayer> currentPlayers;
++        synchronized (this) {
++            this.waypoints.add(waypoint);
++            currentPlayers = Set.copyOf(this.players);
++        }
++
++        for (ServerPlayer player : currentPlayers) {
+             this.createConnection(player, waypoint);
+         }
+     }
+ 
+     public void updateWaypoint(WaypointTransmitter waypoint) {
+-        if (this.waypoints.contains(waypoint)) {
+-            Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
+-            SetView<ServerPlayer> potentialPlayers = Sets.difference(this.players, playerConnection.keySet());
+-
+-            for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(playerConnection.entrySet())) {
+-                this.updateConnection(waypointConnection.getKey(), waypoint, waypointConnection.getValue());
+-            }
+-
+-            for (ServerPlayer player : potentialPlayers) {
+-                this.createConnection(player, waypoint);
+-            }
++        if (this.scheduleWaypointOperation(waypoint, "Waypoint update", () -> this.updateWaypoint(waypoint))) {
++            return;
++        }
++
++        Set<Entry<ServerPlayer, WaypointTransmitter.Connection>> currentConnections;
++        Set<ServerPlayer> potentialPlayers;
++        synchronized (this) {
++            if (this.waypoints.contains(waypoint)) {
++                Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
++                currentConnections = ImmutableSet.copyOf(playerConnection.entrySet());
++                potentialPlayers = ImmutableSet.copyOf(Sets.difference(this.players, playerConnection.keySet()));
++            } else {
++                return;
++            }
++        }
++
++        for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : currentConnections) {
++            this.updateConnection(waypointConnection.getKey(), waypoint, waypointConnection.getValue());
++        }
++
++        for (ServerPlayer player : potentialPlayers) {
++            this.createConnection(player, waypoint);
+         }
+     }
+ 
+     public void untrackWaypoint(WaypointTransmitter waypoint) {
+-        this.connections.column(waypoint).forEach((player, connection) -> connection.disconnect());
+-        Tables.transpose(this.connections).row(waypoint).clear();
+-        this.waypoints.remove(waypoint);
++        if (this.scheduleWaypointOperation(waypoint, "Waypoint untrack", () -> this.untrackWaypoint(waypoint))) {
++            return;
++        }
++
++        Set<WaypointTransmitter.Connection> removedConnections;
++        synchronized (this) {
++            removedConnections = ImmutableSet.copyOf(this.connections.column(waypoint).values());
++            Tables.transpose(this.connections).row(waypoint).clear();
++            this.waypoints.remove(waypoint);
++        }
++
++        for (WaypointTransmitter.Connection connection : removedConnections) {
++            connection.disconnect();
++        }
+     }
+ 
+     public void addPlayer(ServerPlayer player) {
+-        this.players.add(player);
+-
+-        for (WaypointTransmitter waypoint : this.waypoints) {
++        if (this.schedulePlayerOperation(player, () -> this.addPlayer(player))) {
++            return;
++        }
++
++        boolean trackPlayerWaypoint = player.isTransmittingWaypoint();
++        Set<WaypointTransmitter> currentWaypoints;
++        synchronized (this) {
++            this.players.add(player);
++            currentWaypoints = Set.copyOf(this.waypoints);
++        }
++
++        for (WaypointTransmitter waypoint : currentWaypoints) {
+             this.createConnection(player, waypoint);
+         }
+ 
+-        if (player.isTransmittingWaypoint()) {
++        if (trackPlayerWaypoint) {
+             this.trackWaypoint((WaypointTransmitter)player);
+         }
+     }
+ 
+     public void updatePlayer(ServerPlayer player) {
+-        Map<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnections = this.connections.row(player);
+-        SetView<WaypointTransmitter> potentialWaypoints = Sets.difference(this.waypoints, waypointConnections.keySet());
+-
+-        for (Entry<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(waypointConnections.entrySet())) {
++        if (this.schedulePlayerOperation(player, () -> this.updatePlayer(player))) {
++            return;
++        }
++
++        Set<Entry<WaypointTransmitter, WaypointTransmitter.Connection>> currentConnections;
++        Set<WaypointTransmitter> potentialWaypoints;
++        synchronized (this) {
++            Map<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnections = this.connections.row(player);
++            currentConnections = ImmutableSet.copyOf(waypointConnections.entrySet());
++            potentialWaypoints = ImmutableSet.copyOf(Sets.difference(this.waypoints, waypointConnections.keySet()));
++        }
++
++        for (Entry<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnection : currentConnections) {
+             this.updateConnection(player, waypointConnection.getKey(), waypointConnection.getValue());
+         }
+ 
+@@ -75,64 +_,150 @@
+     }
+ 
+     public void removePlayer(ServerPlayer player) {
+-        this.connections.row(player).values().removeIf(connection -> {
++        if (this.schedulePlayerOperation(player, () -> this.removePlayer(player))) {
++            return;
++        }
++
++        Set<WaypointTransmitter.Connection> removedConnections;
++        synchronized (this) {
++            removedConnections = ImmutableSet.copyOf(this.connections.row(player).values());
++            this.connections.row(player).clear();
++            this.players.remove(player);
++        }
++
++        for (WaypointTransmitter.Connection connection : removedConnections) {
+             connection.disconnect();
+-            return true;
+-        });
++        }
++
+         this.untrackWaypoint((WaypointTransmitter)player);
+-        this.players.remove(player);
+     }
+ 
+     public void breakAllConnections() {
+-        this.connections.values().forEach(WaypointTransmitter.Connection::disconnect);
+-        this.connections.clear();
++        Set<WaypointTransmitter.Connection> removedConnections;
++        synchronized (this) {
++            removedConnections = ImmutableSet.copyOf(this.connections.values());
++            this.connections.clear();
++        }
++
++        for (WaypointTransmitter.Connection connection : removedConnections) {
++            connection.disconnect();
++        }
+     }
+ 
+     public void remakeConnections(WaypointTransmitter waypoint) {
+-        for (ServerPlayer player : this.players) {
++        if (this.scheduleWaypointOperation(waypoint, "Waypoint connection remake", () -> this.remakeConnections(waypoint))) {
++            return;
++        }
++
++        Set<ServerPlayer> currentPlayers;
++        synchronized (this) {
++            currentPlayers = Set.copyOf(this.players);
++        }
++
++        for (ServerPlayer player : currentPlayers) {
+             this.createConnection(player, waypoint);
+         }
+     }
+ 
+     public Set<WaypointTransmitter> transmitters() {
+-        return this.waypoints;
++        synchronized (this) {
++            return Set.copyOf(this.waypoints);
++        }
+     }
+ 
+     private static boolean isLocatorBarEnabledFor(ServerPlayer player) {
+         return player.level().getGameRules().get(GameRules.LOCATOR_BAR);
+     }
+ 
++    private boolean schedulePlayerOperation(ServerPlayer player, Runnable task) {
++        if (!this.level.getServer().regionizedTaskDispatcher().isRunning() || RegionizedWorldGuard.isOnPlayerRegion(player)) {
++            return false;
++        }
++
++        RegionizedWorldGuard.executeOnPlayerRegion(player, task);
++        return true;
++    }
++
++    private boolean scheduleWaypointOperation(WaypointTransmitter waypoint, String reason, Runnable task) {
++        if (!(waypoint instanceof LivingEntity source)) {
++            return false;
++        }
++
++        return RegionizedWorldGuard.scheduleEntityIfRegionized(this.level, source, reason, task);
++    }
++
+     private void createConnection(ServerPlayer player, WaypointTransmitter waypoint) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
+-                    this.connections.put(player, waypoint, connection);
+-                    connection.connect();
+-                }, () -> {
+-                    WaypointTransmitter.Connection connection = this.connections.remove(player, waypoint);
+-                    if (connection != null) {
+-                        connection.disconnect();
+-                    }
+-                });
+-            }
++        if (player == waypoint || !isLocatorBarEnabledFor(player)) {
++            this.removeConnection(player, waypoint);
++            return;
++        }
++
++        WaypointTransmitter.Connection newConnection = waypoint.makeWaypointConnectionWith(player).orElse(null);
++        if (newConnection != null) {
++            WaypointTransmitter.Connection oldConnection;
++            synchronized (this) {
++                oldConnection = this.connections.put(player, waypoint, newConnection);
++            }
++
++            if (oldConnection != null) {
++                oldConnection.disconnect();
++            }
++
++            newConnection.connect();
++        } else {
++            this.removeConnection(player, waypoint);
+         }
+     }
+ 
+     private void updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                if (!connection.isBroken()) {
+-                    connection.update();
+-                } else {
+-                    waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConnection -> {
+-                        newConnection.connect();
+-                        this.connections.put(player, waypoint, newConnection);
+-                    }, () -> {
+-                        connection.disconnect();
+-                        this.connections.remove(player, waypoint);
+-                    });
+-                }
+-            }
++        if (player == waypoint || !isLocatorBarEnabledFor(player)) {
++            this.removeConnection(player, waypoint);
++            return;
++        }
++
++        if (!connection.isBroken()) {
++            connection.update();
++            return;
++        }
++
++        WaypointTransmitter.Connection newConnection = waypoint.makeWaypointConnectionWith(player).orElse(null);
++        if (newConnection != null) {
++            WaypointTransmitter.Connection oldConnection;
++            synchronized (this) {
++                oldConnection = this.connections.put(player, waypoint, newConnection);
++            }
++
++            if (oldConnection != null) {
++                oldConnection.disconnect();
++            } else {
++                connection.disconnect();
++            }
++
++            newConnection.connect();
++        } else {
++            this.removeConnection(player, waypoint, connection);
++        }
++    }
++
++    private void removeConnection(ServerPlayer player, WaypointTransmitter waypoint) {
++        this.removeConnection(player, waypoint, null);
++    }
++
++    private void removeConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection fallbackConnection) {
++        WaypointTransmitter.Connection removedConnection;
++        synchronized (this) {
++            WaypointTransmitter.Connection currentConnection = this.connections.get(player, waypoint);
++            if (fallbackConnection != null && currentConnection != null && currentConnection != fallbackConnection) {
++                removedConnection = null;
++            } else {
++                removedConnection = this.connections.remove(player, waypoint);
++            }
++        }
++
++        if (removedConnection != null) {
++            removedConnection.disconnect();
++        } else if (fallbackConnection != null) {
++            fallbackConnection.disconnect();
+         }
+     }
+ }

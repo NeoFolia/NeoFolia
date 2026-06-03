@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/effect/OozingMobEffect.java
++++ b/net/minecraft/world/effect/OozingMobEffect.java
+@@ -39,16 +_,16 @@
+             int numberOfSlimesToSpawn = numberOfSlimesToSpawn(maxEntityCramming, OozingMobEffect.NearbySlimes.closeTo(mob), requestedSlimesToSpawn);
+ 
+             for (int i = 0; i < numberOfSlimesToSpawn; i++) {
+-                this.spawnSlimeOffspring(mob.level(), mob.getX(), mob.getY() + 0.5, mob.getZ());
++                this.spawnSlimeOffspring(mob.level(), mob.getRandom(), mob.getX(), mob.getY() + 0.5, mob.getZ());
+             }
+         }
+     }
+ 
+-    private void spawnSlimeOffspring(Level level, double x, double y, double z) {
++    private void spawnSlimeOffspring(Level level, RandomSource random, double x, double y, double z) {
+         Slime slime = EntityType.SLIME.create(level, EntitySpawnReason.TRIGGERED);
+         if (slime != null) {
+             slime.setSize(2, true);
+-            slime.snapTo(x, y, z, level.getRandom().nextFloat() * 360.0F, 0.0F);
++            slime.snapTo(x, y, z, random.nextFloat() * 360.0F, 0.0F);
+             level.addFreshEntity(slime);
+         }
+     }

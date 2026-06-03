@@ -1,0 +1,57 @@
+--- a/net/minecraft/world/inventory/MerchantResultSlot.java
++++ b/net/minecraft/world/inventory/MerchantResultSlot.java
+@@ -5,6 +_,7 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.trading.Merchant;
+ import net.minecraft.world.item.trading.MerchantOffer;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class MerchantResultSlot extends Slot {
+     private final MerchantContainer slots;
+@@ -20,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean mayPlace(ItemStack itemStack) {
++    public synchronized boolean mayPlace(ItemStack itemStack) {
+         return false;
+     }
+ 
+     @Override
+-    public ItemStack remove(int amount) {
++    public synchronized ItemStack remove(int amount) {
+         if (this.hasItem()) {
+             this.removeCount = this.removeCount + Math.min(amount, this.getItem().getCount());
+         }
+@@ -34,19 +_,19 @@
+     }
+ 
+     @Override
+-    protected void onQuickCraft(ItemStack picked, int count) {
++    protected synchronized void onQuickCraft(ItemStack picked, int count) {
+         this.removeCount += count;
+         this.checkTakeAchievements(picked);
+     }
+ 
+     @Override
+-    protected void checkTakeAchievements(ItemStack carried) {
++    protected synchronized void checkTakeAchievements(ItemStack carried) {
+         carried.onCraftedBy(this.player, this.removeCount);
+         this.removeCount = 0;
+     }
+ 
+     @Override
+-    public void onTake(Player player, ItemStack carried) {
++    public synchronized void onTake(Player player, ItemStack carried) {
+         this.checkTakeAchievements(carried);
+         MerchantOffer offer = this.slots.getActiveOffer();
+         if (offer != null) {
+@@ -54,7 +_,7 @@
+             ItemStack buyB = this.slots.getItem(1);
+             if (offer.take(buyA, buyB) || offer.take(buyB, buyA)) {
+                 this.merchant.notifyTrade(offer);
+-                player.awardStat(Stats.TRADED_WITH_VILLAGER);
++                RegionizedWorldGuard.awardStat(player, Stats.TRADED_WITH_VILLAGER);
+                 this.slots.setItem(0, buyA);
+                 this.slots.setItem(1, buyB);
+             }

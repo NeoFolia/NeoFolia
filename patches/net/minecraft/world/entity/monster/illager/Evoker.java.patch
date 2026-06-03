@@ -1,0 +1,148 @@
+--- a/net/minecraft/world/entity/monster/illager/Evoker.java
++++ b/net/minecraft/world/entity/monster/illager/Evoker.java
+@@ -37,9 +_,11 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.VoxelShape;
+ import net.minecraft.world.scores.PlayerTeam;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Evoker extends SpellcasterIllager {
+@@ -85,7 +_,12 @@
+         } else if (super.considersEntityAsAlly(other)) {
+             return true;
+         } else {
+-            return other instanceof Vex vex && vex.getOwner() != null ? this.considersEntityAsAlly(vex.getOwner()) : false;
++            if (other instanceof Vex vex) {
++                LivingEntity owner = vex.getOwner();
++                return owner != null && this.considersEntityAsAlly(owner);
++            }
++
++            return false;
+         }
+     }
+ 
+@@ -112,6 +_,14 @@
+         return this.wololoTarget;
+     }
+ 
++    private @Nullable Sheep getRegionSafeWololoTarget() {
++        return (Sheep)this.regionSafeTarget(this.getWololoTarget());
++    }
++
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     protected SoundEvent getCastingSoundEvent() {
+         return SoundEvents.EVOKER_CAST_SPELL;
+@@ -139,7 +_,11 @@
+ 
+         @Override
+         protected void performSpellCasting() {
+-            LivingEntity target = Evoker.this.getTarget();
++            LivingEntity target = Evoker.this.regionSafeTarget(Evoker.this.getTarget());
++            if (target == null) {
++                return;
++            }
++
+             double minY = Math.min(target.getY(), Evoker.this.getY());
+             double maxY = Math.max(target.getY(), Evoker.this.getY()) + 1.0;
+             float angleTowardsTarget = (float)Mth.atan2(target.getZ() - Evoker.this.getZ(), target.getX() - Evoker.this.getX());
+@@ -176,8 +_,16 @@
+ 
+             do {
+                 BlockPos below = pos.below();
++                if (!Evoker.this.canReadBlock(below)) {
++                    break;
++                }
++
+                 BlockState belowState = Evoker.this.level().getBlockState(below);
+                 if (belowState.isFaceSturdy(Evoker.this.level(), below, Direction.UP)) {
++                    if (!Evoker.this.canReadBlock(pos)) {
++                        break;
++                    }
++
+                     if (!Evoker.this.level().isEmptyBlock(pos)) {
+                         BlockState blockState = Evoker.this.level().getBlockState(pos);
+                         VoxelShape shape = blockState.getCollisionShape(Evoker.this.level(), pos);
+@@ -218,10 +_,12 @@
+ 
+         @Override
+         public void tick() {
+-            if (Evoker.this.getTarget() != null) {
+-                Evoker.this.getLookControl().setLookAt(Evoker.this.getTarget(), Evoker.this.getMaxHeadYRot(), Evoker.this.getMaxHeadXRot());
+-            } else if (Evoker.this.getWololoTarget() != null) {
+-                Evoker.this.getLookControl().setLookAt(Evoker.this.getWololoTarget(), Evoker.this.getMaxHeadYRot(), Evoker.this.getMaxHeadXRot());
++            LivingEntity target = Evoker.this.regionSafeTarget(Evoker.this.getTarget());
++            Sheep wololoTarget = Evoker.this.getRegionSafeWololoTarget();
++            if (target != null) {
++                Evoker.this.getLookControl().setLookAt(target, Evoker.this.getMaxHeadYRot(), Evoker.this.getMaxHeadXRot());
++            } else if (wololoTarget != null) {
++                Evoker.this.getLookControl().setLookAt(wololoTarget, Evoker.this.getMaxHeadYRot(), Evoker.this.getMaxHeadXRot());
+             }
+         }
+     }
+@@ -240,9 +_,9 @@
+             if (!super.canUse()) {
+                 return false;
+             } else {
+-                int vexes = getServerLevel(Evoker.this.level())
+-                    .getNearbyEntities(Vex.class, this.vexCountTargeting, Evoker.this, Evoker.this.getBoundingBox().inflate(16.0))
+-                    .size();
++                ServerLevel level = getServerLevel(Evoker.this.level());
++                AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, Evoker.this.getBoundingBox().inflate(16.0));
++                int vexes = searchBox == null ? 0 : level.getNearbyEntities(Vex.class, this.vexCountTargeting, Evoker.this, searchBox).size();
+                 return Evoker.this.random.nextInt(8) + 1 > vexes;
+             }
+         }
+@@ -303,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            if (Evoker.this.getTarget() != null) {
++            if (Evoker.this.regionSafeTarget(Evoker.this.getTarget()) != null) {
+                 return false;
+             } else if (Evoker.this.isCastingSpell()) {
+                 return false;
+@@ -311,12 +_,13 @@
+                 return false;
+             } else {
+                 ServerLevel level = getServerLevel(Evoker.this.level());
+-                if (!level.getGameRules().get(GameRules.MOB_GRIEFING)) {
++                if (!net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, Evoker.this)) {
+                     return false;
+                 } else {
+-                    List<Sheep> entities = level.getNearbyEntities(
+-                        Sheep.class, this.wololoTargeting, Evoker.this, Evoker.this.getBoundingBox().inflate(16.0, 4.0, 16.0)
+-                    );
++                    AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, Evoker.this.getBoundingBox().inflate(16.0, 4.0, 16.0));
++                    List<Sheep> entities = searchBox == null
++                        ? List.of()
++                        : level.getNearbyEntities(Sheep.class, this.wololoTargeting, Evoker.this, searchBox);
+                     if (entities.isEmpty()) {
+                         return false;
+                     } else {
+@@ -329,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            return Evoker.this.getWololoTarget() != null && this.attackWarmupDelay > 0;
++            return Evoker.this.getRegionSafeWololoTarget() != null && this.attackWarmupDelay > 0;
+         }
+ 
+         @Override
+@@ -340,7 +_,7 @@
+ 
+         @Override
+         protected void performSpellCasting() {
+-            Sheep wololoTarget = Evoker.this.getWololoTarget();
++            Sheep wololoTarget = Evoker.this.getRegionSafeWololoTarget();
+             if (wololoTarget != null && wololoTarget.isAlive()) {
+                 wololoTarget.setColor(DyeColor.RED);
+             }

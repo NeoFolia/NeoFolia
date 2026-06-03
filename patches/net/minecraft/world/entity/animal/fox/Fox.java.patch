@@ -1,0 +1,398 @@
+--- a/net/minecraft/world/entity/animal/fox/Fox.java
++++ b/net/minecraft/world/entity/animal/fox/Fox.java
+@@ -101,7 +_,9 @@
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Fox extends Animal {
+@@ -122,9 +_,14 @@
+         Fox.class, EntityDataSerializers.OPTIONAL_LIVING_ENTITY_REFERENCE
+     );
+     private static final Predicate<ItemEntity> ALLOWED_ITEMS = e -> !e.hasPickUpDelay() && e.isAlive();
+-    private static final Predicate<Entity> TRUSTED_TARGET_SELECTOR = entity -> !(entity instanceof LivingEntity livingEntity)
+-        ? false
+-        : livingEntity.getLastHurtMob() != null && livingEntity.getLastHurtMobTimestamp() < livingEntity.tickCount + 600;
++    private static final Predicate<Entity> TRUSTED_TARGET_SELECTOR = entity -> {
++        if (!(entity instanceof LivingEntity livingEntity)) {
++            return false;
++        }
++
++        LivingEntity lastHurtMob = RegionizedWorldGuard.restrictEntityToCurrentRegion(livingEntity.level(), livingEntity.getLastHurtMob());
++        return lastHurtMob != null && livingEntity.getLastHurtMobTimestamp() < livingEntity.tickCount + 600;
++    };
+     private static final Predicate<Entity> STALKABLE_PREY = entity -> entity instanceof Chicken || entity instanceof Rabbit;
+     private static final Predicate<Entity> AVOID_PLAYERS = entity -> !entity.isDiscrete() && EntitySelector.NO_CREATIVE_OR_SPECTATOR.test(entity);
+     private static final int MIN_TICKS_BEFORE_EAT = 600;
+@@ -224,7 +_,7 @@
+                 }
+             }
+ 
+-            LivingEntity target = this.getTarget();
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
+             if (target == null || !target.isAlive()) {
+                 this.setIsCrouching(false);
+                 this.setIsInterested(false);
+@@ -248,8 +_,16 @@
+         return this.isDeadOrDying();
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
++    protected static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private boolean canEat(ItemStack itemInMouth) {
+-        return this.isConsumableFood(itemInMouth) && this.getTarget() == null && this.onGround() && !this.isSleeping();
++        return this.isConsumableFood(itemInMouth) && this.regionSafeTarget(this.getTarget()) == null && this.onGround() && !this.isSleeping();
+     }
+ 
+     private boolean isConsumableFood(ItemStack itemStack) {
+@@ -326,7 +_,8 @@
+     }
+ 
+     public static boolean checkFoxSpawnRules(EntityType<Fox> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random) {
+-        return level.getBlockState(pos.below()).is(BlockTags.FOXES_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.FOXES_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
+     }
+ 
+     @Override
+@@ -354,7 +_,7 @@
+             this.setTargetGoals();
+         }
+ 
+-        this.populateDefaultEquipmentSlots(level.getRandom(), difficulty);
++        this.populateDefaultEquipmentSlots(this.getRandom(), difficulty);
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+     }
+ 
+@@ -551,7 +_,7 @@
+         super.tick();
+         if (this.isEffectiveAi()) {
+             boolean inWater = this.isInWater();
+-            if (inWater || this.getTarget() != null || this.level().isThundering()) {
++            if (inWater || this.regionSafeTarget(this.getTarget()) != null || this.level().isThundering()) {
+                 this.wakeUp();
+             }
+ 
+@@ -559,10 +_,12 @@
+                 this.setSitting(false);
+             }
+ 
+-            if (this.isFaceplanted() && this.level().getRandom().nextFloat() < 0.2F) {
++            if (this.isFaceplanted() && this.getRandom().nextFloat() < 0.2F) {
+                 BlockPos pos = this.blockPosition();
+-                BlockState state = this.level().getBlockState(pos);
+-                this.level().levelEvent(2001, pos, Block.getId(state));
++                if (Fox.canReadBlock(this.level(), pos)) {
++                    BlockState state = this.level().getBlockState(pos);
++                    this.level().levelEvent(2001, pos, Block.getId(state));
++                }
+             }
+         }
+ 
+@@ -673,8 +_,10 @@
+             return SoundEvents.FOX_SLEEP;
+         } else {
+             if (!this.level().isBrightOutside() && this.random.nextFloat() < 0.1F) {
+-                List<Player> nearbyEntities = this.level()
+-                    .getEntitiesOfClass(Player.class, this.getBoundingBox().inflate(16.0, 16.0, 16.0), EntitySelector.NO_SPECTATORS);
++                AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(16.0, 16.0, 16.0));
++                List<Player> nearbyEntities = searchBox == null
++                    ? List.of()
++                    : this.level().getEntitiesOfClass(Player.class, searchBox, EntitySelector.NO_SPECTATORS);
+                 if (nearbyEntities.isEmpty()) {
+                     return SoundEvents.FOX_SCREECH;
+                 }
+@@ -700,13 +_,18 @@
+ 
+     @Override
+     protected void dropAllDeathLoot(ServerLevel level, DamageSource source) {
++        super.dropAllDeathLoot(level, source);
++    }
++
++    @Override
++    protected void dropEquipment(ServerLevel level) { // Forge: move extra drops to dropEquipment to allow them to be captured by LivingDropsEvent
++        super.dropEquipment(level);
+         ItemStack itemStack = this.getItemBySlot(EquipmentSlot.MAINHAND);
+         if (!itemStack.isEmpty()) {
+             this.spawnAtLocation(level, itemStack);
+             this.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+         }
+ 
+-        super.dropAllDeathLoot(level, source);
+     }
+ 
+     public static boolean isPathClear(Fox fox, LivingEntity target) {
+@@ -720,7 +_,8 @@
+             double x = slope == 0.0 ? xdiff * (i / 6.0F) : z / slope;
+ 
+             for (int j = 1; j < 4; j++) {
+-                if (!fox.level().getBlockState(BlockPos.containing(fox.getX() + x, fox.getY() + j, fox.getZ() + z)).canBeReplaced()) {
++                BlockPos testPos = BlockPos.containing(fox.getX() + x, fox.getY() + j, fox.getZ() + z);
++                if (!Fox.canReadBlock(fox.level(), testPos) || !fox.level().getBlockState(testPos).canBeReplaced()) {
+                     return false;
+                 }
+             }
+@@ -754,7 +_,7 @@
+                     LivingEntity trustedEntity = trustedReference.getEntity(level, LivingEntity.class);
+                     if (trustedEntity != null) {
+                         this.trustedLastHurt = trustedEntity;
+-                        this.trustedLastHurtBy = trustedEntity.getLastHurtByMob();
++                        this.trustedLastHurtBy = Fox.this.regionSafeTarget(trustedEntity.getLastHurtByMob());
+                         int timestamp = trustedEntity.getLastHurtByMobTimestamp();
+                         return timestamp != this.timestamp && this.canAttack(this.trustedLastHurtBy, this.targetConditions);
+                     }
+@@ -847,13 +_,15 @@
+ 
+         protected boolean hasShelter() {
+             BlockPos foxPos = BlockPos.containing(Fox.this.getX(), Fox.this.getBoundingBox().maxY, Fox.this.getZ());
+-            return !Fox.this.level().canSeeSky(foxPos) && Fox.this.getWalkTargetValue(foxPos) >= 0.0F;
++            return Fox.canReadBlock(Fox.this.level(), foxPos) && !Fox.this.level().canSeeSky(foxPos) && Fox.this.getWalkTargetValue(foxPos) >= 0.0F;
+         }
+ 
+         protected boolean alertable() {
+-            return !getServerLevel(Fox.this.level())
+-                .getNearbyEntities(LivingEntity.class, this.alertableTargeting, Fox.this, Fox.this.getBoundingBox().inflate(12.0, 6.0, 12.0))
+-                .isEmpty();
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(Fox.this.level(), Fox.this.getBoundingBox().inflate(12.0, 6.0, 12.0));
++            return searchBox != null
++                && !getServerLevel(Fox.this.level())
++                    .getNearbyEntities(LivingEntity.class, this.alertableTargeting, Fox.this, searchBox)
++                    .isEmpty();
+         }
+     }
+ 
+@@ -873,9 +_,20 @@
+         @Override
+         protected void breed() {
+             Fox offspring = (Fox)this.animal.getBreedOffspring(this.level, this.partner);
++            final net.neoforged.neoforge.event.entity.living.BabyEntitySpawnEvent event = new net.neoforged.neoforge.event.entity.living.BabyEntitySpawnEvent(animal, partner, offspring);
++            final boolean cancelled = net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event).isCanceled();
++            offspring = (Fox) event.getChild();
++            if (cancelled) {
++                //Reset the "inLove" state for the animals
++                this.animal.setAge(6000);
++                this.partner.setAge(6000);
++                this.animal.resetLove();
++                this.partner.resetLove();
++                return;
++            }
+             if (offspring != null) {
+-                ServerPlayer animalLoveCause = this.animal.getLoveCause();
+-                ServerPlayer partnerLoveCause = this.partner.getLoveCause();
++                ServerPlayer animalLoveCause = this.animal.getLoveCauseAcrossRegions();
++                ServerPlayer partnerLoveCause = this.partner.getLoveCauseAcrossRegions();
+                 ServerPlayer loveCause = animalLoveCause;
+                 if (animalLoveCause != null) {
+                     offspring.addTrustedEntity(animalLoveCause);
+@@ -888,8 +_,7 @@
+                 }
+ 
+                 if (loveCause != null) {
+-                    loveCause.awardStat(Stats.ANIMALS_BRED);
+-                    CriteriaTriggers.BRED_ANIMALS.trigger(loveCause, this.animal, this.partner, offspring);
++                    Animal.triggerBredAnimals(loveCause, this.animal, this.partner, offspring);
+                 }
+ 
+                 this.animal.setAge(6000);
+@@ -931,6 +_,10 @@
+ 
+         @Override
+         protected boolean isValidTarget(LevelReader level, BlockPos pos) {
++            if (!Fox.canReadBlock(level, pos)) {
++                return false;
++            }
++
+             BlockState blockState = level.getBlockState(pos);
+             return blockState.is(Blocks.SWEET_BERRY_BUSH) && blockState.getValue(SweetBerryBushBlock.AGE) >= 2 || CaveVines.hasGlowBerries(blockState);
+         }
+@@ -951,7 +_,8 @@
+         }
+ 
+         protected void onReachedTarget() {
+-            if (getServerLevel(Fox.this.level()).getGameRules().get(GameRules.MOB_GRIEFING)) {
++            if (Fox.canReadBlock(Fox.this.level(), this.blockPos)
++                && net.neoforged.neoforge.event.EventHooks.canEntityGrief(getServerLevel(Fox.this.level()), Fox.this)) {
+                 BlockState state = Fox.this.level().getBlockState(this.blockPos);
+                 if (state.is(Blocks.SWEET_BERRY_BUSH)) {
+                     this.pickSweetBerries(state);
+@@ -968,7 +_,7 @@
+         private void pickSweetBerries(BlockState state) {
+             int age = state.getValue(SweetBerryBushBlock.AGE);
+             state.setValue(SweetBerryBushBlock.AGE, 1);
+-            int count = 1 + Fox.this.level().getRandom().nextInt(2) + (age == 3 ? 1 : 0);
++            int count = 1 + Fox.this.getRandom().nextInt(2) + (age == 3 ? 1 : 0);
+             ItemStack heldItem = Fox.this.getItemBySlot(EquipmentSlot.MAINHAND);
+             if (heldItem.isEmpty()) {
+                 Fox.this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.SWEET_BERRIES));
+@@ -1149,7 +_,7 @@
+             if (!Fox.this.isFullyCrouched()) {
+                 return false;
+             } else {
+-                LivingEntity target = Fox.this.getTarget();
++                LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+                 if (target != null && target.isAlive()) {
+                     if (target.getMotionDirection() != target.getDirection()) {
+                         return false;
+@@ -1171,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            LivingEntity target = Fox.this.getTarget();
++            LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+             if (target != null && target.isAlive()) {
+                 double yd = Fox.this.getDeltaMovement().y;
+                 return (!(yd * yd < 0.05F) || !(Math.abs(Fox.this.getXRot()) < 15.0F) || !Fox.this.onGround()) && !Fox.this.isFaceplanted();
+@@ -1190,7 +_,7 @@
+             Fox.this.setJumping(true);
+             Fox.this.setIsPouncing(true);
+             Fox.this.setIsInterested(false);
+-            LivingEntity target = Fox.this.getTarget();
++            LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+             if (target != null) {
+                 Fox.this.getLookControl().setLookAt(target, 60.0F, 30.0F);
+                 Vec3 uv = new Vec3(target.getX() - Fox.this.getX(), target.getY() - Fox.this.getY(), target.getZ() - Fox.this.getZ()).normalize();
+@@ -1211,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = Fox.this.getTarget();
++            LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+             if (target != null) {
+                 Fox.this.getLookControl().setLookAt(target, 60.0F, 30.0F);
+             }
+@@ -1237,6 +_,7 @@
+             } else if (Fox.this.getXRot() > 0.0F
+                 && Fox.this.onGround()
+                 && (float)Fox.this.getDeltaMovement().y != 0.0F
++                && Fox.canReadBlock(Fox.this.level(), Fox.this.blockPosition())
+                 && Fox.this.level().getBlockState(Fox.this.blockPosition()).is(Blocks.SNOW)) {
+                 Fox.this.setXRot(60.0F);
+                 Fox.this.setTarget(null);
+@@ -1256,22 +_,21 @@
+         public boolean canUse() {
+             if (!Fox.this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
+                 return false;
+-            } else if (Fox.this.getTarget() != null || Fox.this.getLastHurtByMob() != null) {
++            } else if (Fox.this.regionSafeTarget(Fox.this.getTarget()) != null || Fox.this.regionSafeTarget(Fox.this.getLastHurtByMob()) != null) {
+                 return false;
+             } else if (!Fox.this.canMove()) {
+                 return false;
+             } else if (Fox.this.getRandom().nextInt(reducedTickDelay(10)) != 0) {
+                 return false;
+             } else {
+-                List<ItemEntity> items = Fox.this.level()
+-                    .getEntitiesOfClass(ItemEntity.class, Fox.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Fox.ALLOWED_ITEMS);
++                List<ItemEntity> items = this.nearbyAllowedItems();
+                 return !items.isEmpty() && Fox.this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty();
+             }
+         }
+ 
+         @Override
+         public void tick() {
+-            List<ItemEntity> items = Fox.this.level().getEntitiesOfClass(ItemEntity.class, Fox.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Fox.ALLOWED_ITEMS);
++            List<ItemEntity> items = this.nearbyAllowedItems();
+             ItemStack itemStack = Fox.this.getItemBySlot(EquipmentSlot.MAINHAND);
+             if (itemStack.isEmpty() && !items.isEmpty()) {
+                 Fox.this.getNavigation().moveTo(items.get(0), 1.2F);
+@@ -1280,11 +_,16 @@
+ 
+         @Override
+         public void start() {
+-            List<ItemEntity> items = Fox.this.level().getEntitiesOfClass(ItemEntity.class, Fox.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Fox.ALLOWED_ITEMS);
++            List<ItemEntity> items = this.nearbyAllowedItems();
+             if (!items.isEmpty()) {
+                 Fox.this.getNavigation().moveTo(items.get(0), 1.2F);
+             }
+         }
++
++        private List<ItemEntity> nearbyAllowedItems() {
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(Fox.this.level(), Fox.this.getBoundingBox().inflate(8.0, 8.0, 8.0));
++            return searchBox == null ? List.of() : Fox.this.level().getEntitiesOfClass(ItemEntity.class, searchBox, Fox.ALLOWED_ITEMS);
++        }
+     }
+ 
+     private class FoxStrollThroughVillageGoal extends StrollThroughVillageGoal {
+@@ -1310,7 +_,7 @@
+         }
+ 
+         private boolean canFoxMove() {
+-            return !Fox.this.isSleeping() && !Fox.this.isSitting() && !Fox.this.isDefending() && Fox.this.getTarget() == null;
++            return !Fox.this.isSleeping() && !Fox.this.isSitting() && !Fox.this.isDefending() && Fox.this.regionSafeTarget(Fox.this.getTarget()) == null;
+         }
+     }
+ 
+@@ -1328,10 +_,10 @@
+ 
+         @Override
+         public boolean canUse() {
+-            return Fox.this.getLastHurtByMob() == null
++            return Fox.this.regionSafeTarget(Fox.this.getLastHurtByMob()) == null
+                 && Fox.this.getRandom().nextFloat() < 0.02F
+                 && !Fox.this.isSleeping()
+-                && Fox.this.getTarget() == null
++                && Fox.this.regionSafeTarget(Fox.this.getTarget()) == null
+                 && Fox.this.getNavigation().isDone()
+                 && !this.alertable()
+                 && !Fox.this.isPouncing()
+@@ -1387,18 +_,19 @@
+ 
+         @Override
+         public boolean canUse() {
+-            if (!Fox.this.isSleeping() && this.mob.getTarget() == null) {
+-                if (Fox.this.level().isThundering() && Fox.this.level().canSeeSky(this.mob.blockPosition())) {
++            if (!Fox.this.isSleeping() && RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), this.mob.getTarget()) == null) {
++                BlockPos mobPos = this.mob.blockPosition();
++                if (Fox.this.level().isThundering() && Fox.canReadBlock(Fox.this.level(), mobPos) && Fox.this.level().canSeeSky(mobPos)) {
+                     return this.setWantedPos();
+                 } else if (this.interval > 0) {
+                     this.interval--;
+                     return false;
+                 } else {
+                     this.interval = 100;
+-                    BlockPos pos = this.mob.blockPosition();
+                     return Fox.this.level().isBrightOutside()
+-                        && Fox.this.level().canSeeSky(pos)
+-                        && !((ServerLevel)Fox.this.level()).isVillage(pos)
++                        && Fox.canReadBlock(Fox.this.level(), mobPos)
++                        && Fox.this.level().canSeeSky(mobPos)
++                        && !((ServerLevel)Fox.this.level()).isVillage(mobPos)
+                         && this.setWantedPos();
+                 }
+             } else {
+@@ -1473,7 +_,7 @@
+             if (Fox.this.isSleeping()) {
+                 return false;
+             } else {
+-                LivingEntity target = Fox.this.getTarget();
++                LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+                 return target != null
+                     && target.isAlive()
+                     && Fox.STALKABLE_PREY.test(target)
+@@ -1492,7 +_,7 @@
+ 
+         @Override
+         public void stop() {
+-            LivingEntity target = Fox.this.getTarget();
++            LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+             if (target != null && Fox.isPathClear(Fox.this, target)) {
+                 Fox.this.setIsInterested(true);
+                 Fox.this.setIsCrouching(true);
+@@ -1506,7 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            LivingEntity target = Fox.this.getTarget();
++            LivingEntity target = Fox.this.regionSafeTarget(Fox.this.getTarget());
+             if (target != null) {
+                 Fox.this.getLookControl().setLookAt(target, Fox.this.getMaxHeadYRot(), Fox.this.getMaxHeadXRot());
+                 if (Fox.this.distanceToSqr(target) <= 36.0) {

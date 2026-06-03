@@ -1,0 +1,71 @@
+--- a/net/minecraft/world/entity/monster/hoglin/Hoglin.java
++++ b/net/minecraft/world/entity/monster/hoglin/Hoglin.java
+@@ -45,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Hoglin extends Animal implements Enemy, HoglinBase {
+@@ -114,8 +_,9 @@
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+         boolean wasHurt = super.hurtServer(level, source, damage);
+-        if (wasHurt && source.getEntity() instanceof LivingEntity sourceEntity) {
+-            HoglinAi.wasHurtBy(level, this, sourceEntity);
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        if (wasHurt && sourceEntity instanceof LivingEntity livingSource) {
++            HoglinAi.wasHurtBy(level, this, livingSource);
+         }
+ 
+         return wasHurt;
+@@ -140,7 +_,7 @@
+         HoglinAi.updateActivity(this);
+         if (this.isConverting()) {
+             this.timeInOverworld++;
+-            if (this.timeInOverworld > 300) {
++            if (this.timeInOverworld > 300 && net.neoforged.neoforge.event.EventHooks.canLivingConvert(this, EntityType.ZOGLIN, (timer) -> this.timeInOverworld = timer)) {
+                 this.makeSound(SoundEvents.HOGLIN_CONVERTED_TO_ZOMBIFIED);
+                 this.finishConversion();
+             }
+@@ -170,14 +_,15 @@
+     }
+ 
+     public static boolean checkHoglinSpawnRules(EntityType<Hoglin> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random) {
+-        return !level.getBlockState(pos.below()).is(Blocks.NETHER_WART_BLOCK);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && !level.getBlockState(below).is(Blocks.NETHER_WART_BLOCK);
+     }
+ 
+     @Override
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        if (level.getRandom().nextFloat() < 0.2F) {
++        if (this.getRandom().nextFloat() < 0.2F) {
+             this.setBaby(true);
+         }
+ 
+@@ -194,7 +_,8 @@
+         if (HoglinAi.isPosNearNearestRepellent(this, pos)) {
+             return -1.0F;
+         } else {
+-            return level.getBlockState(pos.below()).is(Blocks.CRIMSON_NYLIUM) ? 10.0F : 0.0F;
++            BlockPos below = pos.below();
++            return canReadBlock(level, below) && level.getBlockState(below).is(Blocks.CRIMSON_NYLIUM) ? 10.0F : 0.0F;
+         }
+     }
+ 
+@@ -235,7 +_,10 @@
+ 
+     private void finishConversion() {
+         this.convertTo(
+-            EntityType.ZOGLIN, ConversionParams.single(this, true, false), zoglin -> zoglin.addEffect(new MobEffectInstance(MobEffects.NAUSEA, 200, 0))
++            EntityType.ZOGLIN, ConversionParams.single(this, true, false), zoglin -> {
++                zoglin.addEffect(new MobEffectInstance(MobEffects.NAUSEA, 200, 0));
++                net.neoforged.neoforge.event.EventHooks.onLivingConvert(this, zoglin);
++            }
+         );
+     }
+ 

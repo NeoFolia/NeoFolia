@@ -1,0 +1,40 @@
+--- a/net/minecraft/world/entity/monster/breeze/Breeze.java
++++ b/net/minecraft/world/entity/monster/breeze/Breeze.java
+@@ -35,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Breeze extends Monster {
+@@ -181,7 +_,7 @@
+ 
+     @Override
+     public void playAmbientSound() {
+-        if (this.getTarget() == null || !this.onGround()) {
++        if (this.regionSafeTarget(this.getTarget()) == null || !this.onGround()) {
+             this.level().playLocalSound(this, this.getAmbientSound(), this.getSoundSource(), 1.0F, 1.0F);
+         }
+     }
+@@ -261,7 +_,8 @@
+ 
+     @Override
+     public boolean isInvulnerableTo(ServerLevel level, DamageSource source) {
+-        return source.getEntity() instanceof Breeze || super.isInvulnerableTo(level, source);
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        return sourceEntity instanceof Breeze || super.isInvulnerableTo(level, source);
+     }
+ 
+     @Override
+@@ -286,6 +_,10 @@
+     @Override
+     public @Nullable LivingEntity getTarget() {
+         return this.getTargetFromBrain();
++    }
++
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
+     }
+ 
+     @Override

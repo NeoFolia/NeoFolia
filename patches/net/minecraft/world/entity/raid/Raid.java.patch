@@ -1,0 +1,578 @@
+--- a/net/minecraft/world/entity/raid/Raid.java
++++ b/net/minecraft/world/entity/raid/Raid.java
+@@ -60,24 +_,26 @@
+ import net.minecraft.world.level.block.entity.BannerPatterns;
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Raid {
+     public static final SpawnPlacementType RAVAGER_SPAWN_PLACEMENT_TYPE = SpawnPlacements.getPlacementType(EntityType.RAVAGER);
+     public static final MapCodec<Raid> MAP_CODEC = RecordCodecBuilder.mapCodec(
+         i -> i.group(
+-                Codec.BOOL.fieldOf("started").forGetter(r -> r.started),
+-                Codec.BOOL.fieldOf("active").forGetter(r -> r.active),
+-                Codec.LONG.fieldOf("ticks_active").forGetter(r -> r.ticksActive),
+-                Codec.INT.fieldOf("raid_omen_level").forGetter(r -> r.raidOmenLevel),
+-                Codec.INT.fieldOf("groups_spawned").forGetter(r -> r.groupsSpawned),
+-                Codec.INT.fieldOf("cooldown_ticks").forGetter(r -> r.raidCooldownTicks),
+-                Codec.INT.fieldOf("post_raid_ticks").forGetter(r -> r.postRaidTicks),
+-                Codec.FLOAT.fieldOf("total_health").forGetter(r -> r.totalHealth),
+-                Codec.INT.fieldOf("group_count").forGetter(r -> r.numGroups),
+-                Raid.RaidStatus.CODEC.fieldOf("status").forGetter(r -> r.status),
+-                BlockPos.CODEC.fieldOf("center").forGetter(r -> r.center),
+-                UUIDUtil.CODEC_SET.fieldOf("heroes_of_the_village").forGetter(r -> r.heroesOfTheVillage)
++                Codec.BOOL.fieldOf("started").forGetter(Raid::isStarted),
++                Codec.BOOL.fieldOf("active").forGetter(Raid::isActive),
++                Codec.LONG.fieldOf("ticks_active").forGetter(Raid::ticksActive),
++                Codec.INT.fieldOf("raid_omen_level").forGetter(Raid::getRaidOmenLevel),
++                Codec.INT.fieldOf("groups_spawned").forGetter(Raid::getGroupsSpawned),
++                Codec.INT.fieldOf("cooldown_ticks").forGetter(Raid::raidCooldownTicks),
++                Codec.INT.fieldOf("post_raid_ticks").forGetter(Raid::postRaidTicks),
++                Codec.FLOAT.fieldOf("total_health").forGetter(Raid::getTotalHealth),
++                Codec.INT.fieldOf("group_count").forGetter(Raid::numGroups),
++                Raid.RaidStatus.CODEC.fieldOf("status").forGetter(Raid::status),
++                BlockPos.CODEC.fieldOf("center").forGetter(Raid::getCenter),
++                UUIDUtil.CODEC_SET.fieldOf("heroes_of_the_village").forGetter(Raid::heroesOfTheVillage)
+             )
+             .apply(i, Raid::new)
+     );
+@@ -161,35 +_,59 @@
+         this.heroesOfTheVillage.addAll(heroesOfTheVillage);
+     }
+ 
+-    public boolean isOver() {
++    private synchronized long ticksActive() {
++        return this.ticksActive;
++    }
++
++    private synchronized int raidCooldownTicks() {
++        return this.raidCooldownTicks;
++    }
++
++    private synchronized int postRaidTicks() {
++        return this.postRaidTicks;
++    }
++
++    private synchronized int numGroups() {
++        return this.numGroups;
++    }
++
++    private synchronized Raid.RaidStatus status() {
++        return this.status;
++    }
++
++    private synchronized Set<UUID> heroesOfTheVillage() {
++        return Set.copyOf(this.heroesOfTheVillage);
++    }
++
++    public synchronized boolean isOver() {
+         return this.isVictory() || this.isLoss();
+     }
+ 
+-    public boolean isBetweenWaves() {
++    public synchronized boolean isBetweenWaves() {
+         return this.hasFirstWaveSpawned() && this.getTotalRaidersAlive() == 0 && this.raidCooldownTicks > 0;
+     }
+ 
+-    public boolean hasFirstWaveSpawned() {
++    public synchronized boolean hasFirstWaveSpawned() {
+         return this.groupsSpawned > 0;
+     }
+ 
+-    public boolean isStopped() {
++    public synchronized boolean isStopped() {
+         return this.status == Raid.RaidStatus.STOPPED;
+     }
+ 
+-    public boolean isVictory() {
++    public synchronized boolean isVictory() {
+         return this.status == Raid.RaidStatus.VICTORY;
+     }
+ 
+-    public boolean isLoss() {
++    public synchronized boolean isLoss() {
+         return this.status == Raid.RaidStatus.LOSS;
+     }
+ 
+-    public float getTotalHealth() {
++    public synchronized float getTotalHealth() {
+         return this.totalHealth;
+     }
+ 
+-    public Set<Raider> getAllRaiders() {
++    public synchronized Set<Raider> getAllRaiders() {
+         Set<Raider> raiders = Sets.newHashSet();
+ 
+         for (Set<Raider> raiderSet : this.groupRaiderMap.values()) {
+@@ -199,11 +_,11 @@
+         return raiders;
+     }
+ 
+-    public boolean isStarted() {
++    public synchronized boolean isStarted() {
+         return this.started;
+     }
+ 
+-    public int getGroupsSpawned() {
++    public synchronized int getGroupsSpawned() {
+         return this.groupsSpawned;
+     }
+ 
+@@ -214,9 +_,12 @@
+         };
+     }
+ 
+-    private void updatePlayers(ServerLevel level) {
++    private synchronized void updatePlayers(ServerLevel level) {
+         Set<ServerPlayer> currentPlayersInRaid = Sets.newHashSet(this.raidEvent.getPlayers());
+-        List<ServerPlayer> newPlayersInRaid = level.getPlayers(this.validPlayer());
++        Predicate<ServerPlayer> validPlayer = this.validPlayer();
++        List<ServerPlayer> newPlayersInRaid = level.getPlayers(
++            player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null && validPlayer.test(player)
++        );
+ 
+         for (ServerPlayer player : newPlayersInRaid) {
+             if (!currentPlayersInRaid.contains(player)) {
+@@ -225,25 +_,29 @@
+         }
+ 
+         for (ServerPlayer playerx : currentPlayersInRaid) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(level, playerx) == null) {
++                continue;
++            }
++
+             if (!newPlayersInRaid.contains(playerx)) {
+                 this.raidEvent.removePlayer(playerx);
+             }
+         }
+     }
+ 
+-    public int getMaxRaidOmenLevel() {
++    public synchronized int getMaxRaidOmenLevel() {
+         return 5;
+     }
+ 
+-    public int getRaidOmenLevel() {
++    public synchronized int getRaidOmenLevel() {
+         return this.raidOmenLevel;
+     }
+ 
+-    public void setRaidOmenLevel(int raidOmenLevel) {
++    public synchronized void setRaidOmenLevel(int raidOmenLevel) {
+         this.raidOmenLevel = raidOmenLevel;
+     }
+ 
+-    public boolean absorbRaidOmen(ServerPlayer player) {
++    public synchronized boolean absorbRaidOmen(ServerPlayer player) {
+         MobEffectInstance effect = player.getEffect(MobEffects.RAID_OMEN);
+         if (effect == null) {
+             return false;
+@@ -251,21 +_,27 @@
+             this.raidOmenLevel = this.raidOmenLevel + effect.getAmplifier() + 1;
+             this.raidOmenLevel = Mth.clamp(this.raidOmenLevel, 0, this.getMaxRaidOmenLevel());
+             if (!this.hasFirstWaveSpawned()) {
+-                player.awardStat(Stats.RAID_TRIGGER);
+-                CriteriaTriggers.RAID_OMEN.trigger(player);
++                triggerRaidOmen(player);
+             }
+ 
+             return true;
+         }
+     }
+ 
+-    public void stop() {
++    private static void triggerRaidOmen(ServerPlayer player) {
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++            RegionizedWorldGuard.awardStat(player, Stats.RAID_TRIGGER);
++            CriteriaTriggers.RAID_OMEN.trigger(player);
++        });
++    }
++
++    public synchronized void stop() {
+         this.active = false;
+         this.raidEvent.removeAllPlayers();
+         this.status = Raid.RaidStatus.STOPPED;
+     }
+ 
+-    public void tick(ServerLevel level) {
++    public synchronized void tick(ServerLevel level) {
+         if (!this.isStopped()) {
+             if (this.status == Raid.RaidStatus.ONGOING) {
+                 boolean oldActive = this.active;
+@@ -396,14 +_,11 @@
+                     } else {
+                         this.status = Raid.RaidStatus.VICTORY;
+ 
++                        int heroEffectAmplifier = this.raidOmenLevel - 1;
+                         for (UUID heroUUID : this.heroesOfTheVillage) {
+-                            Entity entity = level.getEntity(heroUUID);
++                            Entity entity = RegionizedWorldGuard.restrictEntityToCurrentRegion(level, level.getEntities().get(heroUUID));
+                             if (entity instanceof LivingEntity hero && !entity.isSpectator()) {
+-                                hero.addEffect(new MobEffectInstance(MobEffects.HERO_OF_THE_VILLAGE, 48000, this.raidOmenLevel - 1, false, false, true));
+-                                if (hero instanceof ServerPlayer playerHero) {
+-                                    playerHero.awardStat(Stats.RAID_WIN);
+-                                    CriteriaTriggers.RAID_WIN.trigger(playerHero);
+-                                }
++                                rewardHeroOfTheVillage(level, hero, heroEffectAmplifier);
+                             }
+                         }
+                     }
+@@ -431,7 +_,7 @@
+         }
+     }
+ 
+-    private void moveRaidCenterToNearbyVillageSection(ServerLevel level) {
++    private synchronized void moveRaidCenterToNearbyVillageSection(ServerLevel level) {
+         Stream<SectionPos> sectionsToSearchForVillage = SectionPos.cube(SectionPos.of(this.center), 2);
+         sectionsToSearchForVillage.filter(level::isVillage)
+             .map(SectionPos::center)
+@@ -439,32 +_,32 @@
+             .ifPresent(this::setCenter);
+     }
+ 
+-    private Optional<BlockPos> getValidSpawnPos(ServerLevel level) {
++    private synchronized Optional<BlockPos> getValidSpawnPos(ServerLevel level) {
+         BlockPos spawnPos = this.findRandomSpawnPos(level, 8);
+         return spawnPos != null ? Optional.of(spawnPos) : Optional.empty();
+     }
+ 
+-    private boolean hasMoreWaves() {
++    private synchronized boolean hasMoreWaves() {
+         return this.hasBonusWave() ? !this.hasSpawnedBonusWave() : !this.isFinalWave();
+     }
+ 
+-    private boolean isFinalWave() {
++    private synchronized boolean isFinalWave() {
+         return this.getGroupsSpawned() == this.numGroups;
+     }
+ 
+-    private boolean hasBonusWave() {
++    private synchronized boolean hasBonusWave() {
+         return this.raidOmenLevel > 1;
+     }
+ 
+-    private boolean hasSpawnedBonusWave() {
++    private synchronized boolean hasSpawnedBonusWave() {
+         return this.getGroupsSpawned() > this.numGroups;
+     }
+ 
+-    private boolean shouldSpawnBonusGroup() {
++    private synchronized boolean shouldSpawnBonusGroup() {
+         return this.isFinalWave() && this.getTotalRaidersAlive() == 0 && this.hasBonusWave();
+     }
+ 
+-    private void updateRaiders(ServerLevel level) {
++    private synchronized void updateRaiders(ServerLevel level) {
+         Iterator<Set<Raider>> raiders = this.groupRaiderMap.values().iterator();
+         Set<Raider> toRemove = Sets.newHashSet();
+ 
+@@ -472,6 +_,10 @@
+             Set<Raider> raiderSet = raiders.next();
+ 
+             for (Raider raider : raiderSet) {
++                if (RegionizedWorldGuard.restrictEntityToCurrentRegion(level, raider) == null) {
++                    continue;
++                }
++
+                 BlockPos raiderPos = raider.blockPosition();
+                 if (raider.isRemoved() || raider.level().dimension() != level.dimension() || this.center.distSqr(raiderPos) >= 12544.0) {
+                     toRemove.add(raider);
+@@ -499,25 +_,66 @@
+         }
+     }
+ 
+-    private void playSound(ServerLevel level, BlockPos soundOrigin) {
++    private static void rewardHeroOfTheVillage(ServerLevel level, LivingEntity hero, int effectAmplifier) {
++        if (RegionizedWorldGuard.scheduleEntityIfRegionized(level, hero, "Raid hero reward", () -> rewardHeroOfTheVillage(level, hero, effectAmplifier))) {
++            return;
++        }
++
++        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(level, hero) == null) {
++            return;
++        }
++
++        hero.addEffect(new MobEffectInstance(MobEffects.HERO_OF_THE_VILLAGE, 48000, effectAmplifier, false, false, true));
++        if (hero instanceof ServerPlayer playerHero) {
++            triggerRaidWin(playerHero);
++        }
++    }
++
++    private static void triggerRaidWin(ServerPlayer playerHero) {
++        RegionizedWorldGuard.executeOnPlayerRegion(playerHero, () -> {
++            RegionizedWorldGuard.awardStat(playerHero, Stats.RAID_WIN);
++            CriteriaTriggers.RAID_WIN.trigger(playerHero);
++        });
++    }
++
++    private synchronized void playSound(ServerLevel level, BlockPos soundOrigin) {
++        if (RegionizedTickContext.isRegionThread()) {
++            BlockPos immutableOrigin = soundOrigin.immutable();
++            if (!level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> this.playSound(level, immutableOrigin))) {
++                throw new IllegalStateException("Cannot play raid sound from region worker while region dispatcher is not running");
++            }
++            return;
++        }
++
+         float distAway = 13.0F;
+         int range = 64;
+         Collection<ServerPlayer> playersInRaid = this.raidEvent.getPlayers();
+         long seed = this.random.nextLong();
+ 
+-        for (ServerPlayer player : level.players()) {
+-            Vec3 playerLoc = player.position();
+-            Vec3 raidLoc = Vec3.atCenterOf(soundOrigin);
+-            double distBtwn = Math.sqrt((raidLoc.x - playerLoc.x) * (raidLoc.x - playerLoc.x) + (raidLoc.z - playerLoc.z) * (raidLoc.z - playerLoc.z));
+-            double x3 = playerLoc.x + 13.0 / distBtwn * (raidLoc.x - playerLoc.x);
+-            double z3 = playerLoc.z + 13.0 / distBtwn * (raidLoc.z - playerLoc.z);
+-            if (distBtwn <= 64.0 || playersInRaid.contains(player)) {
+-                player.connection.send(new ClientboundSoundPacket(SoundEvents.RAID_HORN, SoundSource.NEUTRAL, x3, player.getY(), z3, 64.0F, 1.0F, seed));
++        for (ServerPlayer player : level.getServer().getPlayerList().getPlayersAcrossRegions()) {
++            if (player.level() != level) {
++                continue;
+             }
++
++            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++                Vec3 playerLoc = player.position();
++                Vec3 raidLoc = Vec3.atCenterOf(soundOrigin);
++                double distBtwn = Math.sqrt(
++                    (raidLoc.x - playerLoc.x) * (raidLoc.x - playerLoc.x) + (raidLoc.z - playerLoc.z) * (raidLoc.z - playerLoc.z)
++                );
++                double x3 = playerLoc.x + 13.0 / distBtwn * (raidLoc.x - playerLoc.x);
++                double z3 = playerLoc.z + 13.0 / distBtwn * (raidLoc.z - playerLoc.z);
++                if (distBtwn <= 64.0 || playersInRaid.contains(player)) {
++                    RegionizedWorldGuard.sendToPlayer(
++                        player,
++                        new ClientboundSoundPacket(SoundEvents.RAID_HORN, SoundSource.NEUTRAL, x3, player.getY(), z3, 64.0F, 1.0F, seed)
++                    );
++                }
++            });
+         }
+     }
+ 
+-    private void spawnGroup(ServerLevel level, BlockPos pos) {
++    private synchronized void spawnGroup(ServerLevel level, BlockPos pos) {
+         boolean leaderSet = false;
+         int groupNumber = this.groupsSpawned + 1;
+         this.totalHealth = 0.0F;
+@@ -530,7 +_,7 @@
+             int ravagersSpawned = 0;
+ 
+             for (int i = 0; i < numSpawns; i++) {
+-                Raider raider = raiderType.entityType.create(level, EntitySpawnReason.EVENT);
++                Raider raider = raiderType.entityTypeSupplier.get().create(level, EntitySpawnReason.EVENT);
+                 if (raider == null) {
+                     break;
+                 }
+@@ -542,7 +_,7 @@
+                 }
+ 
+                 this.joinRaid(level, groupNumber, raider, pos, false);
+-                if (raiderType.entityType == EntityType.RAVAGER) {
++                if (raiderType.entityTypeSupplier.get() == EntityType.RAVAGER) {
+                     Raider ridingRaider = null;
+                     if (groupNumber == this.getNumGroups(Difficulty.NORMAL)) {
+                         ridingRaider = EntityType.PILLAGER.create(level, EntitySpawnReason.EVENT);
+@@ -570,7 +_,7 @@
+         this.setDirty(level);
+     }
+ 
+-    public void joinRaid(ServerLevel level, int groupNumber, Raider raider, @Nullable BlockPos pos, boolean exists) {
++    public synchronized void joinRaid(ServerLevel level, int groupNumber, Raider raider, @Nullable BlockPos pos, boolean exists) {
+         boolean added = this.addWaveMob(level, groupNumber, raider);
+         if (added) {
+             raider.setCurrentRaid(this);
+@@ -587,11 +_,11 @@
+         }
+     }
+ 
+-    public void updateBossbar() {
++    public synchronized void updateBossbar() {
+         this.raidEvent.setProgress(Mth.clamp(this.getHealthOfLivingRaiders() / this.totalHealth, 0.0F, 1.0F));
+     }
+ 
+-    public float getHealthOfLivingRaiders() {
++    public synchronized float getHealthOfLivingRaiders() {
+         float health = 0.0F;
+ 
+         for (Set<Raider> raiders : this.groupRaiderMap.values()) {
+@@ -603,15 +_,15 @@
+         return health;
+     }
+ 
+-    private boolean shouldSpawnGroup() {
++    private synchronized boolean shouldSpawnGroup() {
+         return this.raidCooldownTicks == 0 && (this.groupsSpawned < this.numGroups || this.shouldSpawnBonusGroup()) && this.getTotalRaidersAlive() == 0;
+     }
+ 
+-    public int getTotalRaidersAlive() {
++    public synchronized int getTotalRaidersAlive() {
+         return this.groupRaiderMap.values().stream().mapToInt(Set::size).sum();
+     }
+ 
+-    public void removeFromRaid(ServerLevel level, Raider raider, boolean removeFromTotalHealth) {
++    public synchronized void removeFromRaid(ServerLevel level, Raider raider, boolean removeFromTotalHealth) {
+         Set<Raider> raiders = this.groupRaiderMap.get(raider.getWave());
+         if (raiders != null) {
+             boolean couldRemove = raiders.remove(raider);
+@@ -627,7 +_,7 @@
+         }
+     }
+ 
+-    private void setDirty(ServerLevel level) {
++    private synchronized void setDirty(ServerLevel level) {
+         level.getRaids().setDirty();
+     }
+ 
+@@ -658,11 +_,11 @@
+         return getOminousBannerTemplate(patternGetter).create();
+     }
+ 
+-    public @Nullable Raider getLeader(int wave) {
++    public synchronized @Nullable Raider getLeader(int wave) {
+         return this.groupToLeaderMap.get(wave);
+     }
+ 
+-    private @Nullable BlockPos findRandomSpawnPos(ServerLevel level, int maxTries) {
++    private synchronized @Nullable BlockPos findRandomSpawnPos(ServerLevel level, int maxTries) {
+         int secondsRemaining = this.raidCooldownTicks / 20;
+         float howFar = 0.22F * secondsRemaining - 0.24F;
+         BlockPos.MutableBlockPos spawnPos = new BlockPos.MutableBlockPos();
+@@ -672,6 +_,10 @@
+             float angle = startAngle + (float) Math.PI * i / 8.0F;
+             int spawnX = this.center.getX() + Mth.floor(Mth.cos(angle) * 32.0F * howFar) + this.random.nextInt(3) * Mth.floor(howFar);
+             int spawnZ = this.center.getZ() + Mth.floor(Mth.sin(angle) * 32.0F * howFar) + this.random.nextInt(3) * Mth.floor(howFar);
++            if (!canReadChunks(level, spawnX - 10, spawnZ - 10, spawnX + 10, spawnZ + 10)) {
++                continue;
++            }
++
+             int spawnY = level.getHeight(Heightmap.Types.WORLD_SURFACE, spawnX, spawnZ);
+             if (Mth.abs(spawnY - this.center.getY()) <= 96) {
+                 spawnPos.set(spawnX, spawnY, spawnZ);
+@@ -692,11 +_,27 @@
+         return null;
+     }
+ 
+-    private boolean addWaveMob(ServerLevel level, int wave, Raider raider) {
++    private static boolean canReadChunks(ServerLevel level, int minBlockX, int minBlockZ, int maxBlockX, int maxBlockZ) {
++        int minChunkX = minBlockX >> 4;
++        int maxChunkX = maxBlockX >> 4;
++        int minChunkZ = minBlockZ >> 4;
++        int maxChunkZ = maxBlockZ >> 4;
++        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
++            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
++                if (!RegionizedWorldGuard.shouldLoadChunk(level, chunkX, chunkZ)) {
++                    return false;
++                }
++            }
++        }
++
++        return true;
++    }
++
++    private synchronized boolean addWaveMob(ServerLevel level, int wave, Raider raider) {
+         return this.addWaveMob(level, wave, raider, true);
+     }
+ 
+-    public boolean addWaveMob(ServerLevel level, int wave, Raider raider, boolean updateHealth) {
++    public synchronized boolean addWaveMob(ServerLevel level, int wave, Raider raider, boolean updateHealth) {
+         this.groupRaiderMap.computeIfAbsent(wave, v -> Sets.newHashSet());
+         Set<Raider> raiders = this.groupRaiderMap.get(wave);
+         Raider existingCopy = null;
+@@ -723,29 +_,29 @@
+         return true;
+     }
+ 
+-    public void setLeader(int wave, Raider raider) {
++    public synchronized void setLeader(int wave, Raider raider) {
+         this.groupToLeaderMap.put(wave, raider);
+         raider.setItemSlot(EquipmentSlot.HEAD, getOminousBannerInstance(raider.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)));
+         raider.setDropChance(EquipmentSlot.HEAD, 2.0F);
+     }
+ 
+-    public void removeLeader(int wave) {
++    public synchronized void removeLeader(int wave) {
+         this.groupToLeaderMap.remove(wave);
+     }
+ 
+-    public BlockPos getCenter() {
++    public synchronized BlockPos getCenter() {
+         return this.center;
+     }
+ 
+-    private void setCenter(BlockPos center) {
++    private synchronized void setCenter(BlockPos center) {
+         this.center = center;
+     }
+ 
+-    private int getDefaultNumSpawns(Raid.RaiderType type, int wav, boolean isBonusWave) {
++    private synchronized int getDefaultNumSpawns(Raid.RaiderType type, int wav, boolean isBonusWave) {
+         return isBonusWave ? type.spawnsPerWaveBeforeBonus[this.numGroups] : type.spawnsPerWaveBeforeBonus[wav];
+     }
+ 
+-    private int getPotentialBonusSpawns(Raid.RaiderType type, RandomSource random, int wav, DifficultyInstance difficultyInstance, boolean isBonusWave) {
++    private synchronized int getPotentialBonusSpawns(Raid.RaiderType type, RandomSource random, int wav, DifficultyInstance difficultyInstance, boolean isBonusWave) {
+         Difficulty difficulty = difficultyInstance.getDifficulty();
+         boolean isEasy = difficulty == Difficulty.EASY;
+         boolean isNormal = difficulty == Difficulty.NORMAL;
+@@ -778,11 +_,11 @@
+         return bonusSpawns > 0 ? random.nextInt(bonusSpawns + 1) : 0;
+     }
+ 
+-    public boolean isActive() {
++    public synchronized boolean isActive() {
+         return this.active;
+     }
+ 
+-    public int getNumGroups(Difficulty difficulty) {
++    public synchronized int getNumGroups(Difficulty difficulty) {
+         return switch (difficulty) {
+             case PEACEFUL -> 0;
+             case EASY -> 3;
+@@ -791,7 +_,7 @@
+         };
+     }
+ 
+-    public float getEnchantOdds() {
++    public synchronized float getEnchantOdds() {
+         int raidOmenLvl = this.getRaidOmenLevel();
+         if (raidOmenLvl == 2) {
+             return 0.1F;
+@@ -804,7 +_,7 @@
+         }
+     }
+ 
+-    public void addHeroOfTheVillage(Entity killer) {
++    public synchronized void addHeroOfTheVillage(Entity killer) {
+         this.heroesOfTheVillage.add(killer.getUUID());
+     }
+ 
+@@ -835,12 +_,26 @@
+         RAVAGER(EntityType.RAVAGER, new int[]{0, 0, 0, 1, 0, 1, 0, 2});
+ 
+         private static final Raid.RaiderType[] VALUES = values();
++        @Deprecated // Neo: null for custom types, use the supplier instead
+         private final EntityType<? extends Raider> entityType;
+         private final int[] spawnsPerWaveBeforeBonus;
++        final java.util.function.Supplier<EntityType<? extends Raider>> entityTypeSupplier;
+ 
++        @net.neoforged.fml.common.asm.enumextension.ReservedConstructor
+         private RaiderType(EntityType<? extends Raider> entityType, int[] spawnsPerWaveBeforeBonus) {
+             this.entityType = entityType;
+             this.spawnsPerWaveBeforeBonus = spawnsPerWaveBeforeBonus;
++            this.entityTypeSupplier = () -> entityType;
++        }
++
++        private RaiderType(java.util.function.Supplier<EntityType<? extends Raider>> entityTypeSupplier, int[] spawnsPerWave) {
++            this.entityType = null;
++            this.spawnsPerWaveBeforeBonus = spawnsPerWave;
++            this.entityTypeSupplier = entityTypeSupplier;
++        }
++
++        public static net.neoforged.fml.common.asm.enumextension.ExtensionInfo getExtensionInfo() {
++            return net.neoforged.fml.common.asm.enumextension.ExtensionInfo.nonExtended(Raid.RaiderType.class);
+         }
+     }
+ }

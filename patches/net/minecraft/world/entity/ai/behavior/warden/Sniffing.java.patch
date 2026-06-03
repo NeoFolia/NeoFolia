@@ -1,0 +1,39 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/Sniffing.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/Sniffing.java
+@@ -5,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.world.entity.Pose;
+ import net.minecraft.world.entity.ai.behavior.Behavior;
++import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.memory.MemoryStatus;
+ import net.minecraft.world.entity.monster.warden.Warden;
+@@ -36,21 +_,24 @@
+         );
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, E body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, E body, long timestamp) {
+         return true;
+     }
+ 
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+         body.playSound(SoundEvents.WARDEN_SNIFF, 5.0F, 1.0F);
+     }
+ 
+-    protected void stop(ServerLevel level, E body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, E body, long timestamp) {
+         if (body.hasPose(Pose.SNIFFING)) {
+             body.setPose(Pose.STANDING);
+         }
+ 
+         body.getBrain().eraseMemory(MemoryModuleType.IS_SNIFFING);
+-        body.getBrain().getMemory(MemoryModuleType.NEAREST_ATTACKABLE).filter(body::canTargetEntity).ifPresent(entity -> {
++        body.getBrain().getMemory(MemoryModuleType.NEAREST_ATTACKABLE)
++            .map(entity -> BehaviorUtils.regionSafeEntity(body, entity))
++            .filter(body::canTargetEntity)
++            .ifPresent(entity -> {
+             if (body.closerThan(entity, 6.0, 20.0)) {
+                 body.increaseAngerAt(entity);
+             }

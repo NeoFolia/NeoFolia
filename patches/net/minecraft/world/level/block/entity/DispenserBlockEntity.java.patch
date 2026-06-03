@@ -1,0 +1,58 @@
+--- a/net/minecraft/world/level/block/entity/DispenserBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/DispenserBlockEntity.java
+@@ -27,11 +_,11 @@
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return 9;
+     }
+ 
+-    public int getRandomSlot(RandomSource random) {
++    public synchronized int getRandomSlot(RandomSource random) {
+         this.unpackLootTable(null);
+         int replaceSlot = -1;
+         int replaceOdds = 1;
+@@ -45,7 +_,7 @@
+         return replaceSlot;
+     }
+ 
+-    public ItemStack insertItem(ItemStack itemStack) {
++    public synchronized ItemStack insertItem(ItemStack itemStack) {
+         int maxStackSize = this.getMaxStackSize(itemStack);
+ 
+         for (int i = 0; i < this.items.size(); i++) {
+@@ -76,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.items = NonNullList.withSize(this.getContainerSize(), ItemStack.EMPTY);
+         if (!this.tryLoadLootTable(input)) {
+@@ -85,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         if (!this.trySaveLootTable(output)) {
+             ContainerHelper.saveAllItems(output, this.items);
+@@ -93,12 +_,12 @@
+     }
+ 
+     @Override
+-    protected NonNullList<ItemStack> getItems() {
++    protected synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ 
+     @Override
+-    protected void setItems(NonNullList<ItemStack> items) {
++    protected synchronized void setItems(NonNullList<ItemStack> items) {
+         this.items = items;
+     }
+ 

@@ -1,0 +1,143 @@
+--- a/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
++++ b/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
+@@ -42,13 +_,22 @@
+         );
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Mob body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Mob body) {
+         if (this.remainingCooldown > 0) {
+             this.remainingCooldown--;
+             return false;
+         } else {
+             Brain<?> brain = body.getBrain();
+-            WalkTarget walkTarget = brain.getMemory(MemoryModuleType.WALK_TARGET).get();
++            Optional<WalkTarget> walkTargetMemory = brain.getMemory(MemoryModuleType.WALK_TARGET);
++            if (walkTargetMemory.isEmpty()) {
++                return false;
++            }
++
++            WalkTarget walkTarget = walkTargetMemory.orElseThrow();
++            if (!this.isWalkTargetRegionSafe(body, walkTarget)) {
++                brain.eraseMemory(MemoryModuleType.WALK_TARGET);
++                return false;
++            }
+             boolean reachedTarget = this.reachedTarget(body, walkTarget);
+             if (!reachedTarget && this.tryComputePath(body, walkTarget, level.getGameTime())) {
+                 this.lastTargetPos = walkTarget.getTarget().currentBlockPosition();
+@@ -64,36 +_,41 @@
+         }
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
+         if (this.path != null && this.lastTargetPos != null) {
+             Optional<WalkTarget> walkTarget = body.getBrain().getMemory(MemoryModuleType.WALK_TARGET);
+-            boolean isSpectator = walkTarget.map(MoveToTargetSink::isWalkTargetSpectator).orElse(false);
+             PathNavigation navigation = body.getNavigation();
+-            return !navigation.isDone() && walkTarget.isPresent() && !this.reachedTarget(body, walkTarget.get()) && !isSpectator;
++            return !navigation.isDone()
++                && walkTarget.map(target -> this.isWalkTargetRegionSafe(body, target) && !this.reachedTarget(body, target) && !isWalkTargetSpectator(body, target))
++                    .orElse(false);
+         } else {
+             return false;
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Mob body, long timestamp) {
+-        if (body.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+-            && !this.reachedTarget(body, body.getBrain().getMemory(MemoryModuleType.WALK_TARGET).get())
++    protected synchronized void stop(ServerLevel level, Mob body, long timestamp) {
++        Optional<WalkTarget> walkTarget = body.getBrain().getMemory(MemoryModuleType.WALK_TARGET);
++        if (walkTarget.map(target -> this.isWalkTargetRegionSafe(body, target) && !this.reachedTarget(body, target)).orElse(false)
+             && body.getNavigation().isStuck()) {
+-            this.remainingCooldown = level.getRandom().nextInt(40);
++            this.remainingCooldown = body.getRandom().nextInt(40);
+         }
+ 
+         body.getNavigation().stop();
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.PATH);
+         this.path = null;
+-    }
+-
+-    protected void start(ServerLevel level, Mob body, long timestamp) {
+-        body.getBrain().setMemory(MemoryModuleType.PATH, this.path);
+-        body.getNavigation().moveTo(this.path, (double)this.speedModifier);
+-    }
+-
+-    protected void tick(ServerLevel level, Mob body, long timestamp) {
++        this.lastTargetPos = null;
++    }
++
++    protected synchronized void start(ServerLevel level, Mob body, long timestamp) {
++        Path currentPath = this.path;
++        if (currentPath != null) {
++            body.getBrain().setMemory(MemoryModuleType.PATH, currentPath);
++            body.getNavigation().moveTo(currentPath, (double)this.speedModifier);
++        }
++    }
++
++    protected synchronized void tick(ServerLevel level, Mob body, long timestamp) {
+         Path newPath = body.getNavigation().getPath();
+         Brain<?> brain = body.getBrain();
+         if (this.path != newPath) {
+@@ -102,15 +_,25 @@
+         }
+ 
+         if (newPath != null && this.lastTargetPos != null) {
+-            WalkTarget walkTarget = brain.getMemory(MemoryModuleType.WALK_TARGET).get();
+-            if (walkTarget.getTarget().currentBlockPosition().distSqr(this.lastTargetPos) > 4.0 && this.tryComputePath(body, walkTarget, level.getGameTime())) {
+-                this.lastTargetPos = walkTarget.getTarget().currentBlockPosition();
+-                this.start(level, body, timestamp);
+-            }
++            brain.getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walkTarget -> {
++                if (!this.isWalkTargetRegionSafe(body, walkTarget)) {
++                    brain.eraseMemory(MemoryModuleType.WALK_TARGET);
++                    return;
++                }
++                if (walkTarget.getTarget().currentBlockPosition().distSqr(this.lastTargetPos) > 4.0
++                    && this.tryComputePath(body, walkTarget, level.getGameTime())) {
++                    this.lastTargetPos = walkTarget.getTarget().currentBlockPosition();
++                    this.start(level, body, timestamp);
++                }
++            });
+         }
+     }
+ 
+-    private boolean tryComputePath(Mob body, WalkTarget walkTarget, long timestamp) {
++    private synchronized boolean tryComputePath(Mob body, WalkTarget walkTarget, long timestamp) {
++        if (!this.isWalkTargetRegionSafe(body, walkTarget)) {
++            return false;
++        }
++
+         BlockPos targetPos = walkTarget.getTarget().currentBlockPosition();
+         this.path = body.getNavigation().createPath(targetPos, 0);
+         this.speedModifier = walkTarget.getSpeedModifier();
+@@ -139,11 +_,23 @@
+         return false;
+     }
+ 
+-    private boolean reachedTarget(Mob body, WalkTarget walkTarget) {
++    private synchronized boolean reachedTarget(Mob body, WalkTarget walkTarget) {
++        if (!this.isWalkTargetRegionSafe(body, walkTarget)) {
++            return false;
++        }
++
+         return walkTarget.getTarget().currentBlockPosition().distManhattan(body.blockPosition()) <= walkTarget.getCloseEnoughDist();
+     }
+ 
+-    private static boolean isWalkTargetSpectator(WalkTarget walkTarget) {
+-        return walkTarget.getTarget() instanceof EntityTracker entityTracker ? entityTracker.getEntity().isSpectator() : false;
++    private synchronized boolean isWalkTargetRegionSafe(Mob body, WalkTarget walkTarget) {
++        return walkTarget.getTarget().isRegionSafeFor(body);
++    }
++
++    private static boolean isWalkTargetSpectator(Mob body, WalkTarget walkTarget) {
++        if (walkTarget.getTarget() instanceof EntityTracker entityTracker && entityTracker.getEntityIfRegionSafe(body.level()) instanceof net.minecraft.world.entity.Entity entity) {
++            return entity.isSpectator();
++        }
++
++        return false;
+     }
+ }

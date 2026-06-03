@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/entity/ai/sensing/PiglinBruteSpecificSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/PiglinBruteSpecificSensor.java
+@@ -32,6 +_,6 @@
+             .map(Mob.class::cast);
+         List<AbstractPiglin> adultPiglins = PiglinAi.findNearbyAdultPiglins(brain);
+         brain.setMemory(MemoryModuleType.NEAREST_VISIBLE_NEMESIS, nemesis);
+-        brain.setMemory(MemoryModuleType.NEARBY_ADULT_PIGLINS, adultPiglins);
++        brain.setMemory(MemoryModuleType.NEARBY_ADULT_PIGLINS, List.copyOf(adultPiglins));
+     }
+ }

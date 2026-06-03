@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/RandomizableContainer.java
++++ b/net/minecraft/world/RandomizableContainer.java
+@@ -16,6 +_,7 @@
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface RandomizableContainer extends Container {
+@@ -73,8 +_,8 @@
+         ResourceKey<LootTable> lootTableKey = this.getLootTable();
+         if (lootTableKey != null && level != null && level.getServer() != null) {
+             LootTable lootTable = level.getServer().reloadableRegistries().getLootTable(lootTableKey);
+-            if (player instanceof ServerPlayer) {
+-                CriteriaTriggers.GENERATE_LOOT.trigger((ServerPlayer)player, lootTableKey);
++            if (player instanceof ServerPlayer serverPlayer) {
++                RegionizedWorldGuard.executeOnPlayerRegion(serverPlayer, () -> CriteriaTriggers.GENERATE_LOOT.trigger(serverPlayer, lootTableKey));
+             }
+ 
+             this.setLootTable(null);

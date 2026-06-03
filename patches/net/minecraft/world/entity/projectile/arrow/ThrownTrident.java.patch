@@ -1,0 +1,51 @@
+--- a/net/minecraft/world/entity/projectile/arrow/ThrownTrident.java
++++ b/net/minecraft/world/entity/projectile/arrow/ThrownTrident.java
+@@ -2,6 +_,7 @@
+ 
+ import java.util.Collection;
+ import java.util.List;
++import java.util.UUID;
+ import net.minecraft.network.syncher.EntityDataAccessor;
+ import net.minecraft.network.syncher.EntityDataSerializers;
+ import net.minecraft.network.syncher.SynchedEntityData;
+@@ -150,6 +_,10 @@
+ 
+     @Override
+     protected void hitBlockEnchantmentEffects(ServerLevel level, BlockHitResult hitResult, ItemStack weapon) {
++        if (!this.canReadBlock(hitResult.getBlockPos())) {
++            return;
++        }
++
+         Vec3 compensatedHitPosition = hitResult.getBlockPos().clampLocationWithin(hitResult.getLocation());
+         EnchantmentHelper.onHitBlock(
+             level,
+@@ -185,9 +_,28 @@
+ 
+     @Override
+     public void playerTouch(Player player) {
+-        if (this.ownedBy(player) || this.getOwner() == null) {
++        if (this.ownedBy(player) || !this.ownerExistsInAnyRegion()) {
+             super.playerTouch(player);
+         }
++    }
++
++    private boolean ownerExistsInAnyRegion() {
++        if (this.owner == null || !(this.level() instanceof ServerLevel serverLevel)) {
++            return this.getOwner() != null;
++        }
++
++        UUID ownerId = this.owner.getUUID();
++        if (serverLevel.getServer().getPlayerList().getAnyRegionPlayer(ownerId) != null) {
++            return true;
++        }
++
++        for (ServerLevel level : serverLevel.getServer().getAllLevels()) {
++            if (level.getEntities().get(ownerId) != null) {
++                return true;
++            }
++        }
++
++        return false;
+     }
+ 
+     @Override

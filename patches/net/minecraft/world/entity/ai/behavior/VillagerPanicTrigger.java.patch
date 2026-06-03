@@ -1,0 +1,37 @@
+--- a/net/minecraft/world/entity/ai/behavior/VillagerPanicTrigger.java
++++ b/net/minecraft/world/entity/ai/behavior/VillagerPanicTrigger.java
+@@ -13,11 +_,11 @@
+         super(ImmutableMap.of());
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return isHurt(body) || hasHostile(body);
+     }
+ 
+-    protected void start(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         if (isHurt(body) || hasHostile(body)) {
+             Brain<?> brain = body.getBrain();
+             if (!brain.isActive(Activity.PANIC)) {
+@@ -32,17 +_,17 @@
+         }
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
+         if (timestamp % 100L == 0L) {
+             body.spawnGolemIfNeeded(level, timestamp, 3);
+         }
+     }
+ 
+-    public static boolean hasHostile(LivingEntity myBody) {
++    public static synchronized boolean hasHostile(LivingEntity myBody) {
+         return myBody.getBrain().hasMemoryValue(MemoryModuleType.NEAREST_HOSTILE);
+     }
+ 
+-    public static boolean isHurt(LivingEntity myBody) {
++    public static synchronized boolean isHurt(LivingEntity myBody) {
+         return myBody.getBrain().hasMemoryValue(MemoryModuleType.HURT_BY);
+     }
+ }

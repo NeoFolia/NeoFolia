@@ -1,0 +1,69 @@
+--- a/net/minecraft/world/entity/ai/goal/BreathAirGoal.java
++++ b/net/minecraft/world/entity/ai/goal/BreathAirGoal.java
+@@ -5,11 +_,13 @@
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.entity.MoverType;
+ import net.minecraft.world.entity.PathfinderMob;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.pathfinder.PathComputationType;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class BreathAirGoal extends Goal {
+     private final PathfinderMob mob;
+@@ -20,27 +_,27 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.mob.getAirSupply() < 140;
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return this.canUse();
+     }
+ 
+     @Override
+-    public boolean isInterruptable() {
++    public synchronized boolean isInterruptable() {
+         return false;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.findAirPosition();
+         this.mob.getNavigation().stop();
+     }
+ 
+-    private void findAirPosition() {
++    private synchronized void findAirPosition() {
+         Iterable<BlockPos> between = BlockPos.betweenClosed(
+             Mth.floor(this.mob.getX() - 1.0),
+             this.mob.getBlockY(),
+@@ -66,13 +_,17 @@
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         this.findAirPosition();
+         this.mob.moveRelative(0.02F, new Vec3(this.mob.xxa, this.mob.yya, this.mob.zza));
+         this.mob.move(MoverType.SELF, this.mob.getDeltaMovement());
+     }
+ 
+-    private boolean givesAir(LevelReader level, BlockPos pos) {
++    private synchronized boolean givesAir(LevelReader level, BlockPos pos) {
++        if (level instanceof Level levelInstance && !RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4)) {
++            return false;
++        }
++
+         BlockState state = level.getBlockState(pos);
+         return (level.getFluidState(pos).isEmpty() || state.is(Blocks.BUBBLE_COLUMN)) && state.isPathfindable(PathComputationType.LAND);
+     }

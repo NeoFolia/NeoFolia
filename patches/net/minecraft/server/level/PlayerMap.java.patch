@@ -1,0 +1,48 @@
+--- a/net/minecraft/server/level/PlayerMap.java
++++ b/net/minecraft/server/level/PlayerMap.java
+@@ -2,36 +_,37 @@
+ 
+ import it.unimi.dsi.fastutil.objects.Object2BooleanMap;
+ import it.unimi.dsi.fastutil.objects.Object2BooleanOpenHashMap;
++import java.util.HashSet;
+ import java.util.Set;
+ 
+ public final class PlayerMap {
+     private final Object2BooleanMap<ServerPlayer> players = new Object2BooleanOpenHashMap<>();
+ 
+-    public Set<ServerPlayer> getAllPlayers() {
+-        return this.players.keySet();
++    public synchronized Set<ServerPlayer> getAllPlayers() {
++        return new HashSet<>(this.players.keySet());
+     }
+ 
+-    public void addPlayer(ServerPlayer player, boolean ignored) {
++    public synchronized void addPlayer(ServerPlayer player, boolean ignored) {
+         this.players.put(player, ignored);
+     }
+ 
+-    public void removePlayer(ServerPlayer player) {
++    public synchronized void removePlayer(ServerPlayer player) {
+         this.players.removeBoolean(player);
+     }
+ 
+-    public void ignorePlayer(ServerPlayer player) {
++    public synchronized void ignorePlayer(ServerPlayer player) {
+         this.players.replace(player, true);
+     }
+ 
+-    public void unIgnorePlayer(ServerPlayer player) {
++    public synchronized void unIgnorePlayer(ServerPlayer player) {
+         this.players.replace(player, false);
+     }
+ 
+-    public boolean ignoredOrUnknown(ServerPlayer player) {
++    public synchronized boolean ignoredOrUnknown(ServerPlayer player) {
+         return this.players.getOrDefault(player, true);
+     }
+ 
+-    public boolean ignored(ServerPlayer player) {
++    public synchronized boolean ignored(ServerPlayer player) {
+         return this.players.getBoolean(player);
+     }
+ }

@@ -1,0 +1,135 @@
+--- a/net/minecraft/world/waypoints/WaypointTransmitter.java
++++ b/net/minecraft/world/waypoints/WaypointTransmitter.java
+@@ -2,6 +_,7 @@
+ 
+ import java.util.Optional;
+ import net.minecraft.core.BlockPos;
++import net.minecraft.network.protocol.Packet;
+ import net.minecraft.network.protocol.game.ClientboundTrackedWaypointPacket;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.Mth;
+@@ -9,6 +_,8 @@
+ import net.minecraft.world.entity.ai.attributes.Attributes;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public interface WaypointTransmitter extends Waypoint {
+     int REALLY_FAR_DISTANCE = 332;
+@@ -22,22 +_,42 @@
+     static boolean doesSourceIgnoreReceiver(LivingEntity source, ServerPlayer receiver) {
+         if (receiver.isSpectator()) {
+             return false;
+-        } else if (!source.isSpectator() && !source.hasIndirectPassenger(receiver)) {
++        } else if (!source.isSpectator() && !WaypointTransmitter.hasReceiverAsPassengerInCurrentRegion(source, receiver)) {
+             double broadcastRange = Math.min(
+                 source.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE), receiver.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE)
+             );
+-            return source.distanceTo(receiver) >= broadcastRange;
++            return WaypointTransmitter.distanceBetween(source, receiver) >= broadcastRange;
+         } else {
+             return true;
+         }
+     }
+ 
++    static boolean hasReceiverAsPassengerInCurrentRegion(LivingEntity source, ServerPlayer receiver) {
++        if (receiver.level().getServer() != null && receiver.level().getServer().regionizedTaskDispatcher().isRunning()) {
++            if (!RegionizedTickContext.isRegionThread() || !RegionizedWorldGuard.isOnPlayerRegion(receiver)) {
++                return false;
++            }
++        }
++
++        return source.hasIndirectPassenger(receiver);
++    }
++
+     static boolean isChunkVisible(ChunkPos chunkPos, ServerPlayer receiver) {
+         return receiver.getChunkTrackingView().isInViewDistance(chunkPos.x(), chunkPos.z());
+     }
+ 
+     static boolean isReallyFar(LivingEntity source, ServerPlayer receiver) {
+-        return source.distanceTo(receiver) > 332.0F;
++        return WaypointTransmitter.distanceBetween(source, receiver) > 332.0F;
++    }
++
++    static double distanceBetween(LivingEntity source, ServerPlayer receiver) {
++        Vec3 sourcePosition = source.position();
++        Vec3 receiverPosition = receiver.position();
++        return sourcePosition.distanceTo(receiverPosition);
++    }
++
++    static void sendToReceiver(ServerPlayer receiver, Packet<?> packet) {
++        RegionizedWorldGuard.sendToPlayer(receiver, packet);
+     }
+ 
+     public interface BlockConnection extends WaypointTransmitter.Connection {
+@@ -91,12 +_,12 @@
+ 
+         @Override
+         public void connect() {
+-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointAzimuth(this.source.getUUID(), this.icon, this.lastAngle));
++            WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.addWaypointAzimuth(this.source.getUUID(), this.icon, this.lastAngle));
+         }
+ 
+         @Override
+         public void disconnect() {
+-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
++            WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
+         }
+ 
+         @Override
+@@ -104,7 +_,7 @@
+             Vec3 direction = this.receiver.position().subtract(this.source.position()).rotateClockwise90();
+             float currentAngle = (float)Mth.atan2(direction.z(), direction.x());
+             if (Mth.abs(currentAngle - this.lastAngle) > 0.008726646F) {
+-                this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointAzimuth(this.source.getUUID(), this.icon, currentAngle));
++                WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.updateWaypointAzimuth(this.source.getUUID(), this.icon, currentAngle));
+                 this.lastAngle = currentAngle;
+             }
+         }
+@@ -125,19 +_,19 @@
+ 
+         @Override
+         public void connect() {
+-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointPosition(this.source.getUUID(), this.icon, this.lastPosition));
++            WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.addWaypointPosition(this.source.getUUID(), this.icon, this.lastPosition));
+         }
+ 
+         @Override
+         public void disconnect() {
+-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
++            WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
+         }
+ 
+         @Override
+         public void update() {
+             BlockPos currentPosition = this.source.blockPosition();
+             if (currentPosition.distManhattan(this.lastPosition) > 0) {
+-                this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointPosition(this.source.getUUID(), this.icon, currentPosition));
++                WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.updateWaypointPosition(this.source.getUUID(), this.icon, currentPosition));
+                 this.lastPosition = currentPosition;
+             }
+         }
+@@ -173,19 +_,19 @@
+ 
+         @Override
+         public void connect() {
+-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.addWaypointChunk(this.source.getUUID(), this.icon, this.lastPosition));
++            WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.addWaypointChunk(this.source.getUUID(), this.icon, this.lastPosition));
+         }
+ 
+         @Override
+         public void disconnect() {
+-            this.receiver.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
++            WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.removeWaypoint(this.source.getUUID()));
+         }
+ 
+         @Override
+         public void update() {
+             ChunkPos currentPosition = this.source.chunkPosition();
+             if (currentPosition.getChessboardDistance(this.lastPosition) > 0) {
+-                this.receiver.connection.send(ClientboundTrackedWaypointPacket.updateWaypointChunk(this.source.getUUID(), this.icon, currentPosition));
++                WaypointTransmitter.sendToReceiver(this.receiver, ClientboundTrackedWaypointPacket.updateWaypointChunk(this.source.getUUID(), this.icon, currentPosition));
+                 this.lastPosition = currentPosition;
+             }
+         }

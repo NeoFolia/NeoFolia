@@ -1,0 +1,77 @@
+--- a/net/minecraft/world/entity/monster/Ravager.java
++++ b/net/minecraft/world/entity/monster/Ravager.java
+@@ -41,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Ravager extends Raider {
+@@ -137,18 +_,22 @@
+             if (this.isImmobile()) {
+                 this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.0);
+             } else {
+-                double maxSpeed = this.getTarget() != null ? 0.35 : 0.3;
++                double maxSpeed = this.regionSafeTarget(this.getTarget()) != null ? 0.35 : 0.3;
+                 double baseValue = this.getAttribute(Attributes.MOVEMENT_SPEED).getBaseValue();
+                 this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(Mth.lerp(0.1, baseValue, maxSpeed));
+             }
+ 
+-            if (this.level() instanceof ServerLevel serverLevel && this.horizontalCollision && serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
++            if (this.level() instanceof ServerLevel serverLevel && this.horizontalCollision && net.neoforged.neoforge.event.EventHooks.canEntityGrief(serverLevel, this)) {
+                 boolean destroyedBlock = false;
+                 AABB bb = this.getBoundingBox().inflate(0.2);
+ 
+                 for (BlockPos pos : BlockPos.betweenClosed(
+                     Mth.floor(bb.minX), Mth.floor(bb.minY), Mth.floor(bb.minZ), Mth.floor(bb.maxX), Mth.floor(bb.maxY), Mth.floor(bb.maxZ)
+                 )) {
++                    if (!RegionizedWorldGuard.shouldLoadChunk(serverLevel, pos.getX() >> 4, pos.getZ() >> 4)) {
++                        continue;
++                    }
++
+                     BlockState state = serverLevel.getBlockState(pos);
+                     Block block = state.getBlock();
+                     if (block instanceof LeavesBlock) {
+@@ -221,15 +_,18 @@
+ 
+     private void roar() {
+         if (this.isAlive() && this.level() instanceof ServerLevel level) {
+-            Predicate<Entity> targetSelector = level.getGameRules().get(GameRules.MOB_GRIEFING) ? ROAR_TARGET_WITH_GRIEFING : ROAR_TARGET_WITHOUT_GRIEFING;
+-
+-            for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(4.0), targetSelector)) {
+-                if (!(entity instanceof AbstractIllager)) {
+-                    entity.hurtServer(level, this.damageSources().mobAttack(this), 6.0F);
+-                }
+-
+-                if (!(entity instanceof Player)) {
+-                    this.strongKnockback(entity);
++            Predicate<Entity> predicate = net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, this) ? ROAR_TARGET_WITH_GRIEFING : ROAR_TARGET_WITHOUT_GRIEFING;
++            AABB roarBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(4.0));
++
++            if (roarBox != null) {
++                for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, roarBox, predicate)) {
++                    if (!(entity instanceof AbstractIllager)) {
++                        entity.hurtServer(level, this.damageSources().mobAttack(this), 6.0F);
++                    }
++
++                    if (!(entity instanceof Player)) {
++                        this.strongKnockback(entity);
++                    }
+                 }
+             }
+ 
+@@ -239,8 +_,11 @@
+     }
+ 
+     private void applyRoarKnockbackClient() {
+-        for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(4.0), ROAR_TARGET_ON_CLIENT)) {
+-            this.strongKnockback(entity);
++        AABB roarBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(4.0));
++        if (roarBox != null) {
++            for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, roarBox, ROAR_TARGET_ON_CLIENT)) {
++                this.strongKnockback(entity);
++            }
+         }
+     }
+ 

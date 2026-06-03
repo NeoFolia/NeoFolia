@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/level/gameevent/DynamicGameEventListener.java
++++ b/net/minecraft/world/level/gameevent/DynamicGameEventListener.java
+@@ -6,6 +_,8 @@
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.status.ChunkStatus;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class DynamicGameEventListener<T extends GameEventListener> {
+@@ -16,7 +_,7 @@
+         this.listener = listener;
+     }
+ 
+-    public void add(ServerLevel level) {
++    public synchronized void add(ServerLevel level) {
+         this.move(level);
+     }
+ 
+@@ -24,11 +_,11 @@
+         return this.listener;
+     }
+ 
+-    public void remove(ServerLevel level) {
++    public synchronized void remove(ServerLevel level) {
+         ifChunkExists(level, this.lastSection, dispatcher -> dispatcher.unregister(this.listener));
+     }
+ 
+-    public void move(ServerLevel level) {
++    public synchronized void move(ServerLevel level) {
+         this.listener.getListenerSource().getPosition(level).map(SectionPos::of).ifPresent(currentSection -> {
+             if (this.lastSection == null || !this.lastSection.equals(currentSection)) {
+                 ifChunkExists(level, this.lastSection, dispatcher -> dispatcher.unregister(this.listener));
+@@ -40,6 +_,18 @@
+ 
+     private static void ifChunkExists(LevelReader level, @Nullable SectionPos sectionPos, Consumer<GameEventListenerRegistry> action) {
+         if (sectionPos != null) {
++            if (level instanceof ServerLevel serverLevel
++                && RegionizedTickContext.isRegionThread()
++                && !RegionizedWorldGuard.isRegionThreadFor(serverLevel, sectionPos.x(), sectionPos.z())) {
++                if (!serverLevel
++                    .getServer()
++                    .regionizedTaskDispatcher()
++                    .tryExecute(RegionizedWorldGuard.regionFor(serverLevel, sectionPos.x(), sectionPos.z()), () -> ifChunkExists(level, sectionPos, action))) {
++                    throw new IllegalStateException("Cannot update cross-region game event listener while region dispatcher is not running");
++                }
++                return;
++            }
++
+             ChunkAccess chunk = level.getChunk(sectionPos.x(), sectionPos.z(), ChunkStatus.FULL, false);
+             if (chunk != null) {
+                 action.accept(chunk.getListenerRegistry(sectionPos.y()));

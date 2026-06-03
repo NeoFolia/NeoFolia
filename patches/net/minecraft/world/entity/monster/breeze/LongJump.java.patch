@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/entity/monster/breeze/LongJump.java
++++ b/net/minecraft/world/entity/monster/breeze/LongJump.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class LongJump extends Behavior<Breeze> {
+@@ -87,7 +_,12 @@
+                 if (targetPos == null) {
+                     return false;
+                 } else {
+-                    BlockState bs = level.getBlockState(targetPos.below());
++                    BlockPos landingSupport = targetPos.below();
++                    if (!canReadBlock(level, landingSupport)) {
++                        return false;
++                    }
++
++                    BlockState bs = level.getBlockState(landingSupport);
+                     if (breeze.getType().isBlockDangerous(bs)) {
+                         return false;
+                     } else if (!BreezeUtil.hasLineOfSight(breeze, targetPos.getCenter()) && !BreezeUtil.hasLineOfSight(breeze, targetPos.above(4).getCenter())) {
+@@ -201,18 +_,27 @@
+ 
+     private static boolean canJumpFromCurrentPosition(ServerLevel level, Breeze breeze) {
+         BlockPos currentPos = breeze.blockPosition();
++        if (!canReadBlock(level, currentPos)) {
++            return false;
++        }
++
+         if (level.getBlockState(currentPos).is(Blocks.HONEY_BLOCK)) {
+             return false;
+         } else {
+             for (int i = 1; i <= 4; i++) {
+                 BlockPos offsetPos = currentPos.relative(Direction.UP, i);
+-                if (!level.getBlockState(offsetPos).isAir() && !level.getFluidState(offsetPos).is(FluidTags.WATER)) {
++                if (!canReadBlock(level, offsetPos)
++                    || !level.getBlockState(offsetPos).isAir() && !level.getFluidState(offsetPos).is(FluidTags.WATER)) {
+                     return false;
+                 }
+             }
+ 
+             return true;
+         }
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     private static Optional<Vec3> calculateOptimalJumpVector(Breeze body, RandomSource random, Vec3 targetPos) {

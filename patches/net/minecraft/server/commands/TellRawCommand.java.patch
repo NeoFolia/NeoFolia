@@ -1,0 +1,49 @@
+--- a/net/minecraft/server/commands/TellRawCommand.java
++++ b/net/minecraft/server/commands/TellRawCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import net.minecraft.commands.CommandBuildContext;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+@@ -15,17 +_,27 @@
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                 .then(
+                     Commands.argument("targets", EntityArgument.players())
+-                        .then(Commands.argument("message", ComponentArgument.textComponent(context)).executes(c -> {
+-                            int result = 0;
+-
+-                            for (ServerPlayer player : EntityArgument.getPlayers(c, "targets")) {
+-                                player.sendSystemMessage(ComponentArgument.getResolvedComponent(c, "message", player));
+-                                result++;
+-                            }
+-
+-                            return result;
+-                        }))
++                        .then(Commands.argument("message", ComponentArgument.textComponent(context)).executes(TellRawCommand::tellRaw))
+                 )
+         );
++    }
++
++    private static int tellRaw(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> tellRaw(context))) {
++            return 0;
++        }
++
++        int result = 0;
++
++        for (ServerPlayer player : EntityArgument.getPlayers(context, "targets")) {
++            RegionizedCommandHelper.callOnPlayerRegionThrowing(source, player, () -> {
++                player.sendSystemMessage(ComponentArgument.getResolvedComponent(context, "message", player));
++                return null;
++            });
++            result++;
++        }
++
++        return result;
+     }
+ }

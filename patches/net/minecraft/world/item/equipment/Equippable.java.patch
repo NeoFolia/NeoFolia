@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/equipment/Equippable.java
++++ b/net/minecraft/world/item/equipment/Equippable.java
+@@ -28,6 +_,7 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public record Equippable(
+     EquipmentSlot slot,
+@@ -130,7 +_,7 @@
+             if ((!EnchantmentHelper.has(inEquipmentSlot, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE) || player.isCreative())
+                 && !ItemStack.isSameItemSameComponents(inHand, inEquipmentSlot)) {
+                 if (!player.level().isClientSide()) {
+-                    player.awardStat(Stats.ITEM_USED.get(inHand.getItem()));
++                    RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(inHand.getItem()));
+                 }
+ 
+                 if (inHand.getCount() <= 1) {

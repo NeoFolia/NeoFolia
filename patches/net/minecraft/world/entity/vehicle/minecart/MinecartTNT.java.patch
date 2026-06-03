@@ -1,0 +1,83 @@
+--- a/net/minecraft/world/entity/vehicle/minecart/MinecartTNT.java
++++ b/net/minecraft/world/entity/vehicle/minecart/MinecartTNT.java
+@@ -9,6 +_,7 @@
+ import net.minecraft.tags.DamageTypeTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.damagesource.DamageSource;
++import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntityType;
+ import net.minecraft.world.entity.projectile.Projectile;
+ import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+@@ -24,6 +_,7 @@
+ import net.minecraft.world.level.material.FluidState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MinecartTNT extends AbstractMinecart {
+@@ -68,8 +_,10 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+-        if (source.getDirectEntity() instanceof AbstractArrow projectile && projectile.isOnFire()) {
+-            DamageSource damageSource = this.damageSources().explosion(this, source.getEntity());
++        Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        if (directEntity instanceof AbstractArrow projectile && projectile.isOnFire()) {
++            DamageSource damageSource = this.damageSources().explosion(this, sourceEntity);
+             this.explode(damageSource, projectile.getDeltaMovement().lengthSqr());
+         }
+ 
+@@ -152,7 +_,10 @@
+             this.fuse = 80;
+             if (!this.level().isClientSide()) {
+                 if (source != null && this.ignitionSource == null) {
+-                    this.ignitionSource = this.damageSources().explosion(this, source.getEntity());
++                    this.ignitionSource = this.damageSources().explosion(
++                        this,
++                        RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity())
++                    );
+                 }
+ 
+                 this.level().broadcastEntityEvent(this, (byte)10);
+@@ -173,18 +_,25 @@
+ 
+     @Override
+     public float getBlockExplosionResistance(Explosion explosion, BlockGetter level, BlockPos pos, BlockState block, FluidState fluid, float resistance) {
+-        return !this.isPrimed() || !block.is(BlockTags.RAILS) && !level.getBlockState(pos.above()).is(BlockTags.RAILS)
++        BlockPos above = pos.above();
++        return !this.isPrimed() || !block.is(BlockTags.RAILS) && (!canReadBlock(level, above) || !level.getBlockState(above).is(BlockTags.RAILS))
+             ? super.getBlockExplosionResistance(explosion, level, pos, block, fluid, resistance)
+             : 0.0F;
+     }
+ 
+     @Override
+     public boolean shouldBlockExplode(Explosion explosion, BlockGetter level, BlockPos pos, BlockState state, float power) {
+-        return !this.isPrimed() || !state.is(BlockTags.RAILS) && !level.getBlockState(pos.above()).is(BlockTags.RAILS)
++        BlockPos above = pos.above();
++        return !this.isPrimed() || !state.is(BlockTags.RAILS) && (!canReadBlock(level, above) || !level.getBlockState(above).is(BlockTags.RAILS))
+             ? super.shouldBlockExplode(explosion, level, pos, state, power)
+             : false;
+     }
+ 
++    private static boolean canReadBlock(BlockGetter level, BlockPos pos) {
++        return !(level instanceof Level levelInstance)
++            || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     protected void readAdditionalSaveData(ValueInput input) {
+         super.readAdditionalSaveData(input);
+@@ -211,8 +_,9 @@
+         return damageSourceIgnitesTnt(source);
+     }
+ 
+-    private static boolean damageSourceIgnitesTnt(DamageSource source) {
+-        return source.getDirectEntity() instanceof Projectile projectile
++    private boolean damageSourceIgnitesTnt(DamageSource source) {
++        Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
++        return directEntity instanceof Projectile projectile
+             ? projectile.isOnFire()
+             : source.is(DamageTypeTags.IS_FIRE) || source.is(DamageTypeTags.IS_EXPLOSION);
+     }

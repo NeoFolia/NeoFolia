@@ -1,0 +1,360 @@
+--- a/net/minecraft/server/level/ServerEntity.java
++++ b/net/minecraft/server/level/ServerEntity.java
+@@ -44,6 +_,9 @@
+ import net.minecraft.world.level.saveddata.maps.MapId;
+ import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -58,17 +_,18 @@
+     private final int updateInterval;
+     private final boolean trackDelta;
+     private final ServerEntity.Synchronizer synchronizer;
++    private final Object trackingStateLock = new Object();
+     private final VecDeltaCodec positionCodec = new VecDeltaCodec();
+-    private byte lastSentYRot;
+-    private byte lastSentXRot;
+-    private byte lastSentYHeadRot;
+-    private Vec3 lastSentMovement;
++    private volatile byte lastSentYRot;
++    private volatile byte lastSentXRot;
++    private volatile byte lastSentYHeadRot;
++    private volatile Vec3 lastSentMovement;
+     private int tickCount;
+     private int teleportDelay;
+-    private List<Entity> lastPassengers = Collections.emptyList();
++    private volatile List<Entity> lastPassengers = Collections.emptyList();
+     private boolean wasRiding;
+     private boolean wasOnGround;
+-    private @Nullable List<SynchedEntityData.DataValue<?>> trackedDataValues;
++    private volatile @Nullable List<SynchedEntityData.DataValue<?>> trackedDataValues;
+ 
+     public ServerEntity(ServerLevel level, Entity entity, int updateInterval, boolean trackDelta, ServerEntity.Synchronizer synchronizer) {
+         this.level = level;
+@@ -76,37 +_,50 @@
+         this.entity = entity;
+         this.updateInterval = updateInterval;
+         this.trackDelta = trackDelta;
+-        this.positionCodec.setBase(entity.trackingPosition());
++        this.setPositionBase(entity.trackingPosition());
+         this.lastSentMovement = entity.getDeltaMovement();
+         this.lastSentYRot = Mth.packDegrees(entity.getYRot());
+         this.lastSentXRot = Mth.packDegrees(entity.getXRot());
+         this.lastSentYHeadRot = Mth.packDegrees(entity.getYHeadRot());
+         this.wasOnGround = entity.onGround();
+-        this.trackedDataValues = entity.getEntityData().getNonDefaultValues();
++        this.trackedDataValues = copyDataValues(entity.getEntityData().getNonDefaultValues());
+     }
+ 
+-    public void sendChanges() {
++    public synchronized void sendChanges() {
+         this.entity.updateDataBeforeSync();
+         List<Entity> passengers = this.entity.getPassengers();
+-        if (!passengers.equals(this.lastPassengers)) {
++        List<Entity> lastPassengersSnapshot;
++        boolean passengersChanged;
++        synchronized (this.trackingStateLock) {
++            lastPassengersSnapshot = this.lastPassengers;
++            passengersChanged = !passengers.equals(lastPassengersSnapshot);
++            if (passengersChanged) {
++                this.lastPassengers = List.copyOf(passengers);
++            }
++        }
++
++        if (passengersChanged) {
+             this.synchronizer
+                 .sendToTrackingPlayersFiltered(
+-                    new ClientboundSetPassengersPacket(this.entity), player -> passengers.contains(player) == this.lastPassengers.contains(player)
++                    new ClientboundSetPassengersPacket(this.entity), player -> passengers.contains(player) == lastPassengersSnapshot.contains(player)
+                 );
+-            this.lastPassengers = passengers;
+         }
+ 
+         if (this.entity instanceof ItemFrame frame && this.tickCount % 10 == 0) {
+             ItemStack itemStack = frame.getItem();
+-            if (itemStack.getItem() instanceof MapItem) {
++            if (true) {
+                 MapId id = itemStack.get(DataComponents.MAP_ID);
+-                MapItemSavedData data = MapItem.getSavedData(id, this.level);
++                MapItemSavedData data = MapItem.getSavedData(itemStack, this.level);
+                 if (data != null) {
+                     for (ServerPlayer player : this.level.players()) {
++                        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, player) == null) {
++                            continue;
++                        }
++
+                         data.tickCarriedBy(player, itemStack, frame);
+                         Packet<?> packet = data.getUpdatePacket(id, player);
+                         if (packet != null) {
+-                            player.connection.send(packet);
++                            RegionizedWorldGuard.sendToPlayer(player, packet);
+                         }
+                     }
+                 }
+@@ -126,7 +_,7 @@
+                     this.lastSentXRot = xRotn;
+                 }
+ 
+-                this.positionCodec.setBase(this.entity.trackingPosition());
++                this.setPositionBase(this.entity.trackingPosition());
+                 this.sendDirtyEntityData();
+                 this.wasRiding = true;
+             } else if (this.entity instanceof AbstractMinecart minecart && minecart.getBehavior() instanceof NewMinecartBehavior newMinecartBehavior) {
+@@ -134,14 +_,15 @@
+             } else {
+                 this.teleportDelay++;
+                 Vec3 currentPosition = this.entity.trackingPosition();
+-                boolean positionChanged = this.positionCodec.delta(currentPosition).lengthSqr() >= 7.6293945E-6F;
++                ServerEntity.EncodedPosition encodedPosition = this.encodePosition(currentPosition);
++                boolean positionChanged = encodedPosition.positionChanged();
+                 Packet<ClientGamePacketListener> packet = null;
+                 boolean pos = positionChanged || this.tickCount % 60 == 0;
+                 boolean sentPosition = false;
+                 boolean sentRotation = false;
+-                long xa = this.positionCodec.encodeX(currentPosition);
+-                long ya = this.positionCodec.encodeY(currentPosition);
+-                long za = this.positionCodec.encodeZ(currentPosition);
++                long xa = encodedPosition.xa();
++                long ya = encodedPosition.ya();
++                long za = encodedPosition.za();
+                 boolean deltaTooBig = xa < -32768L || xa > 32767L || ya < -32768L || ya > 32767L || za < -32768L || za > 32767L;
+                 if (this.entity.getRequiresPrecisePosition()
+                     || deltaTooBig
+@@ -194,7 +_,7 @@
+ 
+                 this.sendDirtyEntityData();
+                 if (sentPosition) {
+-                    this.positionCodec.setBase(currentPosition);
++                    this.setPositionBase(currentPosition);
+                 }
+ 
+                 if (sentRotation) {
+@@ -227,7 +_,7 @@
+             Vec3 movement = this.entity.getDeltaMovement();
+             double diff = movement.distanceToSqr(this.lastSentMovement);
+             Vec3 currentPosition = this.entity.trackingPosition();
+-            boolean positionChanged = this.positionCodec.delta(currentPosition).lengthSqr() >= 7.6293945E-6F;
++            boolean positionChanged = this.encodePosition(currentPosition).positionChanged();
+             boolean shouldSendPosition = positionChanged || this.tickCount % 60 == 0;
+             if (shouldSendPosition || shouldSendRotation || diff > 1.0E-7) {
+                 this.synchronizer
+@@ -249,22 +_,71 @@
+ 
+         this.lastSentYRot = yRotn;
+         this.lastSentXRot = xRotn;
+-        this.positionCodec.setBase(this.entity.position());
++        this.setPositionBase(this.entity.position());
+     }
+ 
+-    public void removePairing(ServerPlayer player) {
++    public synchronized void removePairing(ServerPlayer player) {
+         this.entity.stopSeenByPlayer(player);
+-        player.connection.send(new ClientboundRemoveEntitiesPacket(this.entity.getId()));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundRemoveEntitiesPacket(this.entity.getId()));
++        this.fireStopEntityTracking(player);
+     }
+ 
+-    public void addPairing(ServerPlayer player) {
++    public synchronized void addPairing(ServerPlayer player) {
+         List<Packet<? super ClientGamePacketListener>> packets = new ArrayList<>();
+         this.sendPairingData(player, packets::add);
+-        player.connection.send(new ClientboundBundlePacket(packets));
++        RegionizedWorldGuard.sendToPlayer(player, new ClientboundBundlePacket(packets));
+         this.entity.startSeenByPlayer(player);
+-    }
+-
+-    public void sendPairingData(ServerPlayer player, Consumer<Packet<ClientGamePacketListener>> broadcast) {
++        this.fireStartEntityTracking(player);
++    }
++
++    private void fireStartEntityTracking(ServerPlayer player) {
++        this.fireEntityTrackingEvent(player, "Start entity tracking event", () -> net.neoforged.neoforge.event.EventHooks.onStartEntityTracking(this.entity, player));
++    }
++
++    private void fireStopEntityTracking(ServerPlayer player) {
++        this.fireEntityTrackingEvent(player, "Stop entity tracking event", () -> net.neoforged.neoforge.event.EventHooks.onStopEntityTracking(this.entity, player));
++    }
++
++    private void fireEntityTrackingEvent(ServerPlayer player, String reason, Runnable eventTask) {
++        if (this.level.getServer() == null || !this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            eventTask.run();
++            return;
++        }
++
++        if (this.entity.level() != this.level || player.level() != this.level) {
++            return;
++        }
++
++        RegionKey entityRegion = RegionizedWorldGuard.regionFor(this.level, this.entity.blockPosition());
++        RegionKey playerRegion = RegionizedWorldGuard.regionFor(this.level, player.blockPosition());
++        if (RegionizedTickContext.isRegionThread()) {
++            if (entityRegion.equals(playerRegion) && RegionizedTickContext.currentRegion().map(entityRegion::equals).orElse(false)) {
++                eventTask.run();
++            } else if (!this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> this.fireEntityTrackingEvent(player, reason, eventTask))) {
++                throw new IllegalStateException("Cannot fire cross-region entity tracking event from region worker while region dispatcher is not running");
++            }
++            return;
++        }
++
++        this.level.getServer().regionizedTaskDispatcher().awaitRegionsPaused(reason, List.of(entityRegion, playerRegion), () -> {
++            if (this.entity.level() != this.level || player.level() != this.level) {
++                return;
++            }
++
++            RegionKey currentEntityRegion = RegionizedWorldGuard.regionFor(this.level, this.entity.blockPosition());
++            RegionKey currentPlayerRegion = RegionizedWorldGuard.regionFor(this.level, player.blockPosition());
++            if (!entityRegion.equals(currentEntityRegion) || !playerRegion.equals(currentPlayerRegion)) {
++                if (!this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> this.fireEntityTrackingEvent(player, reason, eventTask))) {
++                    throw new IllegalStateException("Cannot reschedule cross-region entity tracking event while region dispatcher is not running");
++                }
++                return;
++            }
++
++            eventTask.run();
++        });
++    }
++
++    public synchronized void sendPairingData(ServerPlayer player, Consumer<Packet<? super ClientGamePacketListener>> broadcast) {
+         this.entity.updateDataBeforeSync();
+         if (this.entity.isRemoved()) {
+             LOGGER.warn("Fetching packet for removed entity {}", this.entity);
+@@ -272,8 +_,10 @@
+ 
+         Packet<ClientGamePacketListener> packet = this.entity.getAddEntityPacket(this);
+         broadcast.accept(packet);
+-        if (this.trackedDataValues != null) {
+-            broadcast.accept(new ClientboundSetEntityDataPacket(this.entity.getId(), this.trackedDataValues));
++        this.entity.sendPairingData(player, payload -> broadcast.accept(payload.toVanillaClientbound()));
++        List<SynchedEntityData.DataValue<?>> trackedDataValues = this.getTrackedDataValuesSnapshot();
++        if (trackedDataValues != null) {
++            broadcast.accept(new ClientboundSetEntityDataPacket(this.entity.getId(), trackedDataValues));
+         }
+ 
+         if (this.entity instanceof LivingEntity livingEntity) {
+@@ -287,9 +_,9 @@
+             List<Pair<EquipmentSlot, ItemStack>> slots = Lists.newArrayList();
+ 
+             for (EquipmentSlot slot : EquipmentSlot.VALUES) {
+-                ItemStack itemStack = livingEntityx.getItemBySlot(slot);
++                ItemStack itemStack = livingEntityx.getItemBySlotCopy(slot);
+                 if (!itemStack.isEmpty()) {
+-                    slots.add(Pair.of(slot, itemStack.copy()));
++                    slots.add(Pair.of(slot, itemStack));
+                 }
+             }
+ 
+@@ -302,51 +_,97 @@
+             broadcast.accept(new ClientboundSetPassengersPacket(this.entity));
+         }
+ 
+-        if (this.entity.isPassenger()) {
+-            broadcast.accept(new ClientboundSetPassengersPacket(this.entity.getVehicle()));
++        Entity vehicle = this.entity.getVehicle();
++        if (vehicle != null) {
++            broadcast.accept(new ClientboundSetPassengersPacket(vehicle));
+         }
+ 
+         if (this.entity instanceof Leashable leashable && leashable.isLeashed()) {
+             broadcast.accept(new ClientboundSetEntityLinkPacket(this.entity, leashable.getLeashHolder()));
+         }
++
++        net.neoforged.neoforge.attachment.AttachmentSync.syncInitialEntityAttachments(this.entity, player, broadcast);
+     }
+ 
+     public Vec3 getPositionBase() {
+-        return this.positionCodec.getBase();
++        synchronized (this.trackingStateLock) {
++            return this.positionCodec.getBase();
++        }
+     }
+ 
+     public Vec3 getLastSentMovement() {
+-        return this.lastSentMovement;
++        synchronized (this.trackingStateLock) {
++            return this.lastSentMovement;
++        }
+     }
+ 
+     public float getLastSentXRot() {
+-        return Mth.unpackDegrees(this.lastSentXRot);
++        synchronized (this.trackingStateLock) {
++            return Mth.unpackDegrees(this.lastSentXRot);
++        }
+     }
+ 
+     public float getLastSentYRot() {
+-        return Mth.unpackDegrees(this.lastSentYRot);
++        synchronized (this.trackingStateLock) {
++            return Mth.unpackDegrees(this.lastSentYRot);
++        }
+     }
+ 
+     public float getLastSentYHeadRot() {
+-        return Mth.unpackDegrees(this.lastSentYHeadRot);
++        synchronized (this.trackingStateLock) {
++            return Mth.unpackDegrees(this.lastSentYHeadRot);
++        }
+     }
+ 
+     private void sendDirtyEntityData() {
+         SynchedEntityData entityData = this.entity.getEntityData();
+         List<SynchedEntityData.DataValue<?>> packedValues = entityData.packDirty();
+         if (packedValues != null) {
+-            this.trackedDataValues = entityData.getNonDefaultValues();
+-            this.synchronizer.sendToTrackingPlayersAndSelf(new ClientboundSetEntityDataPacket(this.entity.getId(), packedValues));
++            this.setTrackedDataValues(entityData.getNonDefaultValues());
++            this.synchronizer.sendToTrackingPlayersAndSelf(new ClientboundSetEntityDataPacket(this.entity.getId(), List.copyOf(packedValues)));
+         }
+ 
+         if (this.entity instanceof LivingEntity) {
+-            Set<AttributeInstance> attributes = ((LivingEntity)this.entity).getAttributes().getAttributesToSync();
++            Set<AttributeInstance> attributes = ((LivingEntity)this.entity).getAttributes().getAttributesToSyncAndClear();
+             if (!attributes.isEmpty()) {
+                 this.synchronizer.sendToTrackingPlayersAndSelf(new ClientboundUpdateAttributesPacket(this.entity.getId(), attributes));
+             }
+-
+-            attributes.clear();
+-        }
++        }
++    }
++
++    private static @Nullable List<SynchedEntityData.DataValue<?>> copyDataValues(@Nullable List<SynchedEntityData.DataValue<?>> values) {
++        return values == null ? null : List.copyOf(values);
++    }
++
++    private @Nullable List<SynchedEntityData.DataValue<?>> getTrackedDataValuesSnapshot() {
++        synchronized (this.trackingStateLock) {
++            return this.trackedDataValues;
++        }
++    }
++
++    private void setTrackedDataValues(@Nullable List<SynchedEntityData.DataValue<?>> values) {
++        synchronized (this.trackingStateLock) {
++            this.trackedDataValues = copyDataValues(values);
++        }
++    }
++
++    private ServerEntity.EncodedPosition encodePosition(Vec3 currentPosition) {
++        synchronized (this.trackingStateLock) {
++            long xa = this.positionCodec.encodeX(currentPosition);
++            long ya = this.positionCodec.encodeY(currentPosition);
++            long za = this.positionCodec.encodeZ(currentPosition);
++            boolean positionChanged = this.positionCodec.delta(currentPosition).lengthSqr() >= 7.6293945E-6F;
++            return new ServerEntity.EncodedPosition(xa, ya, za, positionChanged);
++        }
++    }
++
++    private void setPositionBase(Vec3 position) {
++        synchronized (this.trackingStateLock) {
++            this.positionCodec.setBase(position);
++        }
++    }
++
++    private record EncodedPosition(long xa, long ya, long za, boolean positionChanged) {
+     }
+ 
+     public interface Synchronizer {

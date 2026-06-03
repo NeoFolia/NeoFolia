@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetEntityLookTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/SetEntityLookTarget.java
+@@ -10,19 +_,19 @@
+ import net.minecraft.world.entity.ai.memory.NearestVisibleLivingEntities;
+ 
+ public class SetEntityLookTarget {
+-    public static BehaviorControl<LivingEntity> create(MobCategory category, float maxDist) {
++    public static synchronized BehaviorControl<LivingEntity> create(MobCategory category, float maxDist) {
+         return create(mob -> category.equals(mob.getType().getCategory()), maxDist);
+     }
+ 
+-    public static OneShot<LivingEntity> create(EntityType<?> type, float maxDist) {
++    public static synchronized OneShot<LivingEntity> create(EntityType<?> type, float maxDist) {
+         return create(mob -> mob.is(type), maxDist);
+     }
+ 
+-    public static OneShot<LivingEntity> create(float maxDist) {
++    public static synchronized OneShot<LivingEntity> create(float maxDist) {
+         return create(mob -> true, maxDist);
+     }
+ 
+-    public static OneShot<LivingEntity> create(Predicate<LivingEntity> predicate, float maxDist) {
++    public static synchronized OneShot<LivingEntity> create(Predicate<LivingEntity> predicate, float maxDist) {
+         float maxDistSqr = maxDist * maxDist;
+         return BehaviorBuilder.create(
+             i -> i.group(i.absent(MemoryModuleType.LOOK_TARGET), i.present(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES))
+@@ -30,11 +_,14 @@
+                     i,
+                     (lookTarget, nearestEntities) -> (level, body, timestamp) -> {
+                         Optional<LivingEntity> target = i.<NearestVisibleLivingEntities>get(nearestEntities)
+-                            .findClosest(predicate.and(mob -> mob.distanceToSqr(body) <= maxDistSqr && !body.hasPassenger(mob)));
++                            .findClosest(
++                                predicate.and(mob -> BehaviorUtils.regionSafeEntity(body, mob) != null && mob.distanceToSqr(body) <= maxDistSqr && !body.hasPassenger(mob))
++                            );
+                         if (target.isEmpty()) {
+                             return false;
+                         } else {
+-                            lookTarget.set(new EntityTracker(target.get(), true));
++                            LivingEntity targetEntity = target.orElseThrow();
++                            lookTarget.set(new EntityTracker(targetEntity, true));
+                             return true;
+                         }
+                     }

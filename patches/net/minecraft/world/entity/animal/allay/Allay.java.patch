@@ -1,0 +1,51 @@
+--- a/net/minecraft/world/entity/animal/allay/Allay.java
++++ b/net/minecraft/world/entity/animal/allay/Allay.java
+@@ -65,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Allay extends PathfinderMob implements InventoryCarrier, VibrationSystem {
+@@ -152,7 +_,8 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+-        return this.isLikedPlayer(source.getEntity()) ? false : super.hurtServer(level, source, damage);
++        Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++        return this.isLikedPlayer(sourceEntity) ? false : super.hurtServer(level, source, damage);
+     }
+ 
+     @Override
+@@ -322,6 +_,10 @@
+         }
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public SimpleContainer getInventory() {
+         return this.inventory;
+@@ -336,9 +_,9 @@
+     public boolean wantsToPickUp(ServerLevel level, ItemStack itemStack) {
+         ItemStack itemInHand = this.getItemInHand(InteractionHand.MAIN_HAND);
+         return !itemInHand.isEmpty()
+-            && level.getGameRules().get(GameRules.MOB_GRIEFING)
+             && this.inventory.canAddItem(itemStack)
+-            && this.allayConsidersItemEqual(itemInHand, itemStack);
++            && this.allayConsidersItemEqual(itemInHand, itemStack)
++            && net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, this);
+     }
+ 
+     private boolean allayConsidersItemEqual(ItemStack item1, ItemStack item2) {
+@@ -382,6 +_,7 @@
+     private boolean shouldStopDancing() {
+         return this.jukeboxPos == null
+             || !this.jukeboxPos.closerToCenterThan(this.position(), GameEvent.JUKEBOX_PLAY.value().notificationRadius())
++            || !this.canReadBlock(this.jukeboxPos)
+             || !this.level().getBlockState(this.jukeboxPos).is(Blocks.JUKEBOX);
+     }
+ 

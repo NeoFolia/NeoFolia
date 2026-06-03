@@ -1,0 +1,37 @@
+--- a/net/minecraft/world/level/block/CaveVines.java
++++ b/net/minecraft/world/level/block/CaveVines.java
+@@ -6,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.util.Mth;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.Level;
+@@ -15,6 +_,7 @@
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public interface CaveVines {
+     VoxelShape SHAPE = Block.column(14.0, 0.0, 16.0);
+@@ -32,7 +_,7 @@
+                     sourceEntity,
+                     (serverlvl, itemStack) -> Block.popResource(serverlvl, pos, itemStack)
+                 );
+-                float pitch = Mth.randomBetween(serverLevel.getRandom(), 0.8F, 1.2F);
++                float pitch = Mth.randomBetween(caveVinesRandom(serverLevel), 0.8F, 1.2F);
+                 serverLevel.playSound(null, pos, SoundEvents.CAVE_VINES_PICK_BERRIES, SoundSource.BLOCKS, 1.0F, pitch);
+                 BlockState newState = state.setValue(BERRIES, false);
+                 serverLevel.setBlock(pos, newState, 2);
+@@ -51,5 +_,9 @@
+ 
+     static ToIntFunction<BlockState> emission(int lightEmission) {
+         return state -> state.getValue(BlockStateProperties.BERRIES) ? lightEmission : 0;
++    }
++
++    private static RandomSource caveVinesRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
+     }
+ }

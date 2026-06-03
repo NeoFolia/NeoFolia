@@ -1,0 +1,60 @@
+--- a/net/minecraft/world/level/saveddata/WeatherData.java
++++ b/net/minecraft/world/level/saveddata/WeatherData.java
+@@ -36,47 +_,47 @@
+         this.thundering = thundering;
+     }
+ 
+-    public int getClearWeatherTime() {
++    public synchronized int getClearWeatherTime() {
+         return this.clearWeatherTime;
+     }
+ 
+-    public void setClearWeatherTime(int clearWeatherTime) {
++    public synchronized void setClearWeatherTime(int clearWeatherTime) {
+         this.clearWeatherTime = clearWeatherTime;
+         this.setDirty();
+     }
+ 
+-    public boolean isThundering() {
++    public synchronized boolean isThundering() {
+         return this.thundering;
+     }
+ 
+-    public void setThundering(boolean thundering) {
++    public synchronized void setThundering(boolean thundering) {
+         this.thundering = thundering;
+         this.setDirty();
+     }
+ 
+-    public int getThunderTime() {
++    public synchronized int getThunderTime() {
+         return this.thunderTime;
+     }
+ 
+-    public void setThunderTime(int thunderTime) {
++    public synchronized void setThunderTime(int thunderTime) {
+         this.thunderTime = thunderTime;
+         this.setDirty();
+     }
+ 
+-    public boolean isRaining() {
++    public synchronized boolean isRaining() {
+         return this.raining;
+     }
+ 
+-    public void setRaining(boolean raining) {
++    public synchronized void setRaining(boolean raining) {
+         this.raining = raining;
+         this.setDirty();
+     }
+ 
+-    public int getRainTime() {
++    public synchronized int getRainTime() {
+         return this.rainTime;
+     }
+ 
+-    public void setRainTime(int rainTime) {
++    public synchronized void setRainTime(int rainTime) {
+         this.rainTime = rainTime;
+         this.setDirty();
+     }

@@ -1,0 +1,119 @@
+--- a/net/minecraft/server/commands/ClearInventoryCommands.java
++++ b/net/minecraft/server/commands/ClearInventoryCommands.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
+ import java.util.Collection;
+@@ -28,49 +_,64 @@
+         dispatcher.register(
+             Commands.literal("clear")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .executes(c -> clearUnlimited(c.getSource(), Collections.singleton(c.getSource().getPlayerOrException()), i -> true))
++                .executes(c -> clearInventory(c, false, false, false))
+                 .then(
+                     Commands.argument("targets", EntityArgument.players())
+-                        .executes(c -> clearUnlimited(c.getSource(), EntityArgument.getPlayers(c, "targets"), i -> true))
++                        .executes(c -> clearInventory(c, true, false, false))
+                         .then(
+                             Commands.argument("item", ItemPredicateArgument.itemPredicate(context))
+-                                .executes(
+-                                    c -> clearUnlimited(
+-                                        c.getSource(), EntityArgument.getPlayers(c, "targets"), ItemPredicateArgument.getItemPredicate(c, "item")
+-                                    )
+-                                )
++                                .executes(c -> clearInventory(c, true, true, false))
+                                 .then(
+                                     Commands.argument("maxCount", IntegerArgumentType.integer(0))
+-                                        .executes(
+-                                            c -> clearInventory(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                ItemPredicateArgument.getItemPredicate(c, "item"),
+-                                                IntegerArgumentType.getInteger(c, "maxCount")
+-                                            )
+-                                        )
++                                        .executes(c -> clearInventory(c, true, true, true))
+                                 )
+                         )
+                 )
+         );
+     }
+ 
++    private static int clearInventory(CommandContext<CommandSourceStack> context, boolean hasTargets, boolean hasItem, boolean hasMaxCount)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> clearInventory(context, hasTargets, hasItem, hasMaxCount))) {
++            return 0;
++        }
++
++        return clearInventory(
++            source,
++            hasTargets ? EntityArgument.getPlayers(context, "targets") : Collections.singleton(source.getPlayerOrException()),
++            hasItem ? ItemPredicateArgument.getItemPredicate(context, "item") : i -> true,
++            hasMaxCount ? IntegerArgumentType.getInteger(context, "maxCount") : -1
++        );
++    }
++
+     private static int clearUnlimited(CommandSourceStack source, Collection<ServerPlayer> players, Predicate<ItemStack> predicate) throws CommandSyntaxException {
+         return clearInventory(source, players, predicate, -1);
+     }
+ 
+     private static int clearInventory(CommandSourceStack source, Collection<ServerPlayer> players, Predicate<ItemStack> predicate, int maxCount) throws CommandSyntaxException {
+         int count = 0;
++        Component singlePlayerName = null;
++        Component singlePlayerPlainName = null;
+ 
+         for (ServerPlayer player : players) {
+-            count += player.getInventory().clearOrCountMatchingItems(predicate, maxCount, player.inventoryMenu.getCraftSlots());
+-            player.containerMenu.broadcastChanges();
+-            player.inventoryMenu.slotsChanged(player.getInventory());
++            ClearResult result = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                int removed = player.getInventory().clearOrCountMatchingItems(predicate, maxCount, player.inventoryMenu.getCraftSlots());
++                player.broadcastActiveContainerChanges();
++                player.inventoryMenu.slotsChanged(player.getInventory());
++                return new ClearResult(removed, player.getDisplayName(), player.getName());
++            });
++            count += result.count();
++            if (players.size() == 1) {
++                singlePlayerName = result.displayName();
++                singlePlayerPlainName = result.name();
++            }
+         }
+ 
+         if (count == 0) {
+             if (players.size() == 1) {
+-                throw ERROR_SINGLE.create(players.iterator().next().getName());
++                Component playerName = singlePlayerPlainName;
++                throw ERROR_SINGLE.create(playerName);
+             } else {
+                 throw ERROR_MULTIPLE.create(players.size());
+             }
+@@ -78,17 +_,22 @@
+             int finalCount = count;
+             if (maxCount == 0) {
+                 if (players.size() == 1) {
+-                    source.sendSuccess(() -> Component.translatable("commands.clear.test.single", finalCount, players.iterator().next().getDisplayName()), true);
++                    Component targetName = singlePlayerName;
++                    source.sendSuccess(() -> Component.translatable("commands.clear.test.single", finalCount, targetName), true);
+                 } else {
+                     source.sendSuccess(() -> Component.translatable("commands.clear.test.multiple", finalCount, players.size()), true);
+                 }
+             } else if (players.size() == 1) {
+-                source.sendSuccess(() -> Component.translatable("commands.clear.success.single", finalCount, players.iterator().next().getDisplayName()), true);
++                Component targetName = singlePlayerName;
++                source.sendSuccess(() -> Component.translatable("commands.clear.success.single", finalCount, targetName), true);
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.clear.success.multiple", finalCount, players.size()), true);
+             }
+ 
+             return count;
+         }
++    }
++
++    private record ClearResult(int count, Component displayName, Component name) {
+     }
+ }

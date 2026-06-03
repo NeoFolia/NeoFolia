@@ -1,0 +1,38 @@
+--- a/net/minecraft/world/entity/ai/util/DefaultRandomPos.java
++++ b/net/minecraft/world/entity/ai/util/DefaultRandomPos.java
+@@ -6,7 +_,7 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public class DefaultRandomPos {
+-    public static @Nullable Vec3 getPos(PathfinderMob mob, int horizontalDist, int verticalDist) {
++    public static synchronized @Nullable Vec3 getPos(PathfinderMob mob, int horizontalDist, int verticalDist) {
+         boolean restrict = GoalUtils.mobRestricted(mob, horizontalDist);
+         return RandomPos.generateRandomPos(mob, () -> {
+             BlockPos direction = RandomPos.generateRandomDirection(mob.getRandom(), horizontalDist, verticalDist);
+@@ -14,7 +_,7 @@
+         });
+     }
+ 
+-    public static @Nullable Vec3 getPosTowards(PathfinderMob mob, int horizontalDist, int verticalDist, Vec3 towardsPos, double maxXzRadiansFromDir) {
++    public static synchronized @Nullable Vec3 getPosTowards(PathfinderMob mob, int horizontalDist, int verticalDist, Vec3 towardsPos, double maxXzRadiansFromDir) {
+         Vec3 dir = towardsPos.subtract(mob.getX(), mob.getY(), mob.getZ());
+         boolean restrict = GoalUtils.mobRestricted(mob, horizontalDist);
+         return RandomPos.generateRandomPos(
+@@ -28,7 +_,7 @@
+         );
+     }
+ 
+-    public static @Nullable Vec3 getPosAway(PathfinderMob mob, int horizontalDist, int verticalDist, Vec3 avoidPos) {
++    public static synchronized @Nullable Vec3 getPosAway(PathfinderMob mob, int horizontalDist, int verticalDist, Vec3 avoidPos) {
+         Vec3 dirAway = mob.position().subtract(avoidPos);
+         boolean restrict = GoalUtils.mobRestricted(mob, horizontalDist);
+         return RandomPos.generateRandomPos(
+@@ -42,7 +_,7 @@
+         );
+     }
+ 
+-    private static @Nullable BlockPos generateRandomPosTowardDirection(PathfinderMob mob, int horizontalDist, boolean restrict, BlockPos direction) {
++    private static synchronized @Nullable BlockPos generateRandomPosTowardDirection(PathfinderMob mob, int horizontalDist, boolean restrict, BlockPos direction) {
+         BlockPos pos = RandomPos.generateRandomPosTowardDirection(mob, horizontalDist, mob.getRandom(), direction);
+         return !GoalUtils.isOutsideLimits(pos, mob)
+                 && !GoalUtils.isRestricted(restrict, mob, pos)

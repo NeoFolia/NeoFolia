@@ -1,0 +1,66 @@
+--- a/net/minecraft/world/entity/ai/goal/MoveThroughVillageGoal.java
++++ b/net/minecraft/world/entity/ai/goal/MoveThroughVillageGoal.java
+@@ -44,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (!GoalUtils.hasGroundPathNavigation(this.mob)) {
+             return false;
+         } else {
+@@ -116,23 +_,28 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.mob.getNavigation().isDone() ? false : !this.poiPos.closerToCenterThan(this.mob.position(), this.mob.getBbWidth() + this.distanceToPoi);
+-    }
+-
+-    @Override
+-    public void start() {
+-        this.mob.getNavigation().moveTo(this.path, this.speedModifier);
+-    }
+-
+-    @Override
+-    public void stop() {
+-        if (this.mob.getNavigation().isDone() || this.poiPos.closerToCenterThan(this.mob.position(), this.distanceToPoi)) {
+-            this.visited.add(this.poiPos);
+-        }
+-    }
+-
+-    private boolean hasNotVisited(BlockPos poi) {
++    public synchronized boolean canContinueToUse() {
++        return this.poiPos != null && (this.mob.getNavigation().isDone() ? false : !this.poiPos.closerToCenterThan(this.mob.position(), this.mob.getBbWidth() + this.distanceToPoi));
++    }
++
++    @Override
++    public synchronized void start() {
++        if (this.path != null) {
++            this.mob.getNavigation().moveTo(this.path, this.speedModifier);
++        }
++    }
++
++    @Override
++    public synchronized void stop() {
++        BlockPos target = this.poiPos;
++        if (target != null && (this.mob.getNavigation().isDone() || target.closerToCenterThan(this.mob.position(), this.distanceToPoi))) {
++            this.visited.add(target);
++        }
++        this.poiPos = null;
++        this.path = null;
++    }
++
++    private synchronized boolean hasNotVisited(BlockPos poi) {
+         for (BlockPos visitedPoi : this.visited) {
+             if (Objects.equals(poi, visitedPoi)) {
+                 return false;
+@@ -142,7 +_,7 @@
+         return true;
+     }
+ 
+-    private void updateVisited() {
++    private synchronized void updateVisited() {
+         if (this.visited.size() > 15) {
+             this.visited.remove(0);
+         }

@@ -1,0 +1,35 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonChargePlayerPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonChargePlayerPhase.java
+@@ -18,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         if (this.targetLocation == null) {
+             LOGGER.warn("Aborting charge player as no target was set.");
+             this.dragon.getPhaseManager().setPhase(EnderDragonPhase.HOLDING_PATTERN);
+@@ -33,12 +_,12 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.targetLocation = null;
+         this.timeSinceCharge = 0;
+     }
+ 
+-    public void setTarget(Vec3 target) {
++    public synchronized void setTarget(Vec3 target) {
+         this.targetLocation = target;
+     }
+ 
+@@ -48,7 +_,7 @@
+     }
+ 
+     @Override
+-    public @Nullable Vec3 getFlyTargetLocation() {
++    public synchronized @Nullable Vec3 getFlyTargetLocation() {
+         return this.targetLocation;
+     }
+ 

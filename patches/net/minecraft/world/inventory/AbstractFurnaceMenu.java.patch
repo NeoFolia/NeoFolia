@@ -1,0 +1,59 @@
+--- a/net/minecraft/world/inventory/AbstractFurnaceMenu.java
++++ b/net/minecraft/world/inventory/AbstractFurnaceMenu.java
+@@ -74,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
++    public synchronized void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
+         if (this.container instanceof StackedContentsCompatible) {
+             ((StackedContentsCompatible)this.container).fillStackedContents(stackedContents);
+         }
+@@ -90,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -143,7 +_,7 @@
+     }
+ 
+     protected boolean isFuel(ItemStack itemStack) {
+-        return this.level.fuelValues().isFuel(itemStack);
++        return itemStack.getBurnTime(this.recipeType, this.level.fuelValues()) > 0;
+     }
+ 
+     public float getBurnProgress() {
+@@ -171,7 +_,7 @@
+     }
+ 
+     @Override
+-    public RecipeBookMenu.PostPlaceAction handlePlacement(
++    public synchronized RecipeBookMenu.PostPlaceAction handlePlacement(
+         boolean useMaxItems, boolean allowDroppingItemsToClear, RecipeHolder<?> recipe, ServerLevel level, Inventory inventory
+     ) {
+         final List<Slot> slotsToClear = List.of(this.getSlot(0), this.getSlot(2));
+@@ -181,17 +_,17 @@
+             }
+ 
+             @Override
+-            public void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
++            public synchronized void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
+                 AbstractFurnaceMenu.this.fillCraftSlotsStackedContents(stackedContents);
+             }
+ 
+             @Override
+-            public void clearCraftingContent() {
++            public synchronized void clearCraftingContent() {
+                 slotsToClear.forEach(s -> s.set(ItemStack.EMPTY));
+             }
+ 
+             @Override
+-            public boolean recipeMatches(RecipeHolder<AbstractCookingRecipe> recipe) {
++            public synchronized boolean recipeMatches(RecipeHolder<AbstractCookingRecipe> recipe) {
+                 return recipe.value().matches(new SingleRecipeInput(AbstractFurnaceMenu.this.container.getItem(0)), level);
+             }
+         }, 1, 1, List.of(this.getSlot(0)), slotsToClear, inventory, (RecipeHolder<AbstractCookingRecipe>)recipe, useMaxItems, allowDroppingItemsToClear);

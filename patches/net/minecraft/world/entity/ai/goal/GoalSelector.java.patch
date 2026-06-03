@@ -1,0 +1,111 @@
+--- a/net/minecraft/world/entity/ai/goal/GoalSelector.java
++++ b/net/minecraft/world/entity/ai/goal/GoalSelector.java
+@@ -3,6 +_,7 @@
+ import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
+ import java.util.EnumMap;
+ import java.util.EnumSet;
++import java.util.List;
+ import java.util.Map;
+ import java.util.Set;
+ import java.util.function.Predicate;
+@@ -25,16 +_,16 @@
+     private final Set<WrappedGoal> availableGoals = new ObjectLinkedOpenHashSet<>();
+     private final EnumSet<Goal.Flag> disabledFlags = EnumSet.noneOf(Goal.Flag.class);
+ 
+-    public void addGoal(int prio, Goal goal) {
++    public synchronized void addGoal(int prio, Goal goal) {
+         this.availableGoals.add(new WrappedGoal(prio, goal));
+     }
+ 
+-    public void removeAllGoals(Predicate<Goal> predicate) {
++    public synchronized void removeAllGoals(Predicate<Goal> predicate) {
+         this.availableGoals.removeIf(goal -> predicate.test(goal.getGoal()));
+     }
+ 
+-    public void removeGoal(Goal toRemove) {
+-        for (WrappedGoal availableGoal : this.availableGoals) {
++    public synchronized void removeGoal(Goal toRemove) {
++        for (WrappedGoal availableGoal : this.availableGoalsSnapshot()) {
+             if (availableGoal.getGoal() == toRemove && availableGoal.isRunning()) {
+                 availableGoal.stop();
+             }
+@@ -63,11 +_,15 @@
+         return true;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("goalCleanup");
+ 
+-        for (WrappedGoal goal : this.availableGoals) {
++        for (WrappedGoal goal : this.availableGoalsSnapshot()) {
++            if (!this.availableGoals.contains(goal)) {
++                continue;
++            }
++
+             if (goal.isRunning() && (goalContainsAnyFlags(goal, this.disabledFlags) || !goal.canContinueToUse())) {
+                 goal.stop();
+             }
+@@ -77,7 +_,11 @@
+         profiler.pop();
+         profiler.push("goalUpdate");
+ 
+-        for (WrappedGoal goalx : this.availableGoals) {
++        for (WrappedGoal goalx : this.availableGoalsSnapshot()) {
++            if (!this.availableGoals.contains(goalx)) {
++                continue;
++            }
++
+             if (!goalx.isRunning()
+                 && !goalContainsAnyFlags(goalx, this.disabledFlags)
+                 && goalCanBeReplacedForAllFlags(goalx, this.lockedFlags)
+@@ -96,11 +_,15 @@
+         this.tickRunningGoals(true);
+     }
+ 
+-    public void tickRunningGoals(boolean forceTickAllRunningGoals) {
++    public synchronized void tickRunningGoals(boolean forceTickAllRunningGoals) {
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("goalTick");
+ 
+-        for (WrappedGoal goal : this.availableGoals) {
++        for (WrappedGoal goal : this.availableGoalsSnapshot()) {
++            if (!this.availableGoals.contains(goal)) {
++                continue;
++            }
++
+             if (goal.isRunning() && (forceTickAllRunningGoals || goal.requiresUpdateEveryTick())) {
+                 goal.tick();
+             }
+@@ -109,19 +_,23 @@
+         profiler.pop();
+     }
+ 
+-    public Set<WrappedGoal> getAvailableGoals() {
+-        return this.availableGoals;
+-    }
+-
+-    public void disableControlFlag(Goal.Flag flag) {
++    public synchronized Set<WrappedGoal> getAvailableGoals() {
++        return Set.copyOf(this.availableGoals);
++    }
++
++    private synchronized List<WrappedGoal> availableGoalsSnapshot() {
++        return List.copyOf(this.availableGoals);
++    }
++
++    public synchronized void disableControlFlag(Goal.Flag flag) {
+         this.disabledFlags.add(flag);
+     }
+ 
+-    public void enableControlFlag(Goal.Flag flag) {
++    public synchronized void enableControlFlag(Goal.Flag flag) {
+         this.disabledFlags.remove(flag);
+     }
+ 
+-    public void setControlFlag(Goal.Flag flag, boolean enabled) {
++    public synchronized void setControlFlag(Goal.Flag flag, boolean enabled) {
+         if (enabled) {
+             this.enableControlFlag(flag);
+         } else {

@@ -1,0 +1,39 @@
+--- a/net/minecraft/world/entity/animal/polarbear/PolarBear.java
++++ b/net/minecraft/world/entity/animal/polarbear/PolarBear.java
+@@ -51,6 +_,8 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PolarBear extends Animal implements NeutralMob {
+@@ -106,9 +_,10 @@
+         EntityType<PolarBear> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+         Holder<Biome> biome = level.getBiome(pos);
++        BlockPos below = pos.below();
+         return !biome.is(BiomeTags.POLAR_BEARS_SPAWN_ON_ALTERNATE_BLOCKS)
+             ? checkAnimalSpawnRules(type, level, spawnReason, pos, random)
+-            : isBrightEnoughToSpawn(level, pos) && level.getBlockState(pos.below()).is(BlockTags.POLAR_BEARS_SPAWNABLE_ON_ALTERNATE);
++            : canReadBlock(level, below) && isBrightEnoughToSpawn(level, pos) && level.getBlockState(below).is(BlockTags.POLAR_BEARS_SPAWNABLE_ON_ALTERNATE);
+     }
+ 
+     @Override
+@@ -257,9 +_,12 @@
+                 return false;
+             } else {
+                 if (super.canUse()) {
+-                    for (PolarBear bear : PolarBear.this.level().getEntitiesOfClass(PolarBear.class, PolarBear.this.getBoundingBox().inflate(8.0, 4.0, 8.0))) {
+-                        if (bear.isBaby()) {
+-                            return true;
++                    AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(PolarBear.this.level(), PolarBear.this.getBoundingBox().inflate(8.0, 4.0, 8.0));
++                    if (searchBox != null) {
++                        for (PolarBear bear : PolarBear.this.level().getEntitiesOfClass(PolarBear.class, searchBox)) {
++                            if (bear.isBaby()) {
++                                return true;
++                            }
+                         }
+                     }
+                 }

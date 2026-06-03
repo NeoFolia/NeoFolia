@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/item/BottleItem.java
++++ b/net/minecraft/world/item/BottleItem.java
+@@ -18,8 +_,10 @@
+ import net.minecraft.world.level.ClipContext;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.HitResult;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class BottleItem extends Item {
+     public BottleItem(Item.Properties properties) {
+@@ -28,9 +_,10 @@
+ 
+     @Override
+     public InteractionResult use(Level level, Player player, InteractionHand hand) {
+-        List<AreaEffectCloud> clouds = level.getEntitiesOfClass(
+-            AreaEffectCloud.class, player.getBoundingBox().inflate(2.0), input -> input.isAlive() && input.getOwner() instanceof EnderDragon
+-        );
++        AABB breathBox = RegionizedWorldGuard.restrictToCurrentRegion(level, player.getBoundingBox().inflate(2.0));
++        List<AreaEffectCloud> clouds = breathBox == null
++            ? List.of()
++            : level.getEntitiesOfClass(AreaEffectCloud.class, breathBox, input -> input.isAlive() && input.getOwner() instanceof EnderDragon);
+         ItemStack itemStack = player.getItemInHand(hand);
+         if (!clouds.isEmpty()) {
+             AreaEffectCloud cloud = clouds.get(0);
+@@ -38,7 +_,10 @@
+             level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.BOTTLE_FILL_DRAGONBREATH, SoundSource.NEUTRAL, 1.0F, 1.0F);
+             level.gameEvent(player, GameEvent.FLUID_PICKUP, player.position());
+             if (player instanceof ServerPlayer serverPlayer) {
+-                CriteriaTriggers.PLAYER_INTERACTED_WITH_ENTITY.trigger(serverPlayer, itemStack, cloud);
++                ItemStack itemSnapshot = itemStack.copy();
++                RegionizedWorldGuard.executeOnPlayerRegion(
++                    serverPlayer, () -> CriteriaTriggers.PLAYER_INTERACTED_WITH_ENTITY.trigger(serverPlayer, itemSnapshot, cloud)
++                );
+             }
+ 
+             return InteractionResult.SUCCESS.heldItemTransformedTo(this.turnBottleIntoItem(itemStack, player, new ItemStack(Items.DRAGON_BREATH)));
+@@ -67,7 +_,12 @@
+     }
+ 
+     protected ItemStack turnBottleIntoItem(ItemStack itemStack, Player player, ItemStack itemStackToTurnInto) {
+-        player.awardStat(Stats.ITEM_USED.get(this));
++        if (player instanceof ServerPlayer serverPlayer) {
++            RegionizedWorldGuard.awardStat(serverPlayer, Stats.ITEM_USED.get(this));
++        } else {
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
++        }
++
+         return ItemUtils.createFilledResult(itemStack, player, itemStackToTurnInto);
+     }
+ }

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/VillagerCalmDown.java
++++ b/net/minecraft/world/entity/ai/behavior/VillagerCalmDown.java
+@@ -7,7 +_,7 @@
+ public class VillagerCalmDown {
+     private static final int SAFE_DISTANCE_FROM_DANGER = 36;
+ 
+-    public static BehaviorControl<LivingEntity> create() {
++    public static synchronized BehaviorControl<LivingEntity> create() {
+         return BehaviorBuilder.create(
+             i -> i.group(i.registered(MemoryModuleType.HURT_BY), i.registered(MemoryModuleType.HURT_BY_ENTITY), i.registered(MemoryModuleType.NEAREST_HOSTILE))
+                 .apply(

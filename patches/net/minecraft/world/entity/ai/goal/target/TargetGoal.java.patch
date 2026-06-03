@@ -1,0 +1,75 @@
+--- a/net/minecraft/world/entity/ai/goal/target/TargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/TargetGoal.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.Node;
+ import net.minecraft.world.level.pathfinder.Path;
+ import net.minecraft.world.scores.Team;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class TargetGoal extends Goal {
+@@ -34,10 +_,10 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         LivingEntity target = this.mob.getTarget();
+         if (target == null) {
+-            target = this.targetMob;
++            target = this.regionSafeTarget(this.targetMob);
+         }
+ 
+         if (target == null) {
+@@ -69,24 +_,25 @@
+         }
+     }
+ 
+-    protected double getFollowDistance() {
++    protected synchronized double getFollowDistance() {
+         return this.mob.getAttributeValue(Attributes.FOLLOW_RANGE);
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.reachCache = 0;
+         this.reachCacheTime = 0;
+         this.unseenTicks = 0;
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.mob.setTarget(null);
+         this.targetMob = null;
+     }
+ 
+-    protected boolean canAttack(@Nullable LivingEntity target, TargetingConditions targetConditions) {
++    protected synchronized boolean canAttack(@Nullable LivingEntity target, TargetingConditions targetConditions) {
++        target = this.regionSafeTarget(target);
+         if (target == null) {
+             return false;
+         } else if (!targetConditions.test(getServerLevel(this.mob), this.mob, target)) {
+@@ -112,7 +_,11 @@
+         }
+     }
+ 
+-    private boolean canReach(LivingEntity target) {
++    protected synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
++    }
++
++    private synchronized boolean canReach(LivingEntity target) {
+         this.reachCacheTime = reducedTickDelay(10 + this.mob.getRandom().nextInt(5));
+         Path path = this.mob.getNavigation().createPath(target, 0);
+         if (path == null) {
+@@ -129,7 +_,7 @@
+         }
+     }
+ 
+-    public TargetGoal setUnseenMemoryTicks(int unseenMemoryTicks) {
++    public synchronized TargetGoal setUnseenMemoryTicks(int unseenMemoryTicks) {
+         this.unseenMemoryTicks = unseenMemoryTicks;
+         return this;
+     }

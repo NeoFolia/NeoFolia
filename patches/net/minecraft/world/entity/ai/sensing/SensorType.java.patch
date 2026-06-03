@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/sensing/SensorType.java
++++ b/net/minecraft/world/entity/ai/sensing/SensorType.java
+@@ -51,7 +_,7 @@
+         this.factory = factory;
+     }
+ 
+-    public U create() {
++    public synchronized U create() {
+         return this.factory.get();
+     }
+ 

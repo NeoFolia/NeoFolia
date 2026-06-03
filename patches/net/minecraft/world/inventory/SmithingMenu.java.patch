@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/inventory/SmithingMenu.java
++++ b/net/minecraft/world/inventory/SmithingMenu.java
+@@ -68,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void onTake(Player player, ItemStack carried) {
++    protected synchronized void onTake(Player player, ItemStack carried) {
+         carried.onCraftedBy(player, carried.getCount());
+         this.resultSlots.awardUsedRecipes(player, this.getRelevantItems());
+         this.shrinkStackInSlot(0);
+@@ -94,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         super.slotsChanged(container);
+         if (this.level instanceof ServerLevel) {
+             boolean hasRecipeError = this.getSlot(0).hasItem()
+@@ -126,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
++    public synchronized boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
+         return target.container != this.resultSlots && super.canTakeItemForPickAll(carried, target);
+     }
+ 

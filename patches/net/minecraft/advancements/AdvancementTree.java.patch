@@ -1,0 +1,82 @@
+--- a/net/minecraft/advancements/AdvancementTree.java
++++ b/net/minecraft/advancements/AdvancementTree.java
+@@ -20,7 +_,7 @@
+     private final Set<AdvancementNode> tasks = new ObjectLinkedOpenHashSet<>();
+     private AdvancementTree.@Nullable Listener listener;
+ 
+-    private void remove(AdvancementNode node) {
++    private synchronized void remove(AdvancementNode node) {
+         for (AdvancementNode child : node.children()) {
+             this.remove(child);
+         }
+@@ -40,7 +_,7 @@
+         }
+     }
+ 
+-    public void remove(Set<Identifier> ids) {
++    public synchronized void remove(Set<Identifier> ids) {
+         for (Identifier id : ids) {
+             AdvancementNode advancement = this.nodes.get(id);
+             if (advancement == null) {
+@@ -51,7 +_,7 @@
+         }
+     }
+ 
+-    public void addAll(Collection<AdvancementHolder> advancements) {
++    public synchronized void addAll(Collection<AdvancementHolder> advancements) {
+         List<AdvancementHolder> advancementsToAdd = new ArrayList<>(advancements);
+ 
+         while (!advancementsToAdd.isEmpty()) {
+@@ -64,7 +_,7 @@
+         LOGGER.info("Loaded {} advancements", this.nodes.size());
+     }
+ 
+-    private boolean tryInsert(AdvancementHolder holder) {
++    private synchronized boolean tryInsert(AdvancementHolder holder) {
+         Optional<Identifier> parentId = holder.value().parent();
+         AdvancementNode parentNode = parentId.map(this.nodes::get).orElse(null);
+         if (parentNode == null && parentId.isPresent()) {
+@@ -92,7 +_,7 @@
+         }
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.nodes.clear();
+         this.roots.clear();
+         this.tasks.clear();
+@@ -101,23 +_,23 @@
+         }
+     }
+ 
+-    public Iterable<AdvancementNode> roots() {
+-        return this.roots;
+-    }
+-
+-    public Collection<AdvancementNode> nodes() {
+-        return this.nodes.values();
+-    }
+-
+-    public @Nullable AdvancementNode get(Identifier id) {
++    public synchronized Iterable<AdvancementNode> roots() {
++        return List.copyOf(this.roots);
++    }
++
++    public synchronized Collection<AdvancementNode> nodes() {
++        return List.copyOf(this.nodes.values());
++    }
++
++    public synchronized @Nullable AdvancementNode get(Identifier id) {
+         return this.nodes.get(id);
+     }
+ 
+-    public @Nullable AdvancementNode get(AdvancementHolder advancement) {
++    public synchronized @Nullable AdvancementNode get(AdvancementHolder advancement) {
+         return this.nodes.get(advancement.id());
+     }
+ 
+-    public void setListener(AdvancementTree.@Nullable Listener listener) {
++    public synchronized void setListener(AdvancementTree.@Nullable Listener listener) {
+         this.listener = listener;
+         if (listener != null) {
+             for (AdvancementNode root : this.roots) {

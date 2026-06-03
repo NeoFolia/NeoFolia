@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/SonicBoom.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/SonicBoom.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.attributes.Attributes;
+ import net.minecraft.world.entity.ai.behavior.Behavior;
++import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ import net.minecraft.world.entity.ai.memory.MemoryStatus;
+ import net.minecraft.world.entity.monster.warden.Warden;
+@@ -40,28 +_,32 @@
+         );
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Warden body) {
+-        return body.closerThan(body.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET).get(), 15.0, 20.0);
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Warden body) {
++        LivingEntity target = BehaviorUtils.regionSafeEntity(body, body.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET).orElse(null));
++        return target != null && body.closerThan(target, 15.0, 20.0);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Warden body, long timestamp) {
+         return true;
+     }
+ 
+-    protected void start(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Warden body, long timestamp) {
+         body.getBrain().setMemoryWithExpiry(MemoryModuleType.ATTACK_COOLING_DOWN, true, DURATION);
+         body.getBrain().setMemoryWithExpiry(MemoryModuleType.SONIC_BOOM_SOUND_DELAY, Unit.INSTANCE, TICKS_BEFORE_PLAYING_SOUND);
+         level.broadcastEntityEvent(body, (byte)62);
+         body.playSound(SoundEvents.WARDEN_SONIC_CHARGE, 3.0F, 1.0F);
+     }
+ 
+-    protected void tick(ServerLevel level, Warden body, long timestamp) {
+-        body.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET).ifPresent(target -> body.getLookControl().setLookAt(target.position()));
++    protected synchronized void tick(ServerLevel level, Warden body, long timestamp) {
++        body.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET)
++            .map(target -> BehaviorUtils.regionSafeEntity(body, target))
++            .ifPresent(target -> body.getLookControl().setLookAt(target.position()));
+         if (!body.getBrain().hasMemoryValue(MemoryModuleType.SONIC_BOOM_SOUND_DELAY)
+             && !body.getBrain().hasMemoryValue(MemoryModuleType.SONIC_BOOM_SOUND_COOLDOWN)) {
+             body.getBrain().setMemoryWithExpiry(MemoryModuleType.SONIC_BOOM_SOUND_COOLDOWN, Unit.INSTANCE, DURATION - TICKS_BEFORE_PLAYING_SOUND);
+             body.getBrain()
+                 .getMemory(MemoryModuleType.ATTACK_TARGET)
++                .map(target -> BehaviorUtils.regionSafeEntity(body, target))
+                 .filter(body::canTargetEntity)
+                 .filter(target -> body.closerThan(target, 15.0, 20.0))
+                 .ifPresent(target -> {
+@@ -85,11 +_,11 @@
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Warden body, long timestamp) {
+         setCooldown(body, 40);
+     }
+ 
+-    public static void setCooldown(LivingEntity body, int cooldown) {
++    public static synchronized void setCooldown(LivingEntity body, int cooldown) {
+         body.getBrain().setMemoryWithExpiry(MemoryModuleType.SONIC_BOOM_COOLDOWN, Unit.INSTANCE, cooldown);
+     }
+ }

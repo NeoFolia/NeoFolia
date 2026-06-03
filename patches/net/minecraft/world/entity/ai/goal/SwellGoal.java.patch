@@ -1,0 +1,65 @@
+--- a/net/minecraft/world/entity/ai/goal/SwellGoal.java
++++ b/net/minecraft/world/entity/ai/goal/SwellGoal.java
+@@ -3,6 +_,7 @@
+ import java.util.EnumSet;
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.monster.Creeper;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class SwellGoal extends Goal {
+@@ -15,33 +_,34 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        LivingEntity target = this.creeper.getTarget();
++    public synchronized boolean canUse() {
++        LivingEntity target = this.regionSafeTarget(this.creeper.getTarget());
+         return this.creeper.getSwellDir() > 0 || target != null && !target.isDeadOrDying() && this.creeper.distanceToSqr(target) < 9.0;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.creeper.getNavigation().stop();
+-        this.target = this.creeper.getTarget();
++        this.target = this.regionSafeTarget(this.creeper.getTarget());
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.target = null;
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
+-        if (this.target != null && !this.target.isDeadOrDying()) {
+-            if (this.creeper.distanceToSqr(this.target) > 49.0) {
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        if (target != null && !target.isDeadOrDying()) {
++            if (this.creeper.distanceToSqr(target) > 49.0) {
+                 this.creeper.setSwellDir(-1);
+-            } else if (!this.creeper.getSensing().hasLineOfSight(this.target)) {
++            } else if (!this.creeper.getSensing().hasLineOfSight(target)) {
+                 this.creeper.setSwellDir(-1);
+             } else {
+                 this.creeper.setSwellDir(1);
+@@ -49,5 +_,9 @@
+         } else {
+             this.creeper.setSwellDir(-1);
+         }
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.creeper.level(), target);
+     }
+ }

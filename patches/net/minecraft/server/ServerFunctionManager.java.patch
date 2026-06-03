@@ -1,0 +1,58 @@
+--- a/net/minecraft/server/ServerFunctionManager.java
++++ b/net/minecraft/server/ServerFunctionManager.java
+@@ -24,9 +_,9 @@
+     private static final Identifier TICK_FUNCTION_TAG = Identifier.withDefaultNamespace("tick");
+     private static final Identifier LOAD_FUNCTION_TAG = Identifier.withDefaultNamespace("load");
+     private final MinecraftServer server;
+-    private List<CommandFunction<CommandSourceStack>> ticking = ImmutableList.of();
++    private volatile List<CommandFunction<CommandSourceStack>> ticking = ImmutableList.of();
+     private boolean postReload;
+-    private ServerFunctionLibrary library;
++    private volatile ServerFunctionLibrary library;
+ 
+     public ServerFunctionManager(MinecraftServer server, ServerFunctionLibrary library) {
+         this.server = server;
+@@ -40,16 +_,24 @@
+ 
+     public void tick() {
+         if (this.server.tickRateManager().runsNormally()) {
+-            if (this.postReload) {
+-                this.postReload = false;
+-                Collection<CommandFunction<CommandSourceStack>> functions = this.library.getTag(LOAD_FUNCTION_TAG);
+-                this.executeTagFunctions(functions, LOAD_FUNCTION_TAG);
++            List<CommandFunction<CommandSourceStack>> loadFunctions = this.consumePostReloadFunctions();
++            if (!loadFunctions.isEmpty()) {
++                this.executeTagFunctions(loadFunctions, LOAD_FUNCTION_TAG);
+             }
+ 
+             this.executeTagFunctions(this.ticking, TICK_FUNCTION_TAG);
+         }
+     }
+ 
++    private synchronized List<CommandFunction<CommandSourceStack>> consumePostReloadFunctions() {
++        if (!this.postReload) {
++            return List.of();
++        }
++
++        this.postReload = false;
++        return List.copyOf(this.library.getTag(LOAD_FUNCTION_TAG));
++    }
++
+     private void executeTagFunctions(Collection<CommandFunction<CommandSourceStack>> functions, Identifier loadFunctionTag) {
+         Profiler.get().push(loadFunctionTag::toString);
+ 
+@@ -77,12 +_,12 @@
+         }
+     }
+ 
+-    public void replaceLibrary(ServerFunctionLibrary library) {
++    public synchronized void replaceLibrary(ServerFunctionLibrary library) {
+         this.library = library;
+         this.postReload(library);
+     }
+ 
+-    private void postReload(ServerFunctionLibrary library) {
++    private synchronized void postReload(ServerFunctionLibrary library) {
+         this.ticking = List.copyOf(library.getTag(TICK_FUNCTION_TAG));
+         this.postReload = true;
+     }

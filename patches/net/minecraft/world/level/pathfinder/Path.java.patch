@@ -1,0 +1,205 @@
+--- a/net/minecraft/world/level/pathfinder/Path.java
++++ b/net/minecraft/world/level/pathfinder/Path.java
+@@ -1,5 +_,6 @@
+ package net.minecraft.world.level.pathfinder;
+ 
++import java.util.ArrayList;
+ import java.util.HashSet;
+ import java.util.List;
+ import java.util.Set;
+@@ -21,55 +_,55 @@
+     private final boolean reached;
+ 
+     public Path(List<Node> nodes, BlockPos target, boolean reached) {
+-        this.nodes = nodes;
++        this.nodes = new ArrayList<>(nodes);
+         this.target = target;
+         this.distToTarget = nodes.isEmpty() ? Float.MAX_VALUE : this.nodes.get(this.nodes.size() - 1).distanceManhattan(this.target);
+         this.reached = reached;
+     }
+ 
+-    public void advance() {
++    public synchronized void advance() {
+         this.nextNodeIndex++;
+     }
+ 
+-    public boolean notStarted() {
++    public synchronized boolean notStarted() {
+         return this.nextNodeIndex <= 0;
+     }
+ 
+-    public boolean isDone() {
++    public synchronized boolean isDone() {
+         return this.nextNodeIndex >= this.nodes.size();
+     }
+ 
+-    public @Nullable Node getEndNode() {
++    public synchronized @Nullable Node getEndNode() {
+         return !this.nodes.isEmpty() ? this.nodes.get(this.nodes.size() - 1) : null;
+     }
+ 
+-    public Node getNode(int i) {
++    public synchronized Node getNode(int i) {
+         return this.nodes.get(i);
+     }
+ 
+-    public void truncateNodes(int index) {
++    public synchronized void truncateNodes(int index) {
+         if (this.nodes.size() > index) {
+             this.nodes.subList(index, this.nodes.size()).clear();
+         }
+     }
+ 
+-    public void replaceNode(int index, Node replaceWith) {
++    public synchronized void replaceNode(int index, Node replaceWith) {
+         this.nodes.set(index, replaceWith);
+     }
+ 
+-    public int getNodeCount() {
++    public synchronized int getNodeCount() {
+         return this.nodes.size();
+     }
+ 
+-    public int getNextNodeIndex() {
++    public synchronized int getNextNodeIndex() {
+         return this.nextNodeIndex;
+     }
+ 
+-    public void setNextNodeIndex(int nextNodeIndex) {
++    public synchronized void setNextNodeIndex(int nextNodeIndex) {
+         this.nextNodeIndex = nextNodeIndex;
+     }
+ 
+-    public Vec3 getEntityPosAtNode(Entity entity, int index) {
++    public synchronized Vec3 getEntityPosAtNode(Entity entity, int index) {
+         Node node = this.nodes.get(index);
+         double x = node.x + (int)(entity.getBbWidth() + 1.0F) * 0.5;
+         double y = node.y;
+@@ -77,60 +_,64 @@
+         return new Vec3(x, y, z);
+     }
+ 
+-    public BlockPos getNodePos(int index) {
++    public synchronized BlockPos getNodePos(int index) {
+         return this.nodes.get(index).asBlockPos();
+     }
+ 
+-    public Vec3 getNextEntityPos(Entity entity) {
++    public synchronized Vec3 getNextEntityPos(Entity entity) {
+         return this.getEntityPosAtNode(entity, this.nextNodeIndex);
+     }
+ 
+-    public BlockPos getNextNodePos() {
++    public synchronized BlockPos getNextNodePos() {
+         return this.nodes.get(this.nextNodeIndex).asBlockPos();
+     }
+ 
+-    public Node getNextNode() {
++    public synchronized Node getNextNode() {
+         return this.nodes.get(this.nextNodeIndex);
+     }
+ 
+-    public @Nullable Node getPreviousNode() {
++    public synchronized @Nullable Node getPreviousNode() {
+         return this.nextNodeIndex > 0 ? this.nodes.get(this.nextNodeIndex - 1) : null;
+     }
+ 
+-    public boolean sameAs(@Nullable Path path) {
+-        return path != null && this.nodes.equals(path.nodes);
+-    }
+-
+-    @Override
+-    public boolean equals(Object obj) {
+-        return !(obj instanceof Path path)
+-            ? false
+-            : this.nextNodeIndex == path.nextNodeIndex
+-                && this.debugData == path.debugData
+-                && this.reached == path.reached
+-                && this.target.equals(path.target)
+-                && this.nodes.equals(path.nodes);
+-    }
+-
+-    @Override
+-    public int hashCode() {
++    public synchronized boolean sameAs(@Nullable Path path) {
++        return path != null && this.copyNodes().equals(path.copyNodes());
++    }
++
++    @Override
++    public synchronized boolean equals(Object obj) {
++        if (!(obj instanceof Path path)) {
++            return false;
++        } else {
++            Path copy = this.copy();
++            Path otherCopy = path.copy();
++            return copy.nextNodeIndex == otherCopy.nextNodeIndex
++                && copy.debugData == otherCopy.debugData
++                && copy.reached == otherCopy.reached
++                && copy.target.equals(otherCopy.target)
++                && copy.nodes.equals(otherCopy.nodes);
++        }
++    }
++
++    @Override
++    public synchronized int hashCode() {
+         return this.nextNodeIndex + this.nodes.hashCode() * 31;
+     }
+ 
+-    public boolean canReach() {
++    public synchronized boolean canReach() {
+         return this.reached;
+     }
+ 
+     @VisibleForDebug
+-    void setDebug(Node[] openSet, Node[] closedSet, Set<Target> targets) {
+-        this.debugData = new Path.DebugData(openSet, closedSet, targets);
++    synchronized void setDebug(Node[] openSet, Node[] closedSet, Set<Target> targets) {
++        this.debugData = new Path.DebugData(openSet.clone(), closedSet.clone(), Set.copyOf(targets));
+     }
+ 
+-    public Path.@Nullable DebugData debugData() {
++    public synchronized Path.@Nullable DebugData debugData() {
+         return this.debugData;
+     }
+ 
+-    public void writeToStream(FriendlyByteBuf buffer) {
++    public synchronized void writeToStream(FriendlyByteBuf buffer) {
+         if (this.debugData != null && !this.debugData.targetNodes.isEmpty()) {
+             buffer.writeBoolean(this.reached);
+             buffer.writeInt(this.nextNodeIndex);
+@@ -155,15 +_,15 @@
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return "Path(length=" + this.nodes.size() + ")";
+     }
+ 
+-    public BlockPos getTarget() {
++    public synchronized BlockPos getTarget() {
+         return this.target;
+     }
+ 
+-    public float getDistToTarget() {
++    public synchronized float getDistToTarget() {
+         return this.distToTarget;
+     }
+ 
+@@ -185,11 +_,15 @@
+         }
+     }
+ 
+-    public Path copy() {
++    public synchronized Path copy() {
+         Path result = new Path(this.nodes, this.target, this.reached);
+         result.debugData = this.debugData;
+         result.nextNodeIndex = this.nextNodeIndex;
+         return result;
++    }
++
++    private synchronized List<Node> copyNodes() {
++        return new ArrayList<>(this.nodes);
+     }
+ 
+     public record DebugData(Node[] openSet, Node[] closedSet, Set<Target> targetNodes) {

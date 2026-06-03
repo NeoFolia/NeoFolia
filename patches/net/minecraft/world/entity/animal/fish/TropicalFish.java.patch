@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/entity/animal/fish/TropicalFish.java
++++ b/net/minecraft/world/entity/animal/fish/TropicalFish.java
+@@ -42,6 +_,7 @@
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class TropicalFish extends AbstractSchoolingFish {
+@@ -237,7 +_,7 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         groupData = super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         TropicalFish.Variant variant;
+         if (groupData instanceof TropicalFish.TropicalFishGroupData tropicalFishGroupData) {
+             variant = tropicalFishGroupData.variant;
+@@ -261,12 +_,21 @@
+     public static boolean checkTropicalFishSpawnRules(
+         EntityType<TropicalFish> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return level.getFluidState(pos.below()).is(FluidTags.WATER)
+-            && level.getBlockState(pos.above()).is(Blocks.WATER)
++        BlockPos below = pos.below();
++        BlockPos above = pos.above();
++        return canReadBlock(level, pos)
++            && canReadBlock(level, below)
++            && canReadBlock(level, above)
++            && level.getFluidState(below).is(FluidTags.WATER)
++            && level.getBlockState(above).is(Blocks.WATER)
+             && (
+                 level.getBiome(pos).is(BiomeTags.ALLOWS_TROPICAL_FISH_SPAWNS_AT_ANY_HEIGHT)
+                     || WaterAnimal.checkSurfaceWaterAnimalSpawnRules(type, level, spawnReason, pos, random)
+             );
++    }
++
++    private static boolean canReadBlock(LevelAccessor level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     public static enum Base {

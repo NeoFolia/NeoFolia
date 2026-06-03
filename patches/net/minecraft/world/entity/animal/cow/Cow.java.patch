@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/animal/cow/Cow.java
++++ b/net/minecraft/world/entity/animal/cow/Cow.java
+@@ -77,7 +_,7 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         VariantUtils.selectVariantToSpawn(SpawnContext.create(level, this.blockPosition()), Registries.COW_VARIANT).ifPresent(this::setVariant);
+-        this.setSoundVariant(CowSoundVariants.pickRandomSoundVariant(this.registryAccess(), level.getRandom()));
++        this.setSoundVariant(CowSoundVariants.pickRandomSoundVariant(this.registryAccess(), this.random));
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+     }
+ 

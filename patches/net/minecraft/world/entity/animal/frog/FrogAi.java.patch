@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/entity/animal/frog/FrogAi.java
++++ b/net/minecraft/world/entity/animal/frog/FrogAi.java
+@@ -48,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.level.pathfinder.PathfindingContext;
+ import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class FrogAi {
+     private static final float SPEED_MULTIPLIER_WHEN_PANICKING = 2.0F;
+@@ -212,6 +_,10 @@
+     private static <E extends Mob> boolean isAcceptableLandingSpot(E body, BlockPos targetPos) {
+         Level level = body.level();
+         BlockPos below = targetPos.below();
++        if (!canReadBlock(level, targetPos) || !canReadBlock(level, below) || !canReadBlock(level, targetPos.above())) {
++            return false;
++        }
++
+         if (level.getFluidState(targetPos).isEmpty() && level.getFluidState(below).isEmpty() && level.getFluidState(targetPos.above()).isEmpty()) {
+             BlockState bs = level.getBlockState(targetPos);
+             BlockState bsBelow = level.getBlockState(below);
+@@ -228,6 +_,10 @@
+         } else {
+             return false;
+         }
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     private static boolean canAttack(Mob mob) {

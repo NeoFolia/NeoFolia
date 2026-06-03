@@ -1,0 +1,57 @@
+--- a/net/minecraft/server/commands/data/BlockDataAccessor.java
++++ b/net/minecraft/server/commands/data/BlockDataAccessor.java
+@@ -20,6 +_,7 @@
+ import net.minecraft.world.level.block.entity.BlockEntity;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.TagValueInput;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.slf4j.Logger;
+ 
+ public class BlockDataAccessor implements DataAccessor {
+@@ -27,9 +_,13 @@
+     private static final SimpleCommandExceptionType ERROR_NOT_A_BLOCK_ENTITY = new SimpleCommandExceptionType(
+         Component.translatable("commands.data.block.invalid")
+     );
++    private static final SimpleCommandExceptionType ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL = new SimpleCommandExceptionType(
++        Component.literal("This block data accessor must run on the global server thread while regionized ticking is active")
++    );
+     public static final Function<String, DataCommands.DataProvider> PROVIDER = argPrefix -> new DataCommands.DataProvider() {
+         @Override
+         public DataAccessor access(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++            requireGlobalDataAccess(context.getSource());
+             BlockPos pos = BlockPosArgument.getLoadedBlockPos(context, argPrefix + "Pos");
+             BlockEntity entity = context.getSource().getLevel().getBlockEntity(pos);
+             if (entity == null) {
+@@ -55,7 +_,8 @@
+     }
+ 
+     @Override
+-    public void setData(CompoundTag tag) {
++    public void setData(CompoundTag tag) throws CommandSyntaxException {
++        requireGlobalDataAccess();
+         BlockState state = this.entity.getLevel().getBlockState(this.pos);
+ 
+         try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.entity.problemPath(), LOGGER)) {
+@@ -66,8 +_,21 @@
+     }
+ 
+     @Override
+-    public CompoundTag getData() {
++    public CompoundTag getData() throws CommandSyntaxException {
++        requireGlobalDataAccess();
+         return this.entity.saveWithFullMetadata(this.entity.getLevel().registryAccess());
++    }
++
++    private static void requireGlobalDataAccess(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL.create();
++        }
++    }
++
++    private static void requireGlobalDataAccess() throws CommandSyntaxException {
++        if (RegionizedTickContext.isRegionThread()) {
++            throw ERROR_REGIONIZED_DATA_REQUIRES_GLOBAL.create();
++        }
+     }
+ 
+     @Override

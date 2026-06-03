@@ -1,0 +1,85 @@
+--- a/net/minecraft/world/level/pathfinder/BinaryHeap.java
++++ b/net/minecraft/world/level/pathfinder/BinaryHeap.java
+@@ -6,7 +_,7 @@
+     private Node[] heap = new Node[128];
+     private int size;
+ 
+-    public Node insert(Node node) {
++    public synchronized Node insert(Node node) {
+         if (node.heapIdx >= 0) {
+             throw new IllegalStateException("OW KNOWS!");
+         } else {
+@@ -23,15 +_,15 @@
+         }
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() {
+         this.size = 0;
+     }
+ 
+-    public Node peek() {
++    public synchronized Node peek() {
+         return this.heap[0];
+     }
+ 
+-    public Node pop() {
++    public synchronized Node pop() {
+         Node popped = this.heap[0];
+         this.heap[0] = this.heap[--this.size];
+         this.heap[this.size] = null;
+@@ -43,7 +_,7 @@
+         return popped;
+     }
+ 
+-    public void remove(Node node) {
++    public synchronized void remove(Node node) {
+         this.heap[node.heapIdx] = this.heap[--this.size];
+         this.heap[this.size] = null;
+         if (this.size > node.heapIdx) {
+@@ -57,7 +_,7 @@
+         node.heapIdx = -1;
+     }
+ 
+-    public void changeCost(Node node, float newCost) {
++    public synchronized void changeCost(Node node, float newCost) {
+         float oldCost = node.f;
+         node.f = newCost;
+         if (newCost < oldCost) {
+@@ -67,11 +_,11 @@
+         }
+     }
+ 
+-    public int size() {
++    public synchronized int size() {
+         return this.size;
+     }
+ 
+-    private void upHeap(int idx) {
++    private synchronized void upHeap(int idx) {
+         Node node = this.heap[idx];
+         float cost = node.f;
+ 
+@@ -91,7 +_,7 @@
+         node.heapIdx = idx;
+     }
+ 
+-    private void downHeap(int idx) {
++    private synchronized void downHeap(int idx) {
+         Node node = this.heap[idx];
+         float cost = node.f;
+ 
+@@ -137,11 +_,11 @@
+         node.heapIdx = idx;
+     }
+ 
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         return this.size == 0;
+     }
+ 
+-    public Node[] getHeap() {
++    public synchronized Node[] getHeap() {
+         return Arrays.copyOf(this.heap, this.size);
+     }
+ }

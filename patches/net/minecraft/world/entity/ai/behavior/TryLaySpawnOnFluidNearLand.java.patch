@@ -1,0 +1,45 @@
+--- a/net/minecraft/world/entity/ai/behavior/TryLaySpawnOnFluidNearLand.java
++++ b/net/minecraft/world/entity/ai/behavior/TryLaySpawnOnFluidNearLand.java
+@@ -9,12 +_,14 @@
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.behavior.declarative.BehaviorBuilder;
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TryLaySpawnOnFluidNearLand {
+-    public static BehaviorControl<LivingEntity> create(Block spawnBlock) {
++    public static synchronized BehaviorControl<LivingEntity> create(Block spawnBlock) {
+         return BehaviorBuilder.create(
+             i -> i.group(i.absent(MemoryModuleType.ATTACK_TARGET), i.present(MemoryModuleType.WALK_TARGET), i.present(MemoryModuleType.IS_PREGNANT))
+                 .apply(
+@@ -25,12 +_,14 @@
+ 
+                             for (Direction direction : Direction.Plane.HORIZONTAL) {
+                                 BlockPos relativePos = belowPos.relative(direction);
+-                                if (level.getBlockState(relativePos).getCollisionShape(level, relativePos).getFaceShape(Direction.UP).isEmpty()
++                                BlockPos spawnPos = relativePos.above();
++                                if (canReadBlock(level, relativePos)
++                                    && canReadBlock(level, spawnPos)
++                                    && level.getBlockState(relativePos).getCollisionShape(level, relativePos).getFaceShape(Direction.UP).isEmpty()
+                                     && (
+                                         level.getFluidState(relativePos).is(FluidTags.SUPPORTS_FROGSPAWN)
+                                             || level.getBlockState(relativePos).is(BlockTags.SUPPORTS_FROGSPAWN)
+                                     )) {
+-                                    BlockPos spawnPos = relativePos.above();
+                                     if (level.getBlockState(spawnPos).isAir()) {
+                                         BlockState newState = spawnBlock.defaultBlockState();
+                                         level.setBlock(spawnPos, newState, 3);
+@@ -49,5 +_,9 @@
+                     }
+                 )
+         );
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

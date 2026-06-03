@@ -1,0 +1,177 @@
+--- /dev/null
++++ b/net/minecraft/server/commands/RegionizedCommandHelper.java
+@@ -1,0 +_,174 @@
++package net.minecraft.server.commands;
++
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
++import java.util.concurrent.CompletionException;
++import java.util.function.Supplier;
++import net.minecraft.commands.CommandSourceStack;
++import net.minecraft.network.chat.ChatType;
++import net.minecraft.network.chat.Component;
++import net.minecraft.network.chat.OutgoingChatMessage;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.world.entity.Entity;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
++
++public final class RegionizedCommandHelper {
++    private RegionizedCommandHelper() {
++    }
++
++    static boolean scheduleGlobalIfRegionized(CommandSourceStack source, CommandTask task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (source.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> {
++            try {
++                task.run();
++            } catch (CommandSyntaxException ex) {
++                source.sendFailure(Component.literal(ex.getMessage()));
++            }
++        })) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot run global command task from region worker while region dispatcher is not running");
++    }
++
++    static void executeGlobalOrServer(CommandSourceStack source, Runnable task) {
++        if (source.getServer().regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return;
++        }
++
++        source.getServer().execute(task);
++    }
++
++    public static <T> T callOnPlayerRegion(CommandSourceStack source, ServerPlayer player, Supplier<T> supplier) {
++        return RegionizedWorldGuard.callOnPlayerRegionAndWait(player, "player command target", supplier);
++    }
++
++    public static <T> T callOnPlayerRegionThrowing(CommandSourceStack source, ServerPlayer player, CommandSupplier<T> supplier) throws CommandSyntaxException {
++        try {
++            return callOnPlayerRegion(source, player, () -> {
++                try {
++                    return supplier.get();
++                } catch (CommandSyntaxException ex) {
++                    throw new WrappedCommandSyntaxException(ex);
++                }
++            });
++        } catch (WrappedCommandSyntaxException ex) {
++            throw ex.commandException;
++        } catch (CompletionException ex) {
++            if (ex.getCause() instanceof WrappedCommandSyntaxException wrapped) {
++                throw wrapped.commandException;
++            }
++
++            throw ex;
++        }
++    }
++
++    public static <T> T callOnEntityRegion(CommandSourceStack source, Entity entity, Supplier<T> supplier) {
++        return RegionizedWorldGuard.callOnEntityRegionAndWait(entity, "entity command target", supplier);
++    }
++
++    public static <T> T callOnRegion(CommandSourceStack source, ServerLevel level, net.minecraft.core.BlockPos pos, Supplier<T> supplier) {
++        return RegionizedWorldGuard.callOnRegionAndWait(level, pos, "region command target", supplier);
++    }
++
++    public static <T> T callOnRegionThrowing(
++        CommandSourceStack source, ServerLevel level, net.minecraft.core.BlockPos pos, CommandSupplier<T> supplier
++    ) throws CommandSyntaxException {
++        try {
++            return callOnRegion(source, level, pos, () -> {
++                try {
++                    return supplier.get();
++                } catch (CommandSyntaxException ex) {
++                    throw new WrappedCommandSyntaxException(ex);
++                }
++            });
++        } catch (WrappedCommandSyntaxException ex) {
++            throw ex.commandException;
++        } catch (CompletionException ex) {
++            if (ex.getCause() instanceof WrappedCommandSyntaxException wrapped) {
++                throw wrapped.commandException;
++            }
++
++            throw ex;
++        }
++    }
++
++    public static <T> T callOnEntityRegionThrowing(CommandSourceStack source, Entity entity, CommandSupplier<T> supplier) throws CommandSyntaxException {
++        try {
++            return callOnEntityRegion(source, entity, () -> {
++                try {
++                    return supplier.get();
++                } catch (CommandSyntaxException ex) {
++                    throw new WrappedCommandSyntaxException(ex);
++                }
++            });
++        } catch (WrappedCommandSyntaxException ex) {
++            throw ex.commandException;
++        } catch (CompletionException ex) {
++            if (ex.getCause() instanceof WrappedCommandSyntaxException wrapped) {
++                throw wrapped.commandException;
++            }
++
++            throw ex;
++        }
++    }
++
++    static @Nullable Entity sourceEntityFor(CommandSourceStack source, ServerLevel level) {
++        Entity entity = source.getEntity();
++        if (entity == null || entity.level() != level) {
++            return null;
++        }
++
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(level, entity);
++    }
++
++    public static void sendChatMessage(
++        CommandSourceStack source, ServerPlayer sourcePlayer, OutgoingChatMessage message, boolean filtered, ChatType.Bound chatType
++    ) {
++        if (sourcePlayer == null) {
++            source.sendChatMessage(message, filtered, chatType);
++            return;
++        }
++
++        callOnPlayerRegion(source, sourcePlayer, () -> {
++            sourcePlayer.sendChatMessage(message, filtered, chatType);
++            return null;
++        });
++    }
++
++    public static void sendSystemMessage(CommandSourceStack source, ServerPlayer sourcePlayer, Component message) {
++        if (sourcePlayer == null) {
++            source.sendSystemMessage(message);
++            return;
++        }
++
++        callOnPlayerRegion(source, sourcePlayer, () -> {
++            sourcePlayer.sendSystemMessage(message);
++            return null;
++        });
++    }
++
++    @FunctionalInterface
++    interface CommandTask {
++        void run() throws CommandSyntaxException;
++    }
++
++    @FunctionalInterface
++    public interface CommandSupplier<T> {
++        T get() throws CommandSyntaxException;
++    }
++
++    private static final class WrappedCommandSyntaxException extends RuntimeException {
++        private final CommandSyntaxException commandException;
++
++        private WrappedCommandSyntaxException(CommandSyntaxException commandException) {
++            super(commandException);
++            this.commandException = commandException;
++        }
++    }
++}

@@ -1,0 +1,181 @@
+--- a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
+@@ -6,9 +_,11 @@
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.NonNullList;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.util.Mth;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.ContainerHelper;
+ import net.minecraft.world.WorldlyContainer;
+ import net.minecraft.world.entity.ContainerUser;
+@@ -30,6 +_,8 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity implements WorldlyContainer {
+@@ -63,7 +_,7 @@
+         entity.updateAnimation(level, pos, state);
+     }
+ 
+-    private void updateAnimation(Level level, BlockPos pos, BlockState blockState) {
++    private synchronized void updateAnimation(Level level, BlockPos pos, BlockState blockState) {
+         this.progressOld = this.progress;
+         switch (this.animationStatus) {
+             case CLOSED:
+@@ -100,11 +_,11 @@
+         }
+     }
+ 
+-    public ShulkerBoxBlockEntity.AnimationStatus getAnimationStatus() {
++    public synchronized ShulkerBoxBlockEntity.AnimationStatus getAnimationStatus() {
+         return this.animationStatus;
+     }
+ 
+-    public AABB getBoundingBox(BlockState state) {
++    public synchronized AABB getBoundingBox(BlockState state) {
+         Vec3 bottomCenter = new Vec3(0.5, 0.0, 0.5);
+         return Shulker.getProgressAabb(1.0F, state.getValue(ShulkerBoxBlock.FACING), 0.5F * this.getProgress(1.0F), bottomCenter);
+     }
+@@ -113,7 +_,8 @@
+         if (state.getBlock() instanceof ShulkerBoxBlock) {
+             Direction direction = state.getValue(ShulkerBoxBlock.FACING);
+             AABB aabb = Shulker.getProgressDeltaAabb(1.0F, direction, this.progressOld, this.progress, pos.getBottomCenter());
+-            List<Entity> entities = level.getEntities(null, aabb);
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, aabb);
++            List<Entity> entities = regionBox == null ? List.of() : level.getEntities(null, regionBox);
+             if (!entities.isEmpty()) {
+                 for (Entity entity : entities) {
+                     if (entity.getPistonPushReaction() != PushReaction.IGNORE) {
+@@ -132,12 +_,12 @@
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return this.itemStacks.size();
+     }
+ 
+     @Override
+-    public boolean triggerEvent(int b0, int b1) {
++    public synchronized boolean triggerEvent(int b0, int b1) {
+         if (b0 == 1) {
+             this.openCount = b1;
+             if (b1 == 0) {
+@@ -164,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void startOpen(ContainerUser containerUser) {
++    public synchronized void startOpen(ContainerUser containerUser) {
+         if (!this.remove && !containerUser.getLivingEntity().isSpectator()) {
+             if (this.openCount < 0) {
+                 this.openCount = 0;
+@@ -176,14 +_,14 @@
+                 this.level.gameEvent(containerUser.getLivingEntity(), GameEvent.CONTAINER_OPEN, this.worldPosition);
+                 this.level
+                     .playSound(
+-                        null, this.worldPosition, SoundEvents.SHULKER_BOX_OPEN, SoundSource.BLOCKS, 0.5F, this.level.getRandom().nextFloat() * 0.1F + 0.9F
++                        null, this.worldPosition, SoundEvents.SHULKER_BOX_OPEN, SoundSource.BLOCKS, 0.5F, shulkerRandom(this.level).nextFloat() * 0.1F + 0.9F
+                     );
+             }
+         }
+     }
+ 
+     @Override
+-    public void stopOpen(ContainerUser containerUser) {
++    public synchronized void stopOpen(ContainerUser containerUser) {
+         if (!this.remove && !containerUser.getLivingEntity().isSpectator()) {
+             this.openCount--;
+             this.level.blockEvent(this.worldPosition, this.getBlockState().getBlock(), 1, this.openCount);
+@@ -191,7 +_,7 @@
+                 this.level.gameEvent(containerUser.getLivingEntity(), GameEvent.CONTAINER_CLOSE, this.worldPosition);
+                 this.level
+                     .playSound(
+-                        null, this.worldPosition, SoundEvents.SHULKER_BOX_CLOSE, SoundSource.BLOCKS, 0.5F, this.level.getRandom().nextFloat() * 0.1F + 0.9F
++                        null, this.worldPosition, SoundEvents.SHULKER_BOX_CLOSE, SoundSource.BLOCKS, 0.5F, shulkerRandom(this.level).nextFloat() * 0.1F + 0.9F
+                     );
+             }
+         }
+@@ -203,20 +_,20 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.loadFromTag(input);
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         if (!this.trySaveLootTable(output)) {
+             ContainerHelper.saveAllItems(output, this.itemStacks, false);
+         }
+     }
+ 
+-    public void loadFromTag(ValueInput input) {
++    public synchronized void loadFromTag(ValueInput input) {
+         this.itemStacks = NonNullList.withSize(this.getContainerSize(), ItemStack.EMPTY);
+         if (!this.tryLoadLootTable(input)) {
+             ContainerHelper.loadAllItems(input, this.itemStacks);
+@@ -224,12 +_,12 @@
+     }
+ 
+     @Override
+-    protected NonNullList<ItemStack> getItems() {
++    protected synchronized NonNullList<ItemStack> getItems() {
+         return this.itemStacks;
+     }
+ 
+     @Override
+-    protected void setItems(NonNullList<ItemStack> items) {
++    protected synchronized void setItems(NonNullList<ItemStack> items) {
+         this.itemStacks = items;
+     }
+ 
+@@ -239,16 +_,17 @@
+     }
+ 
+     @Override
+-    public boolean canPlaceItemThroughFace(int slot, ItemStack itemStack, @Nullable Direction direction) {
+-        return !(Block.byItem(itemStack.getItem()) instanceof ShulkerBoxBlock);
++    public synchronized boolean canPlaceItemThroughFace(int slot, ItemStack itemStack, @Nullable Direction direction) {
++        // Neo: Make shulker boxes respect IItemStackExtension#canFitInsideContainerItems
++        return !(Block.byItem(itemStack.getItem()) instanceof ShulkerBoxBlock) && itemStack.canFitInsideContainerItems();
+     }
+ 
+     @Override
+-    public boolean canTakeItemThroughFace(int slot, ItemStack itemStack, Direction direction) {
++    public synchronized boolean canTakeItemThroughFace(int slot, ItemStack itemStack, Direction direction) {
+         return true;
+     }
+ 
+-    public float getProgress(float a) {
++    public synchronized float getProgress(float a) {
+         return Mth.lerp(a, this.progressOld, this.progress);
+     }
+ 
+@@ -261,8 +_,12 @@
+         return new ShulkerBoxMenu(containerId, inventory, this);
+     }
+ 
+-    public boolean isClosed() {
++    public synchronized boolean isClosed() {
+         return this.animationStatus == ShulkerBoxBlockEntity.AnimationStatus.CLOSED;
++    }
++
++    private static RandomSource shulkerRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     public static enum AnimationStatus {

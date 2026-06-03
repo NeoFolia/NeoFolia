@@ -1,0 +1,56 @@
+--- a/net/minecraft/world/attribute/EnvironmentAttributeSystem.java
++++ b/net/minecraft/world/attribute/EnvironmentAttributeSystem.java
+@@ -95,11 +_,11 @@
+         });
+     }
+ 
+-    public void invalidateTickCache() {
++    public synchronized void invalidateTickCache() {
+         this.attributeSamplers.values().forEach(EnvironmentAttributeSystem.ValueSampler::invalidateTickCache);
+     }
+ 
+-    private <Value> EnvironmentAttributeSystem.@Nullable ValueSampler<Value> getValueSampler(EnvironmentAttribute<Value> attribute) {
++    private synchronized <Value> EnvironmentAttributeSystem.@Nullable ValueSampler<Value> getValueSampler(EnvironmentAttribute<Value> attribute) {
+         return (EnvironmentAttributeSystem.ValueSampler<Value>)this.attributeSamplers.get(attribute);
+     }
+ 
+@@ -120,13 +_,13 @@
+     }
+ 
+     @VisibleForTesting
+-    <Value> Value getConstantBaseValue(EnvironmentAttribute<Value> attribute) {
++    synchronized <Value> Value getConstantBaseValue(EnvironmentAttribute<Value> attribute) {
+         EnvironmentAttributeSystem.ValueSampler<Value> sampler = this.getValueSampler(attribute);
+         return sampler != null ? sampler.baseValue : attribute.defaultValue();
+     }
+ 
+     @VisibleForTesting
+-    boolean isAffectedByPosition(EnvironmentAttribute<?> attribute) {
++    synchronized boolean isAffectedByPosition(EnvironmentAttribute<?> attribute) {
+         EnvironmentAttributeSystem.ValueSampler<?> sampler = this.getValueSampler(attribute);
+         return sampler != null && sampler.isAffectedByPosition;
+     }
+@@ -216,12 +_,12 @@
+             this.isAffectedByPosition = isAffectedByPosition;
+         }
+ 
+-        public void invalidateTickCache() {
++        public synchronized void invalidateTickCache() {
+             this.cachedTickValue = null;
+             this.cacheTickId++;
+         }
+ 
+-        public Value getDimensionValue() {
++        public synchronized Value getDimensionValue() {
+             if (this.cachedTickValue != null) {
+                 return this.cachedTickValue;
+             } else {
+@@ -231,7 +_,7 @@
+             }
+         }
+ 
+-        public Value getValue(Vec3 pos, @Nullable SpatialAttributeInterpolator biomeInterpolator) {
++        public synchronized Value getValue(Vec3 pos, @Nullable SpatialAttributeInterpolator biomeInterpolator) {
+             return !this.isAffectedByPosition ? this.getDimensionValue() : this.computeValuePositional(pos, biomeInterpolator);
+         }
+ 

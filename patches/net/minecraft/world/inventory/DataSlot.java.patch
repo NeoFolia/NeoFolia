@@ -1,0 +1,56 @@
+--- a/net/minecraft/world/inventory/DataSlot.java
++++ b/net/minecraft/world/inventory/DataSlot.java
+@@ -6,12 +_,12 @@
+     public static DataSlot forContainer(ContainerData container, int dataId) {
+         return new DataSlot() {
+             @Override
+-            public int get() {
++            public synchronized int get() {
+                 return container.get(dataId);
+             }
+ 
+             @Override
+-            public void set(int value) {
++            public synchronized void set(int value) {
+                 container.set(dataId, value);
+             }
+         };
+@@ -20,12 +_,12 @@
+     public static DataSlot shared(int[] storage, int index) {
+         return new DataSlot() {
+             @Override
+-            public int get() {
++            public synchronized int get() {
+                 return storage[index];
+             }
+ 
+             @Override
+-            public void set(int value) {
++            public synchronized void set(int value) {
+                 storage[index] = value;
+             }
+         };
+@@ -36,12 +_,12 @@
+             private int value;
+ 
+             @Override
+-            public int get() {
++            public synchronized int get() {
+                 return this.value;
+             }
+ 
+             @Override
+-            public void set(int value) {
++            public synchronized void set(int value) {
+                 this.value = value;
+             }
+         };
+@@ -51,7 +_,7 @@
+ 
+     public abstract void set(int value);
+ 
+-    public boolean checkAndClearUpdateFlag() {
++    public synchronized boolean checkAndClearUpdateFlag() {
+         int currentValue = this.get();
+         boolean result = currentValue != this.prevValue;
+         this.prevValue = currentValue;

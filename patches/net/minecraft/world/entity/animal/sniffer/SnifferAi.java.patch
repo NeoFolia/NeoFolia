@@ -1,0 +1,10 @@
+--- a/net/minecraft/world/entity/animal/sniffer/SnifferAi.java
++++ b/net/minecraft/world/entity/animal/sniffer/SnifferAi.java
+@@ -291,6 +_,7 @@
+                 Optional<BlockPos> walkTarget = sniffer.getBrain()
+                     .getMemory(MemoryModuleType.WALK_TARGET)
+                     .map(WalkTarget::getTarget)
++                    .filter(target -> target.isRegionSafeFor(sniffer))
+                     .map(PositionTracker::currentBlockPosition);
+                 Optional<BlockPos> sniffingTarget = sniffer.getBrain().getMemory(MemoryModuleType.SNIFFER_SNIFFING_TARGET);
+                 return !walkTarget.isEmpty() && !sniffingTarget.isEmpty() ? sniffingTarget.get().equals(walkTarget.get()) : false;

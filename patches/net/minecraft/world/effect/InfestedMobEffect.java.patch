@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/effect/InfestedMobEffect.java
++++ b/net/minecraft/world/effect/InfestedMobEffect.java
+@@ -42,7 +_,7 @@
+             float angle = (float) (Math.PI / 2);
+             float randomAngle = Mth.randomBetween(random, (float) (-Math.PI / 2), (float) (Math.PI / 2));
+             Vector3f viewDirection = mob.getLookAngle().toVector3f().mul(0.3F).mul(1.0F, 1.5F, 1.0F).rotateY(randomAngle);
+-            silverfish.snapTo(x, y, z, level.getRandom().nextFloat() * 360.0F, 0.0F);
++            silverfish.snapTo(x, y, z, random.nextFloat() * 360.0F, 0.0F);
+             silverfish.setDeltaMovement(new Vec3(viewDirection));
+             level.addFreshEntity(silverfish);
+             silverfish.playSound(SoundEvents.SILVERFISH_HURT);

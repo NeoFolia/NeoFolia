@@ -1,0 +1,57 @@
+--- a/net/minecraft/server/commands/KickCommand.java
++++ b/net/minecraft/server/commands/KickCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.Collection;
+@@ -23,17 +_,28 @@
+                 .requires(Commands.hasPermission(Commands.LEVEL_ADMINS))
+                 .then(
+                     Commands.argument("targets", EntityArgument.players())
+-                        .executes(
+-                            c -> kickPlayers(c.getSource(), EntityArgument.getPlayers(c, "targets"), Component.translatable("multiplayer.disconnect.kicked"))
+-                        )
++                        .executes(c -> kickPlayers(c, false))
+                         .then(
+                             Commands.argument("reason", MessageArgument.message())
+-                                .executes(c -> kickPlayers(c.getSource(), EntityArgument.getPlayers(c, "targets"), MessageArgument.getMessage(c, "reason")))
++                                .executes(c -> kickPlayers(c, true))
+                         )
+                 )
+         );
+     }
+ 
++    private static int kickPlayers(CommandContext<CommandSourceStack> context, boolean hasReason) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> kickPlayers(context, hasReason))) {
++            return 0;
++        }
++
++        return kickPlayers(
++            source,
++            EntityArgument.getPlayers(context, "targets"),
++            hasReason ? MessageArgument.getMessage(context, "reason") : Component.translatable("multiplayer.disconnect.kicked")
++        );
++    }
++
+     private static int kickPlayers(CommandSourceStack source, Collection<ServerPlayer> players, Component reason) throws CommandSyntaxException {
+         if (!source.getServer().isPublished()) {
+             throw ERROR_SINGLEPLAYER.create();
+@@ -42,8 +_,11 @@
+ 
+             for (ServerPlayer player : players) {
+                 if (!source.getServer().isSingleplayerOwner(player.nameAndId())) {
+-                    player.connection.disconnect(reason);
+-                    source.sendSuccess(() -> Component.translatable("commands.kick.success", player.getDisplayName(), reason), true);
++                    Component playerName = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                        player.connection.disconnect(reason);
++                        return player.getDisplayName();
++                    });
++                    source.sendSuccess(() -> Component.translatable("commands.kick.success", playerName, reason), true);
+                     count++;
+                 }
+             }

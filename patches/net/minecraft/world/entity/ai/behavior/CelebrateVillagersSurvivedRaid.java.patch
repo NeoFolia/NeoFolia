@@ -1,0 +1,45 @@
+--- a/net/minecraft/world/entity/ai/behavior/CelebrateVillagersSurvivedRaid.java
++++ b/net/minecraft/world/entity/ai/behavior/CelebrateVillagersSurvivedRaid.java
+@@ -26,22 +_,28 @@
+         super(ImmutableMap.of(), minDuration, maxDuration);
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+         BlockPos testPos = body.blockPosition();
+         this.currentRaid = level.getRaidAt(testPos);
+         return this.currentRaid != null && this.currentRaid.isVictory() && MoveToSkySeeingSpot.hasNoBlocksAbove(level, body, testPos);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+-        return this.currentRaid != null && !this.currentRaid.isStopped();
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++        Raid currentRaid = this.currentRaid;
++        return currentRaid != null && !currentRaid.isStopped();
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         this.currentRaid = null;
+         body.getBrain().updateActivityFromSchedule(level.environmentAttributes(), level.getGameTime(), body.position());
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
++        Raid currentRaid = this.currentRaid;
++        if (currentRaid == null || currentRaid.isStopped()) {
++            return;
++        }
++
+         RandomSource random = body.getRandom();
+         if (random.nextInt(100) == 0) {
+             body.playCelebrateSound();
+@@ -55,7 +_,7 @@
+         }
+     }
+ 
+-    private ItemStack getFirework(DyeColor color, int flightDuration) {
++    private synchronized ItemStack getFirework(DyeColor color, int flightDuration) {
+         ItemStack rocket = new ItemStack(Items.FIREWORK_ROCKET);
+         rocket.set(
+             DataComponents.FIREWORKS,

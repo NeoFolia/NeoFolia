@@ -1,0 +1,132 @@
+--- a/net/minecraft/world/entity/ai/behavior/TradeWithVillager.java
++++ b/net/minecraft/world/entity/ai/behavior/TradeWithVillager.java
+@@ -27,22 +_,34 @@
+         );
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+-        return BehaviorUtils.targetIsValid(body.getBrain(), MemoryModuleType.INTERACTION_TARGET, EntityType.VILLAGER);
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++        return BehaviorUtils.targetIsValid(body, MemoryModuleType.INTERACTION_TARGET, EntityType.VILLAGER);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return this.checkExtraStartConditions(level, body);
+     }
+ 
+-    protected void start(ServerLevel level, Villager myBody, long timestamp) {
+-        Villager target = (Villager)myBody.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
++    protected synchronized void start(ServerLevel level, Villager myBody, long timestamp) {
++        if (!(myBody.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).orElse(null) instanceof Villager target)) {
++            return;
++        }
++        if (BehaviorUtils.regionSafeEntity(myBody, target) == null) {
++            return;
++        }
++
+         BehaviorUtils.lockGazeAndWalkToEachOther(myBody, target, 0.5F, 2);
+-        this.trades = figureOutWhatIAmWillingToTrade(myBody, target);
++        this.trades = Set.copyOf(figureOutWhatIAmWillingToTrade(myBody, target));
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
+-        Villager target = (Villager)body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).get();
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
++        if (!(body.getBrain().getMemory(MemoryModuleType.INTERACTION_TARGET).orElse(null) instanceof Villager target)) {
++            return;
++        }
++        if (BehaviorUtils.regionSafeEntity(body, target) == null) {
++            return;
++        }
++
+         if (!(body.distanceToSqr(target) > 5.0)) {
+             BehaviorUtils.lockGazeAndWalkToEachOther(body, target, 0.5F, 2);
+             body.gossip(level, target, timestamp);
+@@ -55,55 +_,59 @@
+                 throwHalfStack(body, ImmutableSet.of(Items.WHEAT), target);
+             }
+ 
+-            if (!this.trades.isEmpty() && body.getInventory().hasAnyOf(this.trades)) {
+-                throwHalfStack(body, this.trades, target);
++            Set<Item> trades = Set.copyOf(this.trades);
++            if (!trades.isEmpty() && body.getInventory().hasAnyOf(trades)) {
++                throwHalfStack(body, trades, target);
+             }
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         body.getBrain().eraseMemory(MemoryModuleType.INTERACTION_TARGET);
++        this.trades = ImmutableSet.of();
+     }
+ 
+-    private static Set<Item> figureOutWhatIAmWillingToTrade(Villager myBody, Villager target) {
++    private static synchronized Set<Item> figureOutWhatIAmWillingToTrade(Villager myBody, Villager target) {
+         ImmutableSet<Item> targetItems = target.getVillagerData().profession().value().requestedItems();
+         ImmutableSet<Item> selfItems = myBody.getVillagerData().profession().value().requestedItems();
+         return targetItems.stream().filter(entry -> !selfItems.contains(entry)).collect(Collectors.toSet());
+     }
+ 
+-    private static void throwHalfStack(Villager villager, Set<Item> items, LivingEntity target) {
++    private static synchronized void throwHalfStack(Villager villager, Set<Item> items, LivingEntity target) {
+         SimpleContainer inventory = villager.getInventory();
+         ItemStack toThrow = ItemStack.EMPTY;
+         int i = 0;
+ 
+-        while (i < inventory.getContainerSize()) {
+-            ItemStack itemStack;
+-            Item item;
+-            int count;
+-            label28: {
+-                itemStack = inventory.getItem(i);
+-                if (!itemStack.isEmpty()) {
+-                    item = itemStack.getItem();
+-                    if (items.contains(item)) {
+-                        if (itemStack.getCount() > itemStack.getMaxStackSize() / 2) {
+-                            count = itemStack.getCount() / 2;
+-                            break label28;
+-                        }
++        synchronized (inventory) {
++            while (i < inventory.getContainerSize()) {
++                ItemStack itemStack;
++                Item item;
++                int count;
++                label28: {
++                    itemStack = inventory.getItem(i);
++                    if (!itemStack.isEmpty()) {
++                        item = itemStack.getItem();
++                        if (items.contains(item)) {
++                            if (itemStack.getCount() > itemStack.getMaxStackSize() / 2) {
++                                count = itemStack.getCount() / 2;
++                                break label28;
++                            }
+ 
+-                        if (itemStack.getCount() > 24) {
+-                            count = itemStack.getCount() - 24;
+-                            break label28;
++                            if (itemStack.getCount() > 24) {
++                                count = itemStack.getCount() - 24;
++                                break label28;
++                            }
+                         }
+                     }
++
++                    i++;
++                    continue;
+                 }
+ 
+-                i++;
+-                continue;
++                itemStack.shrink(count);
++                toThrow = new ItemStack(item, count);
++                break;
+             }
+-
+-            itemStack.shrink(count);
+-            toThrow = new ItemStack(item, count);
+-            break;
+         }
+ 
+         if (!toThrow.isEmpty()) {

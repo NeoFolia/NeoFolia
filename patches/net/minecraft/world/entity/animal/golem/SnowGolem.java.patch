@@ -1,0 +1,52 @@
+--- a/net/minecraft/world/entity/animal/golem/SnowGolem.java
++++ b/net/minecraft/world/entity/animal/golem/SnowGolem.java
+@@ -40,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.level.storage.loot.BuiltInLootTables;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class SnowGolem extends AbstractGolem implements RangedAttackMob, Shearable {
+@@ -95,7 +_,7 @@
+                 this.hurtServer(serverLevel, this.damageSources().onFire(), 1.0F);
+             }
+ 
+-            if (!serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
++            if (!net.neoforged.neoforge.event.EventHooks.canEntityGrief(serverLevel, this)) {
+                 return;
+             }
+ 
+@@ -106,12 +_,20 @@
+                 int yy = Mth.floor(this.getY());
+                 int zz = Mth.floor(this.getZ() + (i / 2 % 2 * 2 - 1) * 0.25F);
+                 BlockPos snowPos = new BlockPos(xx, yy, zz);
+-                if (this.level().getBlockState(snowPos).isAir() && snow.canSurvive(this.level(), snowPos)) {
+-                    this.level().setBlockAndUpdate(snowPos, snow);
+-                    this.level().gameEvent(GameEvent.BLOCK_PLACE, snowPos, GameEvent.Context.of(this, snow));
++                if (!canReadBlock(serverLevel, snowPos)) {
++                    continue;
++                }
++
++                if (serverLevel.getBlockState(snowPos).isAir() && snow.canSurvive(serverLevel, snowPos)) {
++                    serverLevel.setBlockAndUpdate(snowPos, snow);
++                    serverLevel.gameEvent(GameEvent.BLOCK_PLACE, snowPos, GameEvent.Context.of(this, snow));
+                 }
+             }
+         }
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override
+@@ -136,7 +_,7 @@
+     @Override
+     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+         ItemStack itemStack = player.getItemInHand(hand);
+-        if (itemStack.is(Items.SHEARS) && this.readyForShearing()) {
++        if (false && itemStack.is(Items.SHEARS) && this.readyForShearing()) { // Neo: Shear logic is handled by IShearable
+             if (this.level() instanceof ServerLevel level) {
+                 this.shear(level, SoundSource.PLAYERS, itemStack);
+                 this.gameEvent(GameEvent.SHEAR, player);

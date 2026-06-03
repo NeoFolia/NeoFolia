@@ -1,0 +1,79 @@
+--- a/net/minecraft/server/commands/WhitelistCommand.java
++++ b/net/minecraft/server/commands/WhitelistCommand.java
+@@ -44,7 +_,7 @@
+                                     (c, p) -> {
+                                         PlayerList list = c.getSource().getServer().getPlayerList();
+                                         return SharedSuggestionProvider.suggest(
+-                                            list.getPlayers()
++                                            list.getPlayersAcrossRegions()
+                                                 .stream()
+                                                 .map(Player::nameAndId)
+                                                 .filter(nameAndId -> !list.getWhiteList().isWhiteListed(nameAndId))
+@@ -68,7 +_,11 @@
+         );
+     }
+ 
+-    private static int reload(CommandSourceStack source) {
++    private static int reload(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> reload(source))) {
++            return 1;
++        }
++
+         source.getServer().getPlayerList().reloadWhiteList();
+         source.sendSuccess(() -> Component.translatable("commands.whitelist.reloaded"), true);
+         source.getServer().kickUnlistedPlayers();
+@@ -76,6 +_,10 @@
+     }
+ 
+     private static int addPlayers(CommandSourceStack source, Collection<NameAndId> targets) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> addPlayers(source, targets))) {
++            return targets.size();
++        }
++
+         UserWhiteList list = source.getServer().getPlayerList().getWhiteList();
+         int success = 0;
+ 
+@@ -96,6 +_,10 @@
+     }
+ 
+     private static int removePlayers(CommandSourceStack source, Collection<NameAndId> targets) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> removePlayers(source, targets))) {
++            return targets.size();
++        }
++
+         UserWhiteList list = source.getServer().getPlayerList().getWhiteList();
+         int success = 0;
+ 
+@@ -117,6 +_,10 @@
+     }
+ 
+     private static int enableWhitelist(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> enableWhitelist(source))) {
++            return 1;
++        }
++
+         if (source.getServer().isUsingWhitelist()) {
+             throw ERROR_ALREADY_ENABLED.create();
+         } else {
+@@ -128,6 +_,10 @@
+     }
+ 
+     private static int disableWhitelist(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> disableWhitelist(source))) {
++            return 1;
++        }
++
+         if (!source.getServer().isUsingWhitelist()) {
+             throw ERROR_ALREADY_DISABLED.create();
+         } else {
+@@ -138,6 +_,10 @@
+     }
+ 
+     private static int showList(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> showList(source))) {
++            return 0;
++        }
++
+         String[] list = source.getServer().getPlayerList().getWhiteListNames();
+         if (list.length == 0) {
+             source.sendSuccess(() -> Component.translatable("commands.whitelist.none"), false);

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/LocateHidingPlace.java
++++ b/net/minecraft/world/entity/ai/behavior/LocateHidingPlace.java
+@@ -9,7 +_,7 @@
+ import net.minecraft.world.entity.ai.village.poi.PoiTypes;
+ 
+ public class LocateHidingPlace {
+-    public static OneShot<LivingEntity> create(int radius, float speedModifier, int closeEnoughDist) {
++    public static synchronized OneShot<LivingEntity> create(int radius, float speedModifier, int closeEnoughDist) {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.absent(MemoryModuleType.WALK_TARGET),

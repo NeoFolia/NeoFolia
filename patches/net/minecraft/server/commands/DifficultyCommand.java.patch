@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/DifficultyCommand.java
++++ b/net/minecraft/server/commands/DifficultyCommand.java
+@@ -30,6 +_,10 @@
+     }
+ 
+     public static int setDifficulty(CommandSourceStack source, Difficulty difficulty) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setDifficulty(source, difficulty))) {
++            return 0;
++        }
++
+         MinecraftServer server = source.getServer();
+         if (server.getWorldData().getDifficulty() == difficulty) {
+             throw ERROR_ALREADY_SAME_DIFFICULTY.create(difficulty.getSerializedName());

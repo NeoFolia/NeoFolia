@@ -1,0 +1,47 @@
+--- a/net/minecraft/server/commands/BanListCommands.java
++++ b/net/minecraft/server/commands/BanListCommands.java
+@@ -16,15 +_,42 @@
+             Commands.literal("banlist")
+                 .requires(Commands.hasPermission(Commands.LEVEL_ADMINS))
+                 .executes(s -> {
++                    if (RegionizedCommandHelper.scheduleGlobalIfRegionized(s.getSource(), () -> {
++                        PlayerList players = s.getSource().getServer().getPlayerList();
++                        showList(s.getSource(), Lists.newArrayList(Iterables.concat(players.getBans().getEntries(), players.getIpBans().getEntries())));
++                    })) {
++                        return 0;
++                    }
++
+                     PlayerList players = s.getSource().getServer().getPlayerList();
+                     return showList(s.getSource(), Lists.newArrayList(Iterables.concat(players.getBans().getEntries(), players.getIpBans().getEntries())));
+                 })
+-                .then(Commands.literal("ips").executes(s -> showList(s.getSource(), s.getSource().getServer().getPlayerList().getIpBans().getEntries())))
+-                .then(Commands.literal("players").executes(s -> showList(s.getSource(), s.getSource().getServer().getPlayerList().getBans().getEntries())))
++                .then(Commands.literal("ips").executes(s -> showIpBans(s.getSource())))
++                .then(Commands.literal("players").executes(s -> showPlayerBans(s.getSource())))
+         );
+     }
+ 
++    private static int showIpBans(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> showIpBans(source))) {
++            return 0;
++        }
++
++        return showList(source, source.getServer().getPlayerList().getIpBans().getEntries());
++    }
++
++    private static int showPlayerBans(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> showPlayerBans(source))) {
++            return 0;
++        }
++
++        return showList(source, source.getServer().getPlayerList().getBans().getEntries());
++    }
++
+     private static int showList(CommandSourceStack source, Collection<? extends BanListEntry<?>> list) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> showList(source, list))) {
++            return 0;
++        }
++
+         if (list.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.banlist.none"), false);
+         } else {

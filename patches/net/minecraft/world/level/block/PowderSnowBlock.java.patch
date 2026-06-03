@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/level/block/PowderSnowBlock.java
++++ b/net/minecraft/world/level/block/PowderSnowBlock.java
+@@ -63,7 +_,7 @@
+         if (!(entity instanceof LivingEntity) || entity.getInBlockState().is(this)) {
+             entity.makeStuckInBlock(state, new Vec3(0.9F, 1.5, 0.9F));
+             if (level.isClientSide()) {
+-                RandomSource random = level.getRandom();
++                RandomSource random = entity.getRandom();
+                 boolean isMoving = entity.xOld != entity.getX() || entity.zOld != entity.getZ();
+                 if (isMoving && random.nextBoolean()) {
+                     level.addParticle(
+@@ -138,7 +_,7 @@
+         if (entity.is(EntityTypeTags.POWDER_SNOW_WALKABLE_MOBS)) {
+             return true;
+         } else {
+-            return entity instanceof LivingEntity ? ((LivingEntity)entity).getItemBySlot(EquipmentSlot.FEET).is(Items.LEATHER_BOOTS) : false;
++            return entity instanceof LivingEntity ? ((LivingEntity)entity).getItemBySlot(EquipmentSlot.FEET).canWalkOnPowderedSnow((LivingEntity)entity) : false;
+         }
+     }
+ 

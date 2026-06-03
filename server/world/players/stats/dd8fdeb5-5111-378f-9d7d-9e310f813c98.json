@@ -1,0 +1,28 @@
+{
+  "stats": {
+    "minecraft:used": {
+      "minecraft:flint_and_steel": 5,
+      "minecraft:tnt": 4
+    },
+    "minecraft:picked_up": {
+      "minecraft:orange_terracotta": 19,
+      "minecraft:stick": 5,
+      "minecraft:red_sand": 41
+    },
+    "minecraft:custom": {
+      "minecraft:sprint_one_cm": 3071,
+      "minecraft:time_since_rest": 3734,
+      "minecraft:fall_one_cm": 950,
+      "minecraft:walk_one_cm": 996,
+      "minecraft:total_world_time": 1867,
+      "minecraft:leave_game": 1,
+      "minecraft:fly_one_cm": 24084,
+      "minecraft:damage_taken": 30,
+      "minecraft:sneak_time": 21,
+      "minecraft:play_time": 1867,
+      "minecraft:jump": 45,
+      "minecraft:time_since_death": 1867
+    }
+  },
+  "DataVersion": 4790
+}

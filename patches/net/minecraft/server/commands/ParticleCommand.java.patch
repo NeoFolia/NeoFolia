@@ -1,0 +1,161 @@
+--- a/net/minecraft/server/commands/ParticleCommand.java
++++ b/net/minecraft/server/commands/ParticleCommand.java
+@@ -3,6 +_,7 @@
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.FloatArgumentType;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import java.util.Collection;
+@@ -28,30 +_,12 @@
+                 .then(
+                     Commands.argument("name", ParticleArgument.particle(context))
+                         .executes(
+-                            c -> sendParticles(
+-                                c.getSource(),
+-                                ParticleArgument.getParticle(c, "name"),
+-                                c.getSource().getPosition(),
+-                                Vec3.ZERO,
+-                                0.0F,
+-                                0,
+-                                false,
+-                                c.getSource().getServer().getPlayerList().getPlayers()
+-                            )
++                            c -> sendParticles(c, false, false, false, false)
+                         )
+                         .then(
+                             Commands.argument("pos", Vec3Argument.vec3())
+                                 .executes(
+-                                    c -> sendParticles(
+-                                        c.getSource(),
+-                                        ParticleArgument.getParticle(c, "name"),
+-                                        Vec3Argument.getVec3(c, "pos"),
+-                                        Vec3.ZERO,
+-                                        0.0F,
+-                                        0,
+-                                        false,
+-                                        c.getSource().getServer().getPlayerList().getPlayers()
+-                                    )
++                                    c -> sendParticles(c, true, false, false, false)
+                                 )
+                                 .then(
+                                     Commands.argument("delta", Vec3Argument.vec3(false))
+@@ -60,74 +_,29 @@
+                                                 .then(
+                                                     Commands.argument("count", IntegerArgumentType.integer(0))
+                                                         .executes(
+-                                                            c -> sendParticles(
+-                                                                c.getSource(),
+-                                                                ParticleArgument.getParticle(c, "name"),
+-                                                                Vec3Argument.getVec3(c, "pos"),
+-                                                                Vec3Argument.getVec3(c, "delta"),
+-                                                                FloatArgumentType.getFloat(c, "speed"),
+-                                                                IntegerArgumentType.getInteger(c, "count"),
+-                                                                false,
+-                                                                c.getSource().getServer().getPlayerList().getPlayers()
+-                                                            )
++                                                            c -> sendParticles(c, true, true, false, false)
+                                                         )
+                                                         .then(
+                                                             Commands.literal("force")
+                                                                 .executes(
+-                                                                    c -> sendParticles(
+-                                                                        c.getSource(),
+-                                                                        ParticleArgument.getParticle(c, "name"),
+-                                                                        Vec3Argument.getVec3(c, "pos"),
+-                                                                        Vec3Argument.getVec3(c, "delta"),
+-                                                                        FloatArgumentType.getFloat(c, "speed"),
+-                                                                        IntegerArgumentType.getInteger(c, "count"),
+-                                                                        true,
+-                                                                        c.getSource().getServer().getPlayerList().getPlayers()
+-                                                                    )
++                                                                    c -> sendParticles(c, true, true, true, false)
+                                                                 )
+                                                                 .then(
+                                                                     Commands.argument("viewers", EntityArgument.players())
+                                                                         .executes(
+-                                                                            c -> sendParticles(
+-                                                                                c.getSource(),
+-                                                                                ParticleArgument.getParticle(c, "name"),
+-                                                                                Vec3Argument.getVec3(c, "pos"),
+-                                                                                Vec3Argument.getVec3(c, "delta"),
+-                                                                                FloatArgumentType.getFloat(c, "speed"),
+-                                                                                IntegerArgumentType.getInteger(c, "count"),
+-                                                                                true,
+-                                                                                EntityArgument.getPlayers(c, "viewers")
+-                                                                            )
++                                                                            c -> sendParticles(c, true, true, true, true)
+                                                                         )
+                                                                 )
+                                                         )
+                                                         .then(
+                                                             Commands.literal("normal")
+                                                                 .executes(
+-                                                                    c -> sendParticles(
+-                                                                        c.getSource(),
+-                                                                        ParticleArgument.getParticle(c, "name"),
+-                                                                        Vec3Argument.getVec3(c, "pos"),
+-                                                                        Vec3Argument.getVec3(c, "delta"),
+-                                                                        FloatArgumentType.getFloat(c, "speed"),
+-                                                                        IntegerArgumentType.getInteger(c, "count"),
+-                                                                        false,
+-                                                                        c.getSource().getServer().getPlayerList().getPlayers()
+-                                                                    )
++                                                                    c -> sendParticles(c, true, true, false, false)
+                                                                 )
+                                                                 .then(
+                                                                     Commands.argument("viewers", EntityArgument.players())
+                                                                         .executes(
+-                                                                            c -> sendParticles(
+-                                                                                c.getSource(),
+-                                                                                ParticleArgument.getParticle(c, "name"),
+-                                                                                Vec3Argument.getVec3(c, "pos"),
+-                                                                                Vec3Argument.getVec3(c, "delta"),
+-                                                                                FloatArgumentType.getFloat(c, "speed"),
+-                                                                                IntegerArgumentType.getInteger(c, "count"),
+-                                                                                false,
+-                                                                                EntityArgument.getPlayers(c, "viewers")
+-                                                                            )
++                                                                            c -> sendParticles(c, true, true, false, true)
+                                                                         )
+                                                                 )
+                                                         )
+@@ -139,13 +_,36 @@
+         );
+     }
+ 
++    private static int sendParticles(CommandContext<CommandSourceStack> context, boolean hasPosition, boolean hasSpread, boolean force, boolean hasViewers)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> sendParticles(context, hasPosition, hasSpread, force, hasViewers))) {
++            return 0;
++        }
++
++        return sendParticles(
++            source,
++            ParticleArgument.getParticle(context, "name"),
++            hasPosition ? Vec3Argument.getVec3(context, "pos") : source.getPosition(),
++            hasSpread ? Vec3Argument.getVec3(context, "delta") : Vec3.ZERO,
++            hasSpread ? FloatArgumentType.getFloat(context, "speed") : 0.0F,
++            hasSpread ? IntegerArgumentType.getInteger(context, "count") : 0,
++            force,
++            hasViewers ? EntityArgument.getPlayers(context, "viewers") : source.getServer().getPlayerList().getPlayersAcrossRegions()
++        );
++    }
++
+     private static int sendParticles(
+         CommandSourceStack source, ParticleOptions particle, Vec3 pos, Vec3 delta, float speed, int count, boolean force, Collection<ServerPlayer> players
+     ) throws CommandSyntaxException {
+         int result = 0;
+ 
+         for (ServerPlayer player : players) {
+-            if (source.getLevel().sendParticles(player, particle, force, false, pos.x, pos.y, pos.z, count, delta.x, delta.y, delta.z, speed)) {
++            if (RegionizedCommandHelper.callOnPlayerRegion(
++                source,
++                player,
++                () -> source.getLevel().sendParticles(player, particle, force, false, pos.x, pos.y, pos.z, count, delta.x, delta.y, delta.z, speed)
++            )) {
+                 result++;
+             }
+         }

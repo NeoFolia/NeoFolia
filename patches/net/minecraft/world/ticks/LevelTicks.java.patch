@@ -1,0 +1,194 @@
+--- a/net/minecraft/world/ticks/LevelTicks.java
++++ b/net/minecraft/world/ticks/LevelTicks.java
+@@ -16,7 +_,9 @@
+ import java.util.PriorityQueue;
+ import java.util.Queue;
+ import java.util.Set;
++import java.util.concurrent.ConcurrentLinkedQueue;
+ import java.util.function.BiConsumer;
++import java.util.function.Consumer;
+ import java.util.function.LongPredicate;
+ import java.util.function.Predicate;
+ import net.minecraft.core.BlockPos;
+@@ -27,6 +_,7 @@
+ import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.levelgen.structure.BoundingBox;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class LevelTicks<T> implements LevelTickAccess<T> {
+     private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (o1, o2) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER.compare(o1.peek(), o2.peek());
+@@ -37,6 +_,7 @@
+     private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
+     private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
+     private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
++    private final Queue<ScheduledTick<T>> pendingOffThreadSchedules = new ConcurrentLinkedQueue<>();
+     private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (container, newTick) -> {
+         if (newTick.equals(container.peek())) {
+             this.updateContainerScheduling(newTick);
+@@ -47,7 +_,7 @@
+         this.tickCheck = tickCheck;
+     }
+ 
+-    public void addContainer(ChunkPos pos, LevelChunkTicks<T> container) {
++    public synchronized void addContainer(ChunkPos pos, LevelChunkTicks<T> container) {
+         long posKey = pos.pack();
+         this.allContainers.put(posKey, container);
+         ScheduledTick<T> nextTick = container.peek();
+@@ -58,7 +_,7 @@
+         container.setOnTickAdded(this.chunkScheduleUpdater);
+     }
+ 
+-    public void removeContainer(ChunkPos pos) {
++    public synchronized void removeContainer(ChunkPos pos) {
+         long chunkKey = pos.pack();
+         LevelChunkTicks<T> removedContainer = this.allContainers.remove(chunkKey);
+         this.nextTickForContainer.remove(chunkKey);
+@@ -69,6 +_,17 @@
+ 
+     @Override
+     public void schedule(ScheduledTick<T> tick) {
++        if (RegionizedTickContext.isRegionThread()) {
++            this.pendingOffThreadSchedules.add(tick);
++            return;
++        }
++
++        synchronized (this) {
++            this.scheduleOnOwnerThread(tick);
++        }
++    }
++
++    private void scheduleOnOwnerThread(ScheduledTick<T> tick) {
+         long chunkKey = ChunkPos.pack(tick.pos());
+         LevelChunkTicks<T> tickContainer = this.allContainers.get(chunkKey);
+         if (tickContainer == null) {
+@@ -78,9 +_,11 @@
+         }
+     }
+ 
+-    public void tick(long currentTick, int maxTicksToProcess, BiConsumer<BlockPos, T> output) {
++    public synchronized void tick(long currentTick, int maxTicksToProcess, BiConsumer<BlockPos, T> output) {
+         ProfilerFiller profiler = Profiler.get();
+-        profiler.push("collect");
++        profiler.push("drainRegionSchedules");
++        this.drainOffThreadSchedules();
++        profiler.popPush("collect");
+         this.collectTicks(currentTick, maxTicksToProcess, profiler);
+         profiler.popPush("run");
+         profiler.incrementCounter("ticksToRun", this.toRunThisTick.size());
+@@ -90,6 +_,32 @@
+         profiler.pop();
+     }
+ 
++    public void tickRegionized(long currentTick, int maxTicksToProcess, Consumer<List<ScheduledTick<T>>> output) {
++        ProfilerFiller profiler = Profiler.get();
++        profiler.push("drainRegionSchedules");
++        List<ScheduledTick<T>> ticksToRun;
++        synchronized (this) {
++            this.drainOffThreadSchedules();
++            profiler.popPush("collect");
++            this.collectTicks(currentTick, maxTicksToProcess, profiler);
++            ticksToRun = List.copyOf(this.toRunThisTick);
++            this.toRunThisTickSet.addAll(ticksToRun);
++            this.alreadyRunThisTick.addAll(ticksToRun);
++        }
++
++        profiler.popPush("run");
++        profiler.incrementCounter("ticksToRun", ticksToRun.size());
++        try {
++            output.accept(ticksToRun);
++        } finally {
++            profiler.popPush("cleanup");
++            synchronized (this) {
++                this.cleanupAfterTick();
++            }
++            profiler.pop();
++        }
++    }
++
+     private void collectTicks(long currentTick, int maxTicksToProcess, ProfilerFiller profiler) {
+         this.sortContainersToTick(currentTick);
+         profiler.incrementCounter("containersToTick", this.containersToTick.size());
+@@ -97,6 +_,13 @@
+         this.rescheduleLeftoverContainers();
+     }
+ 
++    private void drainOffThreadSchedules() {
++        ScheduledTick<T> tick;
++        while ((tick = this.pendingOffThreadSchedules.poll()) != null) {
++            this.scheduleOnOwnerThread(tick);
++        }
++    }
++
+     private void sortContainersToTick(long currentTick) {
+         ObjectIterator<Entry> it = Long2LongMaps.fastIterator(this.nextTickForContainer);
+ 
+@@ -199,13 +_,17 @@
+     }
+ 
+     @Override
+-    public boolean hasScheduledTick(BlockPos pos, T block) {
++    public synchronized boolean hasScheduledTick(BlockPos pos, T block) {
+         LevelChunkTicks<T> tickContainer = this.allContainers.get(ChunkPos.pack(pos));
+-        return tickContainer != null && tickContainer.hasScheduledTick(pos, block);
++        if (tickContainer != null && tickContainer.hasScheduledTick(pos, block)) {
++            return true;
++        }
++
++        return this.pendingOffThreadSchedules.stream().anyMatch(tick -> tick.type() == block && tick.pos().equals(pos));
+     }
+ 
+     @Override
+-    public boolean willTickThisTick(BlockPos pos, T type) {
++    public synchronized boolean willTickThisTick(BlockPos pos, T type) {
+         this.calculateTickSetIfNeeded();
+         return this.toRunThisTickSet.contains(ScheduledTick.probe(type, pos));
+     }
+@@ -233,7 +_,7 @@
+         }
+     }
+ 
+-    public void clearArea(BoundingBox area) {
++    public synchronized void clearArea(BoundingBox area) {
+         Predicate<ScheduledTick<T>> tickInsideBB = t -> area.isInside(t.pos());
+         this.forContainersInArea(area, (pos, container) -> {
+             ScheduledTick<T> previousTop = container.peek();
+@@ -249,18 +_,22 @@
+         });
+         this.alreadyRunThisTick.removeIf(tickInsideBB);
+         this.toRunThisTick.removeIf(tickInsideBB);
++        this.pendingOffThreadSchedules.removeIf(tickInsideBB);
+     }
+ 
+-    public void copyArea(BoundingBox area, Vec3i offset) {
++    public synchronized void copyArea(BoundingBox area, Vec3i offset) {
+         this.copyAreaFrom(this, area, offset);
+     }
+ 
+-    public void copyAreaFrom(LevelTicks<T> source, BoundingBox area, Vec3i offset) {
++    public synchronized void copyAreaFrom(LevelTicks<T> source, BoundingBox area, Vec3i offset) {
+         List<ScheduledTick<T>> ticksToAdd = new ArrayList<>();
+         Predicate<ScheduledTick<T>> tickInsideBB = t -> area.isInside(t.pos());
+-        source.alreadyRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
+-        source.toRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
+-        source.forContainersInArea(area, (pos, container) -> container.getAll().filter(tickInsideBB).forEach(ticksToAdd::add));
++        synchronized (source) {
++            source.alreadyRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++            source.toRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++            source.pendingOffThreadSchedules.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++            source.forContainersInArea(area, (pos, container) -> container.getAll().filter(tickInsideBB).forEach(ticksToAdd::add));
++        }
+         LongSummaryStatistics info = ticksToAdd.stream().mapToLong(ScheduledTick::subTickOrder).summaryStatistics();
+         long minSubTick = info.getMin();
+         long maxSubTick = info.getMax();
+@@ -274,8 +_,8 @@
+     }
+ 
+     @Override
+-    public int count() {
+-        return this.allContainers.values().stream().mapToInt(TickAccess::count).sum();
++    public synchronized int count() {
++        return this.allContainers.values().stream().mapToInt(TickAccess::count).sum() + this.pendingOffThreadSchedules.size();
+     }
+ 
+     @FunctionalInterface

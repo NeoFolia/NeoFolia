@@ -1,0 +1,17 @@
+--- a/net/minecraft/world/entity/ai/goal/target/NearestAttackableWitchTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/NearestAttackableWitchTargetGoal.java
+@@ -14,12 +_,12 @@
+         super(raider, targetType, randomInterval, mustSee, mustReach, subselector);
+     }
+ 
+-    public void setCanAttack(boolean canAttack) {
++    public synchronized void setCanAttack(boolean canAttack) {
+         this.canAttack = canAttack;
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.canAttack && super.canUse();
+     }
+ }

@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/gui/PlayerListComponent.java
++++ b/net/minecraft/server/gui/PlayerListComponent.java
+@@ -17,8 +_,8 @@
+         if (this.tickCount++ % 20 == 0) {
+             Vector<String> players = new Vector<>();
+ 
+-            for (int i = 0; i < this.server.getPlayerList().getPlayers().size(); i++) {
+-                players.add(this.server.getPlayerList().getPlayers().get(i).getGameProfile().name());
++            for (var player : this.server.getPlayerList().getAllPlayers()) {
++                players.add(player.getGameProfile().name());
+             }
+ 
+             this.setListData(players);

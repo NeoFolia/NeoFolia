@@ -1,0 +1,71 @@
+--- a/net/minecraft/util/debug/ServerDebugSubscribers.java
++++ b/net/minecraft/util/debug/ServerDebugSubscribers.java
+@@ -10,6 +_,8 @@
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.players.NameAndId;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ServerDebugSubscribers {
+     private final MinecraftServer server;
+@@ -19,14 +_,18 @@
+         this.server = server;
+     }
+ 
+-    private List<ServerPlayer> getSubscribersFor(DebugSubscription<?> subscription) {
+-        return this.enabledSubscriptions.getOrDefault(subscription, List.of());
++    private synchronized List<ServerPlayer> getSubscribersFor(DebugSubscription<?> subscription) {
++        return List.copyOf(this.enabledSubscriptions.getOrDefault(subscription, List.of()));
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
++        if (this.scheduleGlobalIfRegionized(this::tick)) {
++            return;
++        }
++
+         this.enabledSubscriptions.values().forEach(List::clear);
+ 
+-        for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
++        for (ServerPlayer player : this.server.getPlayerList().getAllPlayers()) {
+             for (DebugSubscription<?> subscription : player.debugSubscriptions()) {
+                 this.enabledSubscriptions.computeIfAbsent(subscription, s -> new ArrayList<>()).add(player);
+             }
+@@ -36,12 +_,16 @@
+     }
+ 
+     public void broadcastToAll(DebugSubscription<?> subscription, Packet<?> packet) {
++        if (this.scheduleGlobalIfRegionized(() -> this.broadcastToAll(subscription, packet))) {
++            return;
++        }
++
+         for (ServerPlayer player : this.getSubscribersFor(subscription)) {
+-            player.connection.send(packet);
++            RegionizedWorldGuard.sendToPlayer(player, packet);
+         }
+     }
+ 
+-    public Set<DebugSubscription<?>> enabledSubscriptions() {
++    public synchronized Set<DebugSubscription<?>> enabledSubscriptions() {
+         return Set.copyOf(this.enabledSubscriptions.keySet());
+     }
+ 
+@@ -52,5 +_,17 @@
+     public boolean hasRequiredPermissions(ServerPlayer player) {
+         NameAndId nameAndId = player.nameAndId();
+         return SharedConstants.IS_RUNNING_IN_IDE && this.server.isSingleplayerOwner(nameAndId) ? true : this.server.getPlayerList().isOp(nameAndId);
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate server debug subscriber state from region worker while region dispatcher is not running");
+     }
+ }

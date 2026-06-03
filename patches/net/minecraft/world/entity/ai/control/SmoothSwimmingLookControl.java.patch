@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/control/SmoothSwimmingLookControl.java
++++ b/net/minecraft/world/entity/ai/control/SmoothSwimmingLookControl.java
+@@ -14,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.lookAtCooldown > 0) {
+             this.lookAtCooldown--;
+             this.getYRotD().ifPresent(yRotD -> this.mob.yHeadRot = this.rotateTowards(this.mob.yHeadRot, yRotD + 20.0F, this.yMaxRotSpeed));

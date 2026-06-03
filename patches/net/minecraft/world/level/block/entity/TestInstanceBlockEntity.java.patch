@@ -1,0 +1,31 @@
+--- a/net/minecraft/world/level/block/entity/TestInstanceBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/TestInstanceBlockEntity.java
+@@ -36,6 +_,7 @@
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.ARGB;
+ import net.minecraft.util.ByIdMap;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.player.Player;
+@@ -50,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.slf4j.Logger;
+ 
+ public class TestInstanceBlockEntity extends BlockEntity implements BoundingBoxRenderable, BeaconBeamOwner {
+@@ -333,7 +_,11 @@
+         int padding = this.getPadding();
+         StructureUtils.clearSpaceForStructure(this.getTestBoundingBox(), level);
+         this.removeEntities();
+-        template.placeInWorld(level, pos, pos, placeSettings, level.getRandom(), 818);
++        template.placeInWorld(level, pos, pos, placeSettings, testInstanceRandom(level), 818);
++    }
++
++    private static RandomSource testInstanceRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
+     }
+ 
+     private int getPadding() {

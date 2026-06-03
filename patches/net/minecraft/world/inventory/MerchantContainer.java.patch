@@ -1,0 +1,99 @@
+--- a/net/minecraft/world/inventory/MerchantContainer.java
++++ b/net/minecraft/world/inventory/MerchantContainer.java
+@@ -22,12 +_,12 @@
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return this.itemStacks.size();
+     }
+ 
+     @Override
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         for (ItemStack itemStack : this.itemStacks) {
+             if (!itemStack.isEmpty()) {
+                 return false;
+@@ -38,12 +_,12 @@
+     }
+ 
+     @Override
+-    public ItemStack getItem(int slot) {
++    public synchronized ItemStack getItem(int slot) {
+         return this.itemStacks.get(slot);
+     }
+ 
+     @Override
+-    public ItemStack removeItem(int slot, int count) {
++    public synchronized ItemStack removeItem(int slot, int count) {
+         ItemStack itemStack = this.itemStacks.get(slot);
+         if (slot == 2 && !itemStack.isEmpty()) {
+             return ContainerHelper.removeItem(this.itemStacks, slot, itemStack.getCount());
+@@ -57,17 +_,17 @@
+         }
+     }
+ 
+-    private boolean isPaymentSlot(int slot) {
++    private synchronized boolean isPaymentSlot(int slot) {
+         return slot == 0 || slot == 1;
+     }
+ 
+     @Override
+-    public ItemStack removeItemNoUpdate(int slot) {
++    public synchronized ItemStack removeItemNoUpdate(int slot) {
+         return ContainerHelper.takeItem(this.itemStacks, slot);
+     }
+ 
+     @Override
+-    public void setItem(int slot, ItemStack itemStack) {
++    public synchronized void setItem(int slot, ItemStack itemStack) {
+         this.itemStacks.set(slot, itemStack);
+         itemStack.limitSize(this.getMaxStackSize(itemStack));
+         if (this.isPaymentSlot(slot)) {
+@@ -76,16 +_,16 @@
+     }
+ 
+     @Override
+-    public boolean stillValid(Player player) {
++    public synchronized boolean stillValid(Player player) {
+         return this.merchant.getTradingPlayer() == player;
+     }
+ 
+     @Override
+-    public void setChanged() {
++    public synchronized void setChanged() {
+         this.updateSellItem();
+     }
+ 
+-    public void updateSellItem() {
++    public synchronized void updateSellItem() {
+         this.activeOffer = null;
+         ItemStack buyA;
+         ItemStack buyB;
+@@ -123,21 +_,21 @@
+         }
+     }
+ 
+-    public @Nullable MerchantOffer getActiveOffer() {
++    public synchronized @Nullable MerchantOffer getActiveOffer() {
+         return this.activeOffer;
+     }
+ 
+-    public void setSelectionHint(int selectionHint) {
++    public synchronized void setSelectionHint(int selectionHint) {
+         this.selectionHint = selectionHint;
+         this.updateSellItem();
+     }
+ 
+     @Override
+-    public void clearContent() {
++    public synchronized void clearContent() {
+         this.itemStacks.clear();
+     }
+ 
+-    public int getFutureXp() {
++    public synchronized int getFutureXp() {
+         return this.futureXp;
+     }
+ }

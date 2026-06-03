@@ -1,0 +1,78 @@
+--- a/net/minecraft/recipebook/ServerPlaceRecipe.java
++++ b/net/minecraft/recipebook/ServerPlaceRecipe.java
+@@ -25,7 +_,7 @@
+     private final List<Slot> inputGridSlots;
+     private final List<Slot> slotsToClear;
+ 
+-    public static <I extends RecipeInput, R extends Recipe<I>> RecipeBookMenu.PostPlaceAction placeRecipe(
++    public static synchronized <I extends RecipeInput, R extends Recipe<I>> RecipeBookMenu.PostPlaceAction placeRecipe(
+         ServerPlaceRecipe.CraftingMenuAccess<R> menu,
+         int gridWidth,
+         int gridHeight,
+@@ -65,7 +_,7 @@
+         this.slotsToClear = slotsToClear;
+     }
+ 
+-    private RecipeBookMenu.PostPlaceAction tryPlaceRecipe(RecipeHolder<R> recipe, StackedItemContents availableItems) {
++    private synchronized RecipeBookMenu.PostPlaceAction tryPlaceRecipe(RecipeHolder<R> recipe, StackedItemContents availableItems) {
+         if (availableItems.canCraft(recipe.value(), null)) {
+             this.placeRecipe(recipe, availableItems);
+             this.inventory.setChanged();
+@@ -77,7 +_,7 @@
+         }
+     }
+ 
+-    private void clearGrid() {
++    private synchronized void clearGrid() {
+         for (Slot slot : this.slotsToClear) {
+             ItemStack itemStackCopy = slot.getItem().copy();
+             this.inventory.placeItemBackInInventory(itemStackCopy, false);
+@@ -87,7 +_,7 @@
+         this.menu.clearCraftingContent();
+     }
+ 
+-    private void placeRecipe(RecipeHolder<R> recipe, StackedItemContents availableItems) {
++    private synchronized void placeRecipe(RecipeHolder<R> recipe, StackedItemContents availableItems) {
+         boolean recipeMatchesPlaced = this.menu.recipeMatches(recipe);
+         int biggestCraftableStack = availableItems.getBiggestCraftableStack(recipe.value(), null);
+         if (recipeMatchesPlaced) {
+@@ -142,7 +_,7 @@
+         return value;
+     }
+ 
+-    private int calculateAmountToCraft(int biggestCraftableStack, boolean recipeMatchesPlaced) {
++    private synchronized int calculateAmountToCraft(int biggestCraftableStack, boolean recipeMatchesPlaced) {
+         if (this.useMaxItems) {
+             return biggestCraftableStack;
+         } else if (recipeMatchesPlaced) {
+@@ -165,7 +_,7 @@
+         }
+     }
+ 
+-    private int moveItemToGrid(Slot targetSlot, Holder<Item> itemInInventory, int count) {
++    private synchronized int moveItemToGrid(Slot targetSlot, Holder<Item> itemInInventory, int count) {
+         ItemStack itemInTargetSlot = targetSlot.getItem();
+         int inventorySlotId = this.inventory.findSlotMatchingCraftingIngredient(itemInInventory, itemInTargetSlot);
+         if (inventorySlotId == -1) {
+@@ -190,7 +_,7 @@
+         }
+     }
+ 
+-    private boolean testClearGrid() {
++    private synchronized boolean testClearGrid() {
+         List<ItemStack> freeSlots = Lists.newArrayList();
+         int freeSlotsInInventory = this.getAmountOfFreeSlotsInInventory();
+ 
+@@ -225,10 +_,10 @@
+         return true;
+     }
+ 
+-    private int getAmountOfFreeSlotsInInventory() {
++    private synchronized int getAmountOfFreeSlotsInInventory() {
+         int freeSlots = 0;
+ 
+-        for (ItemStack item : this.inventory.getNonEquipmentItems()) {
++        for (ItemStack item : this.inventory.getNonEquipmentItemsSnapshot()) {
+             if (item.isEmpty()) {
+                 freeSlots++;
+             }

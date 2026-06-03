@@ -1,0 +1,92 @@
+--- a/net/minecraft/world/entity/ai/behavior/Behavior.java
++++ b/net/minecraft/world/entity/ai/behavior/Behavior.java
+@@ -27,24 +_,24 @@
+     public Behavior(Map<MemoryModuleType<?>, MemoryStatus> entryCondition, int minDuration, int maxDuration) {
+         this.minDuration = minDuration;
+         this.maxDuration = maxDuration;
+-        this.entryCondition = entryCondition;
++        this.entryCondition = Map.copyOf(entryCondition);
+     }
+ 
+     @Override
+-    public Behavior.Status getStatus() {
++    public synchronized Behavior.Status getStatus() {
+         return this.status;
+     }
+ 
+     @Override
+-    public Set<MemoryModuleType<?>> getRequiredMemories() {
+-        return this.entryCondition.keySet();
++    public synchronized Set<MemoryModuleType<?>> getRequiredMemories() {
++        return Set.copyOf(this.entryCondition.keySet());
+     }
+ 
+     @Override
+-    public final boolean tryStart(ServerLevel level, E body, long timestamp) {
++    public final synchronized boolean tryStart(ServerLevel level, E body, long timestamp) {
+         if (this.hasRequiredMemories(body) && this.checkExtraStartConditions(level, body)) {
+             this.status = Behavior.Status.RUNNING;
+-            int duration = this.minDuration + level.getRandom().nextInt(this.maxDuration + 1 - this.minDuration);
++            int duration = this.minDuration + body.getRandom().nextInt(this.maxDuration + 1 - this.minDuration);
+             this.endTimestamp = timestamp + duration;
+             this.start(level, body, timestamp);
+             return true;
+@@ -53,11 +_,11 @@
+         }
+     }
+ 
+-    protected void start(ServerLevel level, E body, long timestamp) {
++    protected synchronized void start(ServerLevel level, E body, long timestamp) {
+     }
+ 
+     @Override
+-    public final void tickOrStop(ServerLevel level, E body, long timestamp) {
++    public final synchronized void tickOrStop(ServerLevel level, E body, long timestamp) {
+         if (!this.timedOut(timestamp) && this.canStillUse(level, body, timestamp)) {
+             this.tick(level, body, timestamp);
+         } else {
+@@ -65,36 +_,36 @@
+         }
+     }
+ 
+-    protected void tick(ServerLevel level, E body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, E body, long timestamp) {
+     }
+ 
+     @Override
+-    public final void doStop(ServerLevel level, E body, long timestamp) {
++    public final synchronized void doStop(ServerLevel level, E body, long timestamp) {
+         this.status = Behavior.Status.STOPPED;
+         this.stop(level, body, timestamp);
+     }
+ 
+-    protected void stop(ServerLevel level, E body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, E body, long timestamp) {
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, E body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, E body, long timestamp) {
+         return false;
+     }
+ 
+-    protected boolean timedOut(long timestamp) {
++    protected synchronized boolean timedOut(long timestamp) {
+         return timestamp > this.endTimestamp;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, E body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, E body) {
+         return true;
+     }
+ 
+     @Override
+-    public String debugString() {
++    public synchronized String debugString() {
+         return this.getClass().getSimpleName();
+     }
+ 
+-    protected boolean hasRequiredMemories(E body) {
++    protected synchronized boolean hasRequiredMemories(E body) {
+         for (Entry<MemoryModuleType<?>, MemoryStatus> entry : this.entryCondition.entrySet()) {
+             MemoryModuleType<?> memoryType = entry.getKey();
+             MemoryStatus requiredStatus = entry.getValue();

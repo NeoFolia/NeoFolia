@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/WritableBookItem.java
++++ b/net/minecraft/world/item/WritableBookItem.java
+@@ -5,6 +_,7 @@
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class WritableBookItem extends Item {
+     public WritableBookItem(Item.Properties properties) {
+@@ -15,7 +_,7 @@
+     public InteractionResult use(Level level, Player player, InteractionHand hand) {
+         ItemStack itemStack = player.getItemInHand(hand);
+         player.openItemGui(itemStack, hand);
+-        player.awardStat(Stats.ITEM_USED.get(this));
++        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+         return InteractionResult.SUCCESS;
+     }
+ }

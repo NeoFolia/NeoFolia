@@ -1,0 +1,114 @@
+--- a/net/minecraft/world/entity/monster/Strider.java
++++ b/net/minecraft/world/entity/monster/Strider.java
+@@ -70,6 +_,7 @@
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Strider extends Animal implements ItemSteerable {
+@@ -100,6 +_,9 @@
+ 
+         do {
+             checkPos.move(Direction.UP);
++            if (!canReadBlock(level, checkPos)) {
++                return false;
++            }
+         } while (level.getFluidState(checkPos).is(FluidTags.LAVA));
+ 
+         return level.getBlockState(checkPos).isAir();
+@@ -219,7 +_,7 @@
+         }
+ 
+         for (BlockPos targetBlockPos : targetBlockPositions) {
+-            if (!this.level().getFluidState(targetBlockPos).is(FluidTags.LAVA)) {
++            if (this.canReadBlock(targetBlockPos) && !this.level().getFluidState(targetBlockPos).is(FluidTags.LAVA)) {
+                 double blockFloorHeight = this.level().getBlockFloorHeight(targetBlockPos);
+                 if (DismountHelper.isBlockFloorValid(blockFloorHeight)) {
+                     Vec3 location = Vec3.upFromBottomCenterOf(targetBlockPos, blockFloorHeight);
+@@ -289,7 +_,8 @@
+         }
+ 
+         if (!this.isNoAi()) {
+-            BlockState stateInside = this.level().getBlockState(this.blockPosition());
++            BlockPos blockPos = this.blockPosition();
++            BlockState stateInside = this.canReadBlock(blockPos) ? this.level().getBlockState(blockPos) : Blocks.AIR.defaultBlockState();
+             BlockState stateOn = this.getBlockStateOnLegacy();
+             boolean inWarmBlocks = stateInside.is(BlockTags.STRIDER_WARM_BLOCKS)
+                 || stateOn.is(BlockTags.STRIDER_WARM_BLOCKS)
+@@ -313,9 +_,10 @@
+ 
+     private void floatStrider() {
+         if (this.isInLava()) {
++            BlockPos above = this.blockPosition().above();
+             CollisionContext context = CollisionContext.of(this);
+             if (context.isAbove(this.getLiquidCollisionShape(), this.blockPosition(), true)
+-                && !this.level().getFluidState(this.blockPosition().above()).is(FluidTags.LAVA)) {
++                && (!this.canReadBlock(above) || !this.level().getFluidState(above).is(FluidTags.LAVA))) {
+                 this.setOnGround(true);
+             } else {
+                 this.setDeltaMovement(this.getDeltaMovement().scale(0.5).add(0.0, 0.05, 0.0));
+@@ -369,7 +_,7 @@
+ 
+     @Override
+     public float getWalkTargetValue(BlockPos pos, LevelReader level) {
+-        if (level.getBlockState(pos).getFluidState().is(FluidTags.LAVA)) {
++        if (canReadBlock(level, pos) && level.getBlockState(pos).getFluidState().is(FluidTags.LAVA)) {
+             return 10.0F;
+         } else {
+             return this.isInLava() ? Float.NEGATIVE_INFINITY : 0.0F;
+@@ -426,6 +_,14 @@
+         return new Vec3(0.0, 0.6F * this.getEyeHeight(), this.getBbWidth() * 0.4F);
+     }
+ 
++    private boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
++    protected static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+@@ -433,7 +_,7 @@
+         if (this.isBaby()) {
+             return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+         } else {
+-            RandomSource random = level.getRandom();
++            RandomSource random = this.getRandom();
+             if (random.nextInt(30) == 0) {
+                 Mob jockey = EntityType.ZOMBIFIED_PIGLIN.create(level.getLevel(), EntitySpawnReason.JOCKEY);
+                 if (jockey != null) {
+@@ -478,7 +_,7 @@
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            return !this.strider.isInLava() && this.isValidTarget(this.strider.level(), this.blockPos);
++            return !this.strider.isInLava() && this.canReadBlock(this.blockPos) && this.isValidTarget(this.strider.level(), this.blockPos);
+         }
+ 
+         @Override
+@@ -493,7 +_,10 @@
+ 
+         @Override
+         protected boolean isValidTarget(LevelReader level, BlockPos pos) {
+-            return level.getBlockState(pos).is(Blocks.LAVA) && level.getBlockState(pos.above()).isPathfindable(PathComputationType.LAND);
++            return this.canReadBlock(pos)
++                && this.canReadBlock(pos.above())
++                && level.getBlockState(pos).is(Blocks.LAVA)
++                && level.getBlockState(pos.above()).isPathfindable(PathComputationType.LAND);
+         }
+     }
+ 
+@@ -515,7 +_,7 @@
+ 
+         @Override
+         public boolean isStableDestination(BlockPos pos) {
+-            return this.level.getBlockState(pos).is(Blocks.LAVA) || super.isStableDestination(pos);
++            return this.canReadBlock(pos) && (this.level.getBlockState(pos).is(Blocks.LAVA) || super.isStableDestination(pos));
+         }
+     }
+ }

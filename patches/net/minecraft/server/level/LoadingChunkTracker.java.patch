@@ -1,0 +1,44 @@
+--- a/net/minecraft/server/level/LoadingChunkTracker.java
++++ b/net/minecraft/server/level/LoadingChunkTracker.java
+@@ -11,16 +_,20 @@
+         super(MAX_LEVEL + 1, 16, 256);
+         this.distanceManager = distanceManager;
+         this.ticketStorage = ticketStorage;
+-        ticketStorage.setLoadingChunkUpdatedListener(this::update);
++        ticketStorage.setLoadingChunkUpdatedListener((node, newLevelFrom, onlyDecreased) -> {
++            synchronized (this.distanceManager) {
++                this.update(node, newLevelFrom, onlyDecreased);
++            }
++        });
+     }
+ 
+     @Override
+-    protected int getLevelFromSource(long to) {
++    protected synchronized int getLevelFromSource(long to) {
+         return this.ticketStorage.getTicketLevelAt(to, false);
+     }
+ 
+     @Override
+-    protected int getLevel(long node) {
++    protected synchronized int getLevel(long node) {
+         if (!this.distanceManager.isChunkToRemove(node)) {
+             ChunkHolder chunk = this.distanceManager.getChunk(node);
+             if (chunk != null) {
+@@ -32,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void setLevel(long node, int level) {
++    protected synchronized void setLevel(long node, int level) {
+         ChunkHolder chunk = this.distanceManager.getChunk(node);
+         int oldLevel = chunk == null ? MAX_LEVEL : chunk.getTicketLevel();
+         if (oldLevel != level) {
+@@ -43,7 +_,7 @@
+         }
+     }
+ 
+-    public int runDistanceUpdates(int count) {
++    public synchronized int runDistanceUpdates(int count) {
+         return this.runUpdates(count);
+     }
+ }

@@ -1,0 +1,166 @@
+--- a/net/minecraft/world/level/block/entity/ChiseledBookShelfBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ChiseledBookShelfBlockEntity.java
+@@ -33,16 +_,23 @@
+     }
+ 
+     private void updateState(int interactedSlot) {
+-        if (interactedSlot >= 0 && interactedSlot < 6) {
+-            this.lastInteractedSlot = interactedSlot;
+-            BlockState updatedState = this.getBlockState();
++        BlockState updatedState;
++        synchronized (this) {
++            if (interactedSlot < 0 || interactedSlot >= 6) {
++                updatedState = null;
++            } else {
++                this.lastInteractedSlot = interactedSlot;
++                updatedState = this.getBlockState();
+ 
+-            for (int slot = 0; slot < ChiseledBookShelfBlock.SLOT_OCCUPIED_PROPERTIES.size(); slot++) {
+-                boolean slotIsOccupied = !this.getItem(slot).isEmpty();
+-                BooleanProperty slotProperty = ChiseledBookShelfBlock.SLOT_OCCUPIED_PROPERTIES.get(slot);
+-                updatedState = updatedState.setValue(slotProperty, slotIsOccupied);
++                for (int slot = 0; slot < ChiseledBookShelfBlock.SLOT_OCCUPIED_PROPERTIES.size(); slot++) {
++                    boolean slotIsOccupied = !this.items.get(slot).isEmpty();
++                    BooleanProperty slotProperty = ChiseledBookShelfBlock.SLOT_OCCUPIED_PROPERTIES.get(slot);
++                    updatedState = updatedState.setValue(slotProperty, slotIsOccupied);
++                }
+             }
++        }
+ 
++        if (updatedState != null) {
+             Objects.requireNonNull(this.level).setBlock(this.worldPosition, updatedState, 3);
+             this.level.gameEvent(GameEvent.BLOCK_CHANGE, this.worldPosition, GameEvent.Context.of(updatedState));
+         } else {
+@@ -51,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.items.clear();
+         ContainerHelper.loadAllItems(input, this.items);
+@@ -59,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         ContainerHelper.saveAllItems(output, this.items, true);
+         output.putInt("last_interacted_slot", this.lastInteractedSlot);
+@@ -77,8 +_,12 @@
+ 
+     @Override
+     public ItemStack removeItem(int slot, int count) {
+-        ItemStack retrievedItem = Objects.requireNonNullElse(this.getItems().get(slot), ItemStack.EMPTY);
+-        this.getItems().set(slot, ItemStack.EMPTY);
++        ItemStack retrievedItem;
++        synchronized (this) {
++            retrievedItem = Objects.requireNonNullElse(this.items.get(slot), ItemStack.EMPTY);
++            this.items.set(slot, ItemStack.EMPTY);
++        }
++
+         if (!retrievedItem.isEmpty()) {
+             this.updateState(slot);
+         }
+@@ -88,11 +_,64 @@
+ 
+     @Override
+     public void setItem(int slot, ItemStack itemStack) {
+-        if (this.acceptsItemType(itemStack)) {
+-            this.getItems().set(slot, itemStack);
+-            this.updateState(slot);
+-        } else if (itemStack.isEmpty()) {
++        setItem(slot, itemStack, false);
++    }
++
++    // Neo: Skip side-effects if insideTransaction is true so the caller can defer them until the transaction commits
++    @Override
++    public void setItem(int slot, ItemStack itemStack, boolean insideTransaction) {
++        boolean updateState = false;
++        boolean removeItem = false;
++        synchronized (this) {
++            if (this.acceptsItemType(itemStack)) {
++                this.items.set(slot, itemStack);
++                updateState = !insideTransaction;
++            } else if (itemStack.isEmpty()) {
++                if (insideTransaction) {
++                    // Skip the updateState call in removeItem
++                    this.items.set(slot, itemStack);
++                    return;
++                }
++
++                removeItem = true;
++            }
++        }
++
++        if (removeItem) {
+             this.removeItem(slot, this.getMaxStackSize());
++        } else if (updateState) {
++            this.updateState(slot);
++        }
++    }
++
++    // Neo: Make lastInteractedSlot transactional, and defer updateState until end of a transaction
++    private final net.neoforged.neoforge.transfer.transaction.SnapshotJournal<Integer> lastInteractedSlotJournal = new net.neoforged.neoforge.transfer.transaction.SnapshotJournal<>() {
++        @Override
++        protected Integer createSnapshot() {
++            synchronized (ChiseledBookShelfBlockEntity.this) {
++                return lastInteractedSlot;
++            }
++        }
++        @Override
++        protected void revertToSnapshot(Integer snapshot) {
++            synchronized (ChiseledBookShelfBlockEntity.this) {
++                lastInteractedSlot = snapshot;
++            }
++        }
++        @Override
++        protected void onRootCommit(Integer originalState) {
++            // If the block entity was removed, skip updateState to avoid the setBlock call that would overwrite the current block
++            if (!isRemoved()) {
++                updateState(lastInteractedSlot);
++            }
++        }
++    };
++
++    @Override
++    public void onTransfer(int slot, int amountChange, net.neoforged.neoforge.transfer.transaction.TransactionContext transaction) {
++        this.lastInteractedSlotJournal.updateSnapshots(transaction);
++        synchronized (this) {
++            lastInteractedSlot = slot;
+         }
+     }
+ 
+@@ -106,7 +_,7 @@
+     }
+ 
+     @Override
+-    public NonNullList<ItemStack> getItems() {
++    public synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ 
+@@ -115,18 +_,18 @@
+         return Container.stillValidBlockEntity(this, player);
+     }
+ 
+-    public int getLastInteractedSlot() {
++    public synchronized int getLastInteractedSlot() {
+         return this.lastInteractedSlot;
+     }
+ 
+     @Override
+-    protected void applyImplicitComponents(DataComponentGetter components) {
++    protected synchronized void applyImplicitComponents(DataComponentGetter components) {
+         super.applyImplicitComponents(components);
+         components.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyInto(this.items);
+     }
+ 
+     @Override
+-    protected void collectImplicitComponents(DataComponentMap.Builder components) {
++    protected synchronized void collectImplicitComponents(DataComponentMap.Builder components) {
+         super.collectImplicitComponents(components);
+         components.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(this.items));
+     }

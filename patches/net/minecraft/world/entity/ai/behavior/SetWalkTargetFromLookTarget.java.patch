@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetWalkTargetFromLookTarget.java
++++ b/net/minecraft/world/entity/ai/behavior/SetWalkTargetFromLookTarget.java
+@@ -8,20 +_,23 @@
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
+ 
+ public class SetWalkTargetFromLookTarget {
+-    public static OneShot<LivingEntity> create(float speedModifier, int closeEnoughDistance) {
++    public static synchronized OneShot<LivingEntity> create(float speedModifier, int closeEnoughDistance) {
+         return create(mob -> true, mob -> speedModifier, closeEnoughDistance);
+     }
+ 
+-    public static OneShot<LivingEntity> create(
++    public static synchronized OneShot<LivingEntity> create(
+         Predicate<LivingEntity> canSetWalkTargetPredicate, Function<LivingEntity, Float> speedModifier, int closeEnoughDistance
+     ) {
+         return BehaviorBuilder.create(
+             i -> i.group(i.absent(MemoryModuleType.WALK_TARGET), i.present(MemoryModuleType.LOOK_TARGET))
+                 .apply(i, (walkTarget, lookTarget) -> (level, body, timestamp) -> {
+-                    if (!canSetWalkTargetPredicate.test(body)) {
++                    PositionTracker target = i.get(lookTarget);
++                    if (!target.isVisibleBy(body)) {
++                        return false;
++                    } else if (!canSetWalkTargetPredicate.test(body)) {
+                         return false;
+                     } else {
+-                        walkTarget.set(new WalkTarget(i.get(lookTarget), speedModifier.apply(body), closeEnoughDistance));
++                        walkTarget.set(new WalkTarget(target, speedModifier.apply(body), closeEnoughDistance));
+                         return true;
+                     }
+                 })

@@ -1,0 +1,28 @@
+--- a/net/minecraft/commands/arguments/ScoreHolderArgument.java
++++ b/net/minecraft/commands/arguments/ScoreHolderArgument.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.server.permissions.Permissions;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.scores.ScoreHolder;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ScoreHolderArgument implements ArgumentType<ScoreHolderArgument.Result> {
+     public static final SuggestionProvider<CommandSourceStack> SUGGEST_SCORE_HOLDERS = (context, builder) -> {
+@@ -128,6 +_,7 @@
+ 
+                             for (ServerLevel level : server.getAllLevels()) {
+                                 Entity entity = level.getEntity(uuid);
++                                entity = RegionizedWorldGuard.restrictEntityToCurrentRegion(level, entity);
+                                 if (entity != null) {
+                                     if (firstResult == null) {
+                                         firstResult = entity;
+@@ -151,7 +_,8 @@
+                     } catch (IllegalArgumentException var7) {
+                         return (sender, wildcard) -> {
+                             MinecraftServer server = sender.getServer();
+-                            ServerPlayer player = server.getPlayerList().getPlayerByName(text);
++                            ServerPlayer player = server.getPlayerList().getAllPlayerByName(text);
++                            player = RegionizedWorldGuard.restrictEntityToCurrentRegion(sender.getLevel(), player);
+                             return player != null ? List.of(player) : nameOnlyHolder;
+                         };
+                     }

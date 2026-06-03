@@ -1,0 +1,72 @@
+--- a/net/minecraft/world/entity/ai/goal/PathfindToRaidGoal.java
++++ b/net/minecraft/world/entity/ai/goal/PathfindToRaidGoal.java
+@@ -5,11 +_,15 @@
+ import java.util.List;
+ import java.util.Set;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+ import net.minecraft.world.entity.raid.Raid;
+ import net.minecraft.world.entity.raid.Raider;
+ import net.minecraft.world.entity.raid.Raids;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class PathfindToRaidGoal<T extends Raider> extends Goal {
+     private static final int RECRUITMENT_SEARCH_TICK_DELAY = 20;
+@@ -23,8 +_,8 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        return this.mob.getTarget() == null
++    public synchronized boolean canUse() {
++        return this.regionSafeTarget(this.mob.getTarget()) == null
+             && !this.mob.hasControllingPassenger()
+             && this.mob.hasActiveRaid()
+             && !this.mob.getCurrentRaid().isOver()
+@@ -32,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return this.mob.hasActiveRaid() && !this.mob.getCurrentRaid().isOver() && !getServerLevel(this.mob.level()).isVillage(this.mob.blockPosition());
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.mob.hasActiveRaid()) {
+             Raid raid = this.mob.getCurrentRaid();
+             if (this.mob.tickCount > this.recruitmentTick) {
+@@ -54,18 +_,23 @@
+         }
+     }
+ 
+-    private void recruitNearby(Raid raid) {
++    private synchronized void recruitNearby(Raid raid) {
+         if (raid.isActive()) {
+             ServerLevel level = getServerLevel(this.mob.level());
+             Set<Raider> raidersToAdd = Sets.newHashSet();
+-            List<Raider> raidersNearby = level.getEntitiesOfClass(
+-                Raider.class, this.mob.getBoundingBox().inflate(16.0), mob -> !mob.hasActiveRaid() && Raids.canJoinRaid(mob)
+-            );
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, this.mob.getBoundingBox().inflate(16.0));
++            List<Raider> raidersNearby = searchBox == null
++                ? List.of()
++                : List.copyOf(level.getEntitiesOfClass(Raider.class, searchBox, mob -> !mob.hasActiveRaid() && Raids.canJoinRaid(mob)));
+             raidersToAdd.addAll(raidersNearby);
+ 
+             for (Raider raider : raidersToAdd) {
+                 raid.joinRaid(level, raid.getGroupsSpawned(), raider, null, true);
+             }
+         }
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

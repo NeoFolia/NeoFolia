@@ -1,0 +1,163 @@
+--- a/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
++++ b/net/minecraft/world/entity/projectile/FireworkRocketEntity.java
+@@ -27,10 +_,13 @@
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FireworkRocketEntity extends Projectile implements ItemSupplier {
+@@ -107,6 +_,13 @@
+ 
+     @Override
+     public void tick() {
++        if (this.isAttachedToEntity()
++            && this.attachedToEntity != null
++            && RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.attachedToEntity) == null
++            && RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Attached firework rocket tick", this::tick)) {
++            return;
++        }
++
+         super.tick();
+         HitResult hitResult;
+         if (this.isAttachedToEntity()) {
+@@ -119,14 +_,15 @@
+                 });
+             }
+ 
+-            if (this.attachedToEntity != null) {
++            LivingEntity attachedToEntity = this.getAttachedToEntityRegionSafe();
++            if (attachedToEntity != null) {
+                 Vec3 handAngle;
+-                if (this.attachedToEntity.isFallFlying()) {
+-                    Vec3 lookAngle = this.attachedToEntity.getLookAngle();
++                if (attachedToEntity.isFallFlying()) {
++                    Vec3 lookAngle = attachedToEntity.getLookAngle();
+                     double power = 1.5;
+                     double powerAdd = 0.1;
+-                    Vec3 movement = this.attachedToEntity.getDeltaMovement();
+-                    this.attachedToEntity
++                    Vec3 movement = attachedToEntity.getDeltaMovement();
++                    attachedToEntity
+                         .setDeltaMovement(
+                             movement.add(
+                                 lookAngle.x * 0.1 + (lookAngle.x * 1.5 - movement.x) * 0.5,
+@@ -134,13 +_,13 @@
+                                 lookAngle.z * 0.1 + (lookAngle.z * 1.5 - movement.z) * 0.5
+                             )
+                         );
+-                    handAngle = this.attachedToEntity.getHandHoldingItemAngle(Items.FIREWORK_ROCKET);
++                    handAngle = attachedToEntity.getHandHoldingItemAngle(Items.FIREWORK_ROCKET);
+                 } else {
+                     handAngle = Vec3.ZERO;
+                 }
+ 
+-                this.setPos(this.attachedToEntity.getX() + handAngle.x, this.attachedToEntity.getY() + handAngle.y, this.attachedToEntity.getZ() + handAngle.z);
+-                this.setDeltaMovement(this.attachedToEntity.getDeltaMovement());
++                this.setPos(attachedToEntity.getX() + handAngle.x, attachedToEntity.getY() + handAngle.y, attachedToEntity.getZ() + handAngle.z);
++                this.setDeltaMovement(attachedToEntity.getDeltaMovement());
+             }
+ 
+             hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+@@ -186,6 +_,13 @@
+         }
+     }
+ 
++    @Override
++    protected void onHit(HitResult result) {
++        if (result.getType() == HitResult.Type.MISS || !net.neoforged.neoforge.event.EventHooks.onProjectileImpact(this, result)) {
++            super.onHit(result);
++        }
++    }
++
+     private void explode(ServerLevel level) {
+         level.broadcastEntityEvent(this, (byte)17);
+         this.gameEvent(GameEvent.EXPLODE, this.getOwner());
+@@ -204,7 +_,10 @@
+     @Override
+     protected void onHitBlock(BlockHitResult hitResult) {
+         BlockPos pos = new BlockPos(hitResult.getBlockPos());
+-        this.level().getBlockState(pos).entityInside(this.level(), pos, this, InsideBlockEffectApplier.NOOP, true);
++        if (this.canReadBlock(pos)) {
++            this.level().getBlockState(pos).entityInside(this.level(), pos, this, InsideBlockEffectApplier.NOOP, true);
++        }
++
+         if (this.level() instanceof ServerLevel level && this.hasExplosion()) {
+             this.explode(level);
+         }
+@@ -224,29 +_,33 @@
+         }
+ 
+         if (damageAmount > 0.0F) {
+-            if (this.attachedToEntity != null) {
+-                this.attachedToEntity.hurtServer(level, this.damageSources().fireworks(this, this.getOwner()), 5.0F + explosions.size() * 2);
++            LivingEntity attachedToEntity = this.getAttachedToEntityRegionSafe();
++            if (attachedToEntity != null) {
++                attachedToEntity.hurtServer(level, this.damageSources().fireworks(this, this.getOwner()), 5.0F + explosions.size() * 2);
+             }
+ 
+             double radius = 5.0;
+             Vec3 rocketPos = this.position();
+-
+-            for (LivingEntity target : this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(5.0))) {
+-                if (target != this.attachedToEntity && !(this.distanceToSqr(target) > 25.0)) {
+-                    boolean canSee = false;
+-
+-                    for (int testStep = 0; testStep < 2; testStep++) {
+-                        Vec3 to = new Vec3(target.getX(), target.getY(0.5 * testStep), target.getZ());
+-                        HitResult clip = this.level().clip(new ClipContext(rocketPos, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+-                        if (clip.getType() == HitResult.Type.MISS) {
+-                            canSee = true;
+-                            break;
+-                        }
+-                    }
+-
+-                    if (canSee) {
+-                        float damage = damageAmount * (float)Math.sqrt((5.0 - this.distanceTo(target)) / 5.0);
+-                        target.hurtServer(level, this.damageSources().fireworks(this, this.getOwner()), damage);
++            AABB damageBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(5.0));
++
++            if (damageBox != null) {
++                for (LivingEntity target : this.level().getEntitiesOfClass(LivingEntity.class, damageBox)) {
++                    if (target != attachedToEntity && !(this.distanceToSqr(target) > 25.0)) {
++                        boolean canSee = false;
++
++                        for (int testStep = 0; testStep < 2; testStep++) {
++                            Vec3 to = new Vec3(target.getX(), target.getY(0.5 * testStep), target.getZ());
++                            HitResult clip = this.level().clip(new ClipContext(rocketPos, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
++                            if (clip.getType() == HitResult.Type.MISS) {
++                                canSee = true;
++                                break;
++                            }
++                        }
++
++                        if (canSee) {
++                            float damage = damageAmount * (float)Math.sqrt((5.0 - this.distanceTo(target)) / 5.0);
++                            target.hurtServer(level, this.damageSources().fireworks(this, this.getOwner()), damage);
++                        }
+                     }
+                 }
+             }
+@@ -255,6 +_,15 @@
+ 
+     private boolean isAttachedToEntity() {
+         return this.entityData.get(DATA_ATTACHED_TO_TARGET).isPresent();
++    }
++
++    private @Nullable LivingEntity getAttachedToEntityRegionSafe() {
++        LivingEntity attachedToEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), this.attachedToEntity);
++        if (this.attachedToEntity != null && attachedToEntity == null && !RegionizedTickContext.isRegionThread()) {
++            this.attachedToEntity = null;
++        }
++
++        return attachedToEntity;
+     }
+ 
+     public boolean isShotAtAngle() {

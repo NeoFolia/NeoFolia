@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/ai/behavior/StartAttacking.java
++++ b/net/minecraft/world/entity/ai/behavior/StartAttacking.java
+@@ -25,11 +_,19 @@
+                         if (target.isEmpty()) {
+                             return false;
+                         } else {
+-                            LivingEntity targetEntity = target.get();
++                            LivingEntity targetEntity = BehaviorUtils.regionSafeEntity(body, target.get());
++                            if (targetEntity == null) {
++                                return false;
++                            }
++
+                             if (!body.canAttack(targetEntity)) {
+                                 return false;
+                             } else {
+-                                attackTarget.set(targetEntity);
++                                net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent changeTargetEvent = net.neoforged.neoforge.common.CommonHooks.onLivingChangeTarget(body, targetEntity, net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent.LivingTargetType.BEHAVIOR_TARGET);
++                                if (changeTargetEvent.isCanceled() || changeTargetEvent.getNewAboutToBeSetTarget() == null)
++                                    return false;
++
++                                attackTarget.set(changeTargetEvent.getNewAboutToBeSetTarget());
+                                 cantReachSince.erase();
+                                 return true;
+                             }

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/BecomePassiveIfMemoryPresent.java
++++ b/net/minecraft/world/entity/ai/behavior/BecomePassiveIfMemoryPresent.java
+@@ -5,7 +_,7 @@
+ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+ 
+ public class BecomePassiveIfMemoryPresent {
+-    public static BehaviorControl<LivingEntity> create(MemoryModuleType<?> pacifyingMemory, int pacifyDuration) {
++    public static synchronized BehaviorControl<LivingEntity> create(MemoryModuleType<?> pacifyingMemory, int pacifyDuration) {
+         return BehaviorBuilder.create(
+             i -> i.group(i.registered(MemoryModuleType.ATTACK_TARGET), i.absent(MemoryModuleType.PACIFIED), i.present(pacifyingMemory))
+                 .apply(

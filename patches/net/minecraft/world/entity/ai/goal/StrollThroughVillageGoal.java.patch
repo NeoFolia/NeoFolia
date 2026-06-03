@@ -1,0 +1,95 @@
+--- a/net/minecraft/world/entity/ai/goal/StrollThroughVillageGoal.java
++++ b/net/minecraft/world/entity/ai/goal/StrollThroughVillageGoal.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.entity.ai.util.LandRandomPos;
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class StrollThroughVillageGoal extends Goal {
+@@ -25,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.mob.hasControllingPassenger()) {
+             return false;
+         } else if (this.mob.level().isBrightOutside()) {
+@@ -35,10 +_,15 @@
+         } else {
+             ServerLevel level = (ServerLevel)this.mob.level();
+             BlockPos pos = this.mob.blockPosition();
+-            if (!level.isCloseToVillage(pos, 6)) {
++            if (!canReadBlock(level, pos) || !level.isCloseToVillage(pos, 6)) {
+                 return false;
+             } else {
+-                Vec3 landPos = LandRandomPos.getPos(this.mob, 15, 7, p -> -level.sectionsToVillage(SectionPos.of(p)));
++                Vec3 landPos = LandRandomPos.getPos(
++                    this.mob,
++                    15,
++                    7,
++                    p -> canReadBlock(level, p) ? -level.sectionsToVillage(SectionPos.of(p)) : Double.NEGATIVE_INFINITY
++                );
+                 this.wantedPos = landPos == null ? null : BlockPos.containing(landPos);
+                 return this.wantedPos != null;
+             }
+@@ -46,21 +_,28 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.wantedPos != null && !this.mob.getNavigation().isDone() && this.mob.getNavigation().getTargetPos().equals(this.wantedPos);
++    public synchronized boolean canContinueToUse() {
++        BlockPos target = this.wantedPos;
++        return target != null && !this.mob.getNavigation().isDone() && target.equals(this.mob.getNavigation().getTargetPos());
+     }
+ 
+     @Override
+-    public void tick() {
+-        if (this.wantedPos != null) {
++    public synchronized void tick() {
++        BlockPos target = this.wantedPos;
++        if (target != null) {
+             PathNavigation navigation = this.mob.getNavigation();
+-            if (navigation.isDone() && !this.wantedPos.closerToCenterThan(this.mob.position(), 10.0)) {
+-                Vec3 longDistanceTarget = Vec3.atBottomCenterOf(this.wantedPos);
++            if (navigation.isDone() && !target.closerToCenterThan(this.mob.position(), 10.0)) {
++                Vec3 longDistanceTarget = Vec3.atBottomCenterOf(target);
+                 Vec3 selfVector = this.mob.position();
+                 Vec3 distance = selfVector.subtract(longDistanceTarget);
+                 longDistanceTarget = distance.scale(0.4).add(longDistanceTarget);
+                 Vec3 moveTarget = longDistanceTarget.subtract(selfVector).normalize().scale(10.0).add(selfVector);
+                 BlockPos pathTarget = BlockPos.containing(moveTarget);
++                if (!canReadBlock((ServerLevel)this.mob.level(), pathTarget)) {
++                    this.moveRandomly();
++                    return;
++                }
++
+                 pathTarget = this.mob.level().getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pathTarget);
+                 if (!navigation.moveTo(pathTarget.getX(), pathTarget.getY(), pathTarget.getZ(), 1.0)) {
+                     this.moveRandomly();
+@@ -69,11 +_,18 @@
+         }
+     }
+ 
+-    private void moveRandomly() {
++    private synchronized void moveRandomly() {
+         RandomSource random = this.mob.getRandom();
+-        BlockPos pathTarget = this.mob
+-            .level()
+-            .getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, this.mob.blockPosition().offset(-8 + random.nextInt(16), 0, -8 + random.nextInt(16)));
++        BlockPos pathTarget = this.mob.blockPosition().offset(-8 + random.nextInt(16), 0, -8 + random.nextInt(16));
++        if (!canReadBlock((ServerLevel)this.mob.level(), pathTarget)) {
++            return;
++        }
++
++        pathTarget = this.mob.level().getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pathTarget);
+         this.mob.getNavigation().moveTo(pathTarget.getX(), pathTarget.getY(), pathTarget.getZ(), 1.0);
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

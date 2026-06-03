@@ -1,0 +1,62 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetWalkTargetAwayFrom.java
++++ b/net/minecraft/world/entity/ai/behavior/SetWalkTargetAwayFrom.java
+@@ -10,19 +_,22 @@
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
+ import net.minecraft.world.entity.ai.util.LandRandomPos;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class SetWalkTargetAwayFrom {
+-    public static BehaviorControl<PathfinderMob> pos(MemoryModuleType<BlockPos> memory, float speedModifier, int desiredDistance, boolean interruptCurrentWalk) {
++    public static synchronized BehaviorControl<PathfinderMob> pos(
++        MemoryModuleType<BlockPos> memory, float speedModifier, int desiredDistance, boolean interruptCurrentWalk
++    ) {
+         return create(memory, speedModifier, desiredDistance, interruptCurrentWalk, Vec3::atBottomCenterOf);
+     }
+ 
+-    public static OneShot<PathfinderMob> entity(
++    public static synchronized OneShot<PathfinderMob> entity(
+         MemoryModuleType<? extends Entity> memory, float speedModifier, int desiredDistance, boolean interruptCurrentWalk
+     ) {
+         return create(memory, speedModifier, desiredDistance, interruptCurrentWalk, Entity::position);
+     }
+ 
+-    private static <T> OneShot<PathfinderMob> create(
++    private static synchronized <T> OneShot<PathfinderMob> create(
+         MemoryModuleType<T> walkAwayFromMemory, float speedModifier, int desiredDistance, boolean interruptCurrentWalk, Function<T, Vec3> toPosition
+     ) {
+         return BehaviorBuilder.create(
+@@ -33,12 +_,30 @@
+                         return false;
+                     } else {
+                         Vec3 bodyPosition = body.position();
+-                        Vec3 avoidPosition = toPosition.apply(i.get(walkAwayFrom));
++                        T walkAwayFromValue = i.get(walkAwayFrom);
++                        Vec3 avoidPosition;
++                        if (walkAwayFromValue instanceof Entity entity) {
++                            Entity safeEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(body.level(), entity);
++                            if (safeEntity == null) {
++                                return false;
++                            }
++
++                            avoidPosition = safeEntity.position();
++                        } else {
++                            avoidPosition = toPosition.apply(walkAwayFromValue);
++                        }
++
+                         if (!bodyPosition.closerThan(avoidPosition, desiredDistance)) {
+                             return false;
+                         } else {
+-                            if (target.isPresent() && target.get().getSpeedModifier() == speedModifier) {
+-                                Vec3 currentDirection = target.get().getTarget().currentPosition().subtract(bodyPosition);
++                            WalkTarget currentTarget = target.orElse(null);
++                            if (currentTarget != null && currentTarget.getSpeedModifier() == speedModifier) {
++                                PositionTracker currentPositionTarget = currentTarget.getTarget();
++                                if (!currentPositionTarget.isRegionSafeFor(body)) {
++                                    return false;
++                                }
++
++                                Vec3 currentDirection = currentPositionTarget.currentPosition().subtract(bodyPosition);
+                                 Vec3 avoidDirection = avoidPosition.subtract(bodyPosition);
+                                 if (currentDirection.dot(avoidDirection) < 0.0) {
+                                     return false;

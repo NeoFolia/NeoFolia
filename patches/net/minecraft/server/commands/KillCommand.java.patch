@@ -1,0 +1,52 @@
+--- a/net/minecraft/server/commands/KillCommand.java
++++ b/net/minecraft/server/commands/KillCommand.java
+@@ -2,6 +_,8 @@
+ 
+ import com.google.common.collect.ImmutableList;
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+@@ -14,18 +_,36 @@
+         dispatcher.register(
+             Commands.literal("kill")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .executes(c -> kill(c.getSource(), ImmutableList.of(c.getSource().getEntityOrException())))
+-                .then(Commands.argument("targets", EntityArgument.entities()).executes(c -> kill(c.getSource(), EntityArgument.getEntities(c, "targets"))))
++                .executes(c -> kill(c, false))
++                .then(Commands.argument("targets", EntityArgument.entities()).executes(c -> kill(c, true)))
+         );
+     }
+ 
++    private static int kill(CommandContext<CommandSourceStack> context, boolean hasTargets) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> kill(context, hasTargets))) {
++            return 0;
++        }
++
++        return kill(source, hasTargets ? EntityArgument.getEntities(context, "targets") : ImmutableList.of(source.getEntityOrException()));
++    }
++
+     private static int kill(CommandSourceStack source, Collection<? extends Entity> victims) {
++        Component singleVictimName = null;
+         for (Entity entity : victims) {
+-            entity.kill(source.getLevel());
++            Component victimName = RegionizedCommandHelper.callOnEntityRegion(source, entity, () -> {
++                Component displayName = entity.getDisplayName();
++                entity.kill(source.getLevel());
++                return displayName;
++            });
++            if (victims.size() == 1) {
++                singleVictimName = victimName;
++            }
+         }
+ 
+         if (victims.size() == 1) {
+-            source.sendSuccess(() -> Component.translatable("commands.kill.success.single", victims.iterator().next().getDisplayName()), true);
++            Component targetName = singleVictimName;
++            source.sendSuccess(() -> Component.translatable("commands.kill.success.single", targetName), true);
+         } else {
+             source.sendSuccess(() -> Component.translatable("commands.kill.success.multiple", victims.size()), true);
+         }

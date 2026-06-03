@@ -1,0 +1,47 @@
+--- a/net/minecraft/world/entity/ai/behavior/warden/Roar.java
++++ b/net/minecraft/world/entity/ai/behavior/warden/Roar.java
+@@ -34,33 +_,38 @@
+         );
+     }
+ 
+-    protected void start(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Warden body, long timestamp) {
+         Brain<Warden> brain = body.getBrain();
+         brain.setMemoryWithExpiry(MemoryModuleType.ROAR_SOUND_DELAY, Unit.INSTANCE, 25L);
+         brain.eraseMemory(MemoryModuleType.WALK_TARGET);
+-        LivingEntity target = body.getBrain().getMemory(MemoryModuleType.ROAR_TARGET).get();
++        LivingEntity target = BehaviorUtils.regionSafeEntity(body, body.getBrain().getMemory(MemoryModuleType.ROAR_TARGET).orElse(null));
++        if (target == null) {
++            body.getBrain().eraseMemory(MemoryModuleType.ROAR_TARGET);
++            return;
++        }
++
+         BehaviorUtils.lookAtEntity(body, target);
+         body.setPose(Pose.ROARING);
+         body.increaseAngerAt(target, 20, false);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Warden body, long timestamp) {
+         return true;
+     }
+ 
+-    protected void tick(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Warden body, long timestamp) {
+         if (!body.getBrain().hasMemoryValue(MemoryModuleType.ROAR_SOUND_DELAY) && !body.getBrain().hasMemoryValue(MemoryModuleType.ROAR_SOUND_COOLDOWN)) {
+             body.getBrain().setMemoryWithExpiry(MemoryModuleType.ROAR_SOUND_COOLDOWN, Unit.INSTANCE, WardenAi.ROAR_DURATION - 25);
+             body.playSound(SoundEvents.WARDEN_ROAR, 3.0F, 1.0F);
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Warden body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Warden body, long timestamp) {
+         if (body.hasPose(Pose.ROARING)) {
+             body.setPose(Pose.STANDING);
+         }
+ 
+-        body.getBrain().getMemory(MemoryModuleType.ROAR_TARGET).ifPresent(body::setAttackTarget);
++        body.getBrain().getMemory(MemoryModuleType.ROAR_TARGET).map(target -> BehaviorUtils.regionSafeEntity(body, target)).ifPresent(body::setAttackTarget);
+         body.getBrain().eraseMemory(MemoryModuleType.ROAR_TARGET);
+     }
+ }

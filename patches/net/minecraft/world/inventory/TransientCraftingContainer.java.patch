@@ -1,0 +1,94 @@
+--- a/net/minecraft/world/inventory/TransientCraftingContainer.java
++++ b/net/minecraft/world/inventory/TransientCraftingContainer.java
+@@ -25,12 +_,12 @@
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return this.items.size();
+     }
+ 
+     @Override
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         for (ItemStack itemStack : this.items) {
+             if (!itemStack.isEmpty()) {
+                 return false;
+@@ -41,18 +_,21 @@
+     }
+ 
+     @Override
+-    public ItemStack getItem(int slot) {
++    public synchronized ItemStack getItem(int slot) {
+         return slot >= this.getContainerSize() ? ItemStack.EMPTY : this.items.get(slot);
+     }
+ 
+     @Override
+-    public ItemStack removeItemNoUpdate(int slot) {
++    public synchronized ItemStack removeItemNoUpdate(int slot) {
+         return ContainerHelper.takeItem(this.items, slot);
+     }
+ 
+     @Override
+     public ItemStack removeItem(int slot, int count) {
+-        ItemStack result = ContainerHelper.removeItem(this.items, slot, count);
++        ItemStack result;
++        synchronized (this) {
++            result = ContainerHelper.removeItem(this.items, slot, count);
++        }
+         if (!result.isEmpty()) {
+             this.menu.slotsChanged(this);
+         }
+@@ -62,41 +_,43 @@
+ 
+     @Override
+     public void setItem(int slot, ItemStack itemStack) {
+-        this.items.set(slot, itemStack);
++        synchronized (this) {
++            this.items.set(slot, itemStack);
++        }
+         this.menu.slotsChanged(this);
+     }
+ 
+     @Override
+-    public void setChanged() {
++    public synchronized void setChanged() {
+     }
+ 
+     @Override
+-    public boolean stillValid(Player player) {
++    public synchronized boolean stillValid(Player player) {
+         return true;
+     }
+ 
+     @Override
+-    public void clearContent() {
++    public synchronized void clearContent() {
+         this.items.clear();
+     }
+ 
+     @Override
+-    public int getHeight() {
++    public synchronized int getHeight() {
+         return this.height;
+     }
+ 
+     @Override
+-    public int getWidth() {
++    public synchronized int getWidth() {
+         return this.width;
+     }
+ 
+     @Override
+-    public List<ItemStack> getItems() {
++    public synchronized List<ItemStack> getItems() {
+         return List.copyOf(this.items);
+     }
+ 
+     @Override
+-    public void fillStackedContents(StackedItemContents contents) {
++    public synchronized void fillStackedContents(StackedItemContents contents) {
+         for (ItemStack itemStack : this.items) {
+             contents.accountSimpleStack(itemStack);
+         }

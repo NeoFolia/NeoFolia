@@ -1,0 +1,55 @@
+--- a/net/minecraft/world/inventory/AbstractCraftingMenu.java
++++ b/net/minecraft/world/inventory/AbstractCraftingMenu.java
+@@ -36,7 +_,7 @@
+     }
+ 
+     @Override
+-    public RecipeBookMenu.PostPlaceAction handlePlacement(
++    public synchronized RecipeBookMenu.PostPlaceAction handlePlacement(
+         boolean useMaxItems, boolean allowDroppingItemsToClear, RecipeHolder<?> recipe, ServerLevel level, Inventory inventory
+     ) {
+         RecipeHolder<CraftingRecipe> typedRecipe = (RecipeHolder<CraftingRecipe>)recipe;
+@@ -51,18 +_,18 @@
+                 }
+ 
+                 @Override
+-                public void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
++                public synchronized void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
+                     AbstractCraftingMenu.this.fillCraftSlotsStackedContents(stackedContents);
+                 }
+ 
+                 @Override
+-                public void clearCraftingContent() {
++                public synchronized void clearCraftingContent() {
+                     AbstractCraftingMenu.this.resultSlots.clearContent();
+                     AbstractCraftingMenu.this.craftSlots.clearContent();
+                 }
+ 
+                 @Override
+-                public boolean recipeMatches(RecipeHolder<CraftingRecipe> recipe) {
++                public synchronized boolean recipeMatches(RecipeHolder<CraftingRecipe> recipe) {
+                     return recipe.value().matches(AbstractCraftingMenu.this.craftSlots.asCraftInput(), AbstractCraftingMenu.this.owner().level());
+                 }
+             }, this.width, this.height, inputSlots, inputSlots, inventory, typedRecipe, useMaxItems, allowDroppingItemsToClear);
+@@ -73,10 +_,10 @@
+         return var8;
+     }
+ 
+-    protected void beginPlacingRecipe() {
++    protected synchronized void beginPlacingRecipe() {
+     }
+ 
+-    protected void finishPlacingRecipe(ServerLevel level, RecipeHolder<CraftingRecipe> recipe) {
++    protected synchronized void finishPlacingRecipe(ServerLevel level, RecipeHolder<CraftingRecipe> recipe) {
+     }
+ 
+     public abstract Slot getResultSlot();
+@@ -94,7 +_,7 @@
+     protected abstract Player owner();
+ 
+     @Override
+-    public void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
++    public synchronized void fillCraftSlotsStackedContents(StackedItemContents stackedContents) {
+         this.craftSlots.fillStackedContents(stackedContents);
+     }
+ }

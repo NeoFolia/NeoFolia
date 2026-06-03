@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/SignBlock.java
++++ b/net/minecraft/world/level/block/SignBlock.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Util;
+ import net.minecraft.world.InteractionHand;
+@@ -99,7 +_,7 @@
+                     if (signApplicator.canApplyToSign(sign.getText(isFrontText), itemStack, player)
+                         && signApplicator.tryApplyToSign(serverLevel, sign, isFrontText, itemStack, player)) {
+                         sign.executeClickCommandsIfPresent(serverLevel, player, pos, isFrontText);
+-                        player.awardStat(Stats.ITEM_USED.get(itemStack.getItem()));
++                        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(itemStack.getItem()));
+                         serverLevel.gameEvent(GameEvent.BLOCK_CHANGE, sign.getBlockPos(), GameEvent.Context.of(player, sign.getBlockState()));
+                         itemStack.consume(1, player);
+                         return InteractionResult.SUCCESS;

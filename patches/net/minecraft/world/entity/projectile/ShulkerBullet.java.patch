@@ -1,0 +1,124 @@
+--- a/net/minecraft/world/entity/projectile/ShulkerBullet.java
++++ b/net/minecraft/world/entity/projectile/ShulkerBullet.java
+@@ -31,6 +_,7 @@
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ShulkerBullet extends Projectile {
+@@ -117,32 +_,32 @@
+             BlockPos current = this.blockPosition();
+             List<Direction> options = Lists.newArrayList();
+             if (avoidAxis != Direction.Axis.X) {
+-                if (current.getX() < targetPos.getX() && this.level().isEmptyBlock(current.east())) {
++                if (current.getX() < targetPos.getX() && this.isEmptyBlockInCurrentRegion(current.east())) {
+                     options.add(Direction.EAST);
+-                } else if (current.getX() > targetPos.getX() && this.level().isEmptyBlock(current.west())) {
++                } else if (current.getX() > targetPos.getX() && this.isEmptyBlockInCurrentRegion(current.west())) {
+                     options.add(Direction.WEST);
+                 }
+             }
+ 
+             if (avoidAxis != Direction.Axis.Y) {
+-                if (current.getY() < targetPos.getY() && this.level().isEmptyBlock(current.above())) {
++                if (current.getY() < targetPos.getY() && this.isEmptyBlockInCurrentRegion(current.above())) {
+                     options.add(Direction.UP);
+-                } else if (current.getY() > targetPos.getY() && this.level().isEmptyBlock(current.below())) {
++                } else if (current.getY() > targetPos.getY() && this.isEmptyBlockInCurrentRegion(current.below())) {
+                     options.add(Direction.DOWN);
+                 }
+             }
+ 
+             if (avoidAxis != Direction.Axis.Z) {
+-                if (current.getZ() < targetPos.getZ() && this.level().isEmptyBlock(current.south())) {
++                if (current.getZ() < targetPos.getZ() && this.isEmptyBlockInCurrentRegion(current.south())) {
+                     options.add(Direction.SOUTH);
+-                } else if (current.getZ() > targetPos.getZ() && this.level().isEmptyBlock(current.north())) {
++                } else if (current.getZ() > targetPos.getZ() && this.isEmptyBlockInCurrentRegion(current.north())) {
+                     options.add(Direction.NORTH);
+                 }
+             }
+ 
+             selection = Direction.getRandom(this.random);
+             if (options.isEmpty()) {
+-                for (int attempts = 5; !this.level().isEmptyBlock(current.relative(selection)) && attempts > 0; attempts--) {
++                for (int attempts = 5; !this.isEmptyBlockInCurrentRegion(current.relative(selection)) && attempts > 0; attempts--) {
+                     selection = Direction.getRandom(this.random);
+                 }
+             } else {
+@@ -173,6 +_,10 @@
+         this.flightSteps = 10 + this.random.nextInt(5) * 10;
+     }
+ 
++    private boolean isEmptyBlockInCurrentRegion(BlockPos pos) {
++        return this.canReadBlock(pos) && this.level().isEmptyBlock(pos);
++    }
++
+     @Override
+     public void checkDespawn() {
+         if (this.level().getDifficulty() == Difficulty.PEACEFUL) {
+@@ -188,10 +_,13 @@
+     @Override
+     public void tick() {
+         super.tick();
+-        Entity finalTarget = !this.level().isClientSide() ? EntityReference.getEntity(this.finalTarget, this.level()) : null;
++        EntityReference<Entity> targetReference = this.finalTarget;
++        Entity finalTarget = !this.level().isClientSide()
++            ? RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), EntityReference.getEntity(targetReference, this.level()))
++            : null;
+         HitResult hitResult = null;
+         if (!this.level().isClientSide()) {
+-            if (finalTarget == null) {
++            if (finalTarget == null && !this.targetExistsOutsideCurrentRegion(targetReference)) {
+                 this.finalTarget = null;
+             }
+ 
+@@ -217,7 +_,7 @@
+             this.handlePortal();
+         }
+ 
+-        if (hitResult != null && this.isAlive() && hitResult.getType() != HitResult.Type.MISS) {
++        if (hitResult != null && this.isAlive() && hitResult.getType() != HitResult.Type.MISS && !net.neoforged.neoforge.event.EventHooks.onProjectileImpact(this, hitResult)) {
+             this.hitTargetOrDeflectSelf(hitResult);
+         }
+ 
+@@ -235,7 +_,8 @@
+             if (this.currentMoveDirection != null) {
+                 BlockPos current = this.blockPosition();
+                 Direction.Axis axis = this.currentMoveDirection.getAxis();
+-                if (this.level().loadedAndEntityCanStandOn(current.relative(this.currentMoveDirection), this)) {
++                BlockPos ahead = current.relative(this.currentMoveDirection);
++                if (this.canReadBlock(ahead) && this.level().loadedAndEntityCanStandOn(ahead, this)) {
+                     this.selectNextMoveDirection(axis, finalTarget);
+                 } else {
+                     BlockPos targetPos = finalTarget.blockPosition();
+@@ -249,6 +_,15 @@
+         }
+     }
+ 
++    private boolean targetExistsOutsideCurrentRegion(@Nullable EntityReference<Entity> targetReference) {
++        if (targetReference == null || !(this.level() instanceof ServerLevel serverLevel)) {
++            return false;
++        }
++
++        Entity target = serverLevel.getEntities().get(targetReference.getUUID());
++        return target != null && RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, target) == null;
++    }
++
+     @Override
+     protected boolean isAffectedByBlocks() {
+         return !this.isRemoved();
+@@ -257,6 +_,11 @@
+     @Override
+     protected boolean canHitEntity(Entity entity) {
+         return super.canHitEntity(entity) && !entity.noPhysics;
++    }
++
++    @Override
++    protected boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level(), pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override

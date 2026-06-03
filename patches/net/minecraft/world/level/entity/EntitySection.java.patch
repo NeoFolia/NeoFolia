@@ -1,0 +1,84 @@
+--- a/net/minecraft/world/level/entity/EntitySection.java
++++ b/net/minecraft/world/level/entity/EntitySection.java
+@@ -1,7 +_,8 @@
+ package net.minecraft.world.level.entity;
+ 
+ import com.mojang.logging.LogUtils;
+-import java.util.Collection;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.stream.Stream;
+ import net.minecraft.util.AbortableIterationConsumer;
+ import net.minecraft.util.ClassInstanceMultiMap;
+@@ -19,16 +_,21 @@
+         this.storage = new ClassInstanceMultiMap<>(entityClass);
+     }
+ 
+-    public void add(T entity) {
++    public synchronized void add(T entity) {
+         this.storage.add(entity);
+     }
+ 
+-    public boolean remove(T entity) {
++    public synchronized boolean remove(T entity) {
+         return this.storage.remove(entity);
+     }
+ 
+     public AbortableIterationConsumer.Continuation getEntities(AABB bb, AbortableIterationConsumer<T> entities) {
+-        for (T entity : this.storage) {
++        List<T> snapshot;
++        synchronized (this) {
++            snapshot = new ArrayList<>(this.storage);
++        }
++
++        for (T entity : snapshot) {
+             if (entity.getBoundingBox().intersects(bb) && entities.accept(entity).shouldAbort()) {
+                 return AbortableIterationConsumer.Continuation.ABORT;
+             }
+@@ -38,7 +_,11 @@
+     }
+ 
+     public <U extends T> AbortableIterationConsumer.Continuation getEntities(EntityTypeTest<T, U> type, AABB bb, AbortableIterationConsumer<? super U> consumer) {
+-        Collection<? extends T> foundEntities = this.storage.find(type.getBaseClass());
++        List<? extends T> foundEntities;
++        synchronized (this) {
++            foundEntities = new ArrayList<>(this.storage.find(type.getBaseClass()));
++        }
++
+         if (foundEntities.isEmpty()) {
+             return AbortableIterationConsumer.Continuation.CONTINUE;
+         } else {
+@@ -53,26 +_,28 @@
+         }
+     }
+ 
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         return this.storage.isEmpty();
+     }
+ 
+     public Stream<T> getEntities() {
+-        return this.storage.stream();
++        synchronized (this) {
++            return List.copyOf(this.storage).stream();
++        }
+     }
+ 
+-    public Visibility getStatus() {
++    public synchronized Visibility getStatus() {
+         return this.chunkStatus;
+     }
+ 
+-    public Visibility updateChunkStatus(Visibility chunkStatus) {
++    public synchronized Visibility updateChunkStatus(Visibility chunkStatus) {
+         Visibility prev = this.chunkStatus;
+         this.chunkStatus = chunkStatus;
+         return prev;
+     }
+ 
+     @VisibleForDebug
+-    public int size() {
++    public synchronized int size() {
+         return this.storage.size();
+     }
+ }

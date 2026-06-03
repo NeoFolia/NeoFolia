@@ -1,0 +1,86 @@
+--- a/net/minecraft/world/inventory/CartographyTableMenu.java
++++ b/net/minecraft/world/inventory/CartographyTableMenu.java
+@@ -31,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             CartographyTableMenu.this.slotsChanged(this);
+             super.setChanged();
+         }
+@@ -42,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             CartographyTableMenu.this.slotsChanged(this);
+             super.setChanged();
+         }
+@@ -61,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return itemStack.has(DataComponents.MAP_ID);
+             }
+         });
+@@ -71,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return itemStack.is(Items.PAPER) || itemStack.is(Items.MAP) || itemStack.is(Items.GLASS_PANE);
+             }
+         });
+@@ -81,12 +_,12 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return false;
+             }
+ 
+             @Override
+-            public void onTake(Player player, ItemStack carried) {
++            public synchronized void onTake(Player player, ItemStack carried) {
+                 CartographyTableMenu.this.slots.get(0).remove(1);
+                 CartographyTableMenu.this.slots.get(1).remove(1);
+                 carried.getItem().onCraftedBy(carried, player);
+@@ -109,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         ItemStack mapStack = this.container.getItem(0);
+         ItemStack additionalStack = this.container.getItem(1);
+         ItemStack resultStack = this.resultContainer.getItem(2);
+@@ -155,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
++    public synchronized boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
+         return target.container != this.resultContainer && super.canTakeItemForPickAll(carried, target);
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -210,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.resultContainer.removeItemNoUpdate(2);
+         this.access.execute((level, pos) -> this.clearContainer(player, this.container));

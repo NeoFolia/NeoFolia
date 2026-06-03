@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/level/redstone/ExperimentalRedstoneUtils.java
++++ b/net/minecraft/world/level/redstone/ExperimentalRedstoneUtils.java
+@@ -1,14 +_,17 @@
+ package net.minecraft.world.level.redstone;
+ 
+ import net.minecraft.core.Direction;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.world.flag.FeatureFlags;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ExperimentalRedstoneUtils {
+     public static @Nullable Orientation initialOrientation(Level level, @Nullable Direction front, @Nullable Direction up) {
+         if (level.enabledFeatures().contains(FeatureFlags.REDSTONE_EXPERIMENTS)) {
+-            Orientation orientation = Orientation.random(level.getRandom()).withSideBias(Orientation.SideBias.LEFT);
++            Orientation orientation = Orientation.random(redstoneRandom(level)).withSideBias(Orientation.SideBias.LEFT);
+             if (up != null) {
+                 orientation = orientation.withUp(up);
+             }
+@@ -21,6 +_,10 @@
+         } else {
+             return null;
+         }
++    }
++
++    private static RandomSource redstoneRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     public static @Nullable Orientation withFront(@Nullable Orientation orientation, Direction front) {

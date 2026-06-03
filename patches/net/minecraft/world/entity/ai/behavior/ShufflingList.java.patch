@@ -1,0 +1,74 @@
+--- a/net/minecraft/world/entity/ai/behavior/ShufflingList.java
++++ b/net/minecraft/world/entity/ai/behavior/ShufflingList.java
+@@ -29,28 +_,28 @@
+         return ShufflingList.WeightedEntry.codec(elementCodec).listOf().xmap(ShufflingList::new, l -> l.entries);
+     }
+ 
+-    public ShufflingList<U> add(U data, int weight) {
++    public synchronized ShufflingList<U> add(U data, int weight) {
+         this.entries.add(new ShufflingList.WeightedEntry<>(data, weight));
+         return this;
+     }
+ 
+-    public ShufflingList<U> shuffle() {
++    public synchronized ShufflingList<U> shuffle() {
+         this.entries.forEach(k -> k.setRandom(this.random.nextFloat()));
+         this.entries.sort(Comparator.comparingDouble(ShufflingList.WeightedEntry::getRandWeight));
+         return this;
+     }
+ 
+-    public Stream<U> stream() {
+-        return this.entries.stream().map(ShufflingList.WeightedEntry::getData);
+-    }
+-
+-    @Override
+-    public Iterator<U> iterator() {
+-        return Iterators.transform(this.entries.iterator(), ShufflingList.WeightedEntry::getData);
+-    }
+-
+-    @Override
+-    public String toString() {
++    public synchronized Stream<U> stream() {
++        return this.entries.stream().map(ShufflingList.WeightedEntry::getData).toList().stream();
++    }
++
++    @Override
++    public synchronized Iterator<U> iterator() {
++        return this.entries.stream().map(ShufflingList.WeightedEntry::getData).toList().iterator();
++    }
++
++    @Override
++    public synchronized String toString() {
+         return "ShufflingList[" + this.entries + "]";
+     }
+ 
+@@ -64,24 +_,24 @@
+             this.data = data;
+         }
+ 
+-        private double getRandWeight() {
++        private synchronized double getRandWeight() {
+             return this.randWeight;
+         }
+ 
+-        private void setRandom(float random) {
++        private synchronized void setRandom(float random) {
+             this.randWeight = -Math.pow(random, 1.0F / this.weight);
+         }
+ 
+-        public T getData() {
++        public synchronized T getData() {
+             return this.data;
+         }
+ 
+-        public int getWeight() {
++        public synchronized int getWeight() {
+             return this.weight;
+         }
+ 
+         @Override
+-        public String toString() {
++        public synchronized String toString() {
+             return this.weight + ":" + this.data;
+         }
+ 

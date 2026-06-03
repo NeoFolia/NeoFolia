@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/item/ThrowablePotionItem.java
++++ b/net/minecraft/world/item/ThrowablePotionItem.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.world.entity.projectile.Projectile;
+ import net.minecraft.world.entity.projectile.throwableitemprojectile.AbstractThrownPotion;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class ThrowablePotionItem extends PotionItem implements ProjectileItem {
+     public static final float PROJECTILE_SHOOT_POWER = 0.5F;
+@@ -26,7 +_,7 @@
+             Projectile.spawnProjectileFromRotation(this::createPotion, serverLevel, itemStack, player, -20.0F, 0.5F, 1.0F);
+         }
+ 
+-        player.awardStat(Stats.ITEM_USED.get(this));
++        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+         itemStack.consume(1, player);
+         return InteractionResult.SUCCESS;
+     }

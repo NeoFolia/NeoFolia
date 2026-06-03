@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonSittingAttackingPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonSittingAttackingPhase.java
+@@ -29,14 +_,14 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         if (this.attackingTicks++ >= 40) {
+             this.dragon.getPhaseManager().setPhase(EnderDragonPhase.SITTING_FLAMING);
+         }
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.attackingTicks = 0;
+     }
+ 

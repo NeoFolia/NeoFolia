@@ -1,0 +1,14 @@
+--- a/net/minecraft/world/level/EntityGetter.java
++++ b/net/minecraft/world/level/EntityGetter.java
+@@ -111,8 +_,9 @@
+     }
+ 
+     default @Nullable Player getPlayerByUUID(UUID uuid) {
+-        for (int i = 0; i < this.players().size(); i++) {
+-            Player player = this.players().get(i);
++        List<? extends Player> players = this.players();
++        for (int i = 0; i < players.size(); i++) {
++            Player player = players.get(i);
+             if (uuid.equals(player.getUUID())) {
+                 return player;
+             }

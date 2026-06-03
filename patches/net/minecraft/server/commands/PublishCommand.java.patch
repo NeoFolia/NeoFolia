@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/PublishCommand.java
++++ b/net/minecraft/server/commands/PublishCommand.java
+@@ -57,6 +_,10 @@
+     }
+ 
+     private static int publish(CommandSourceStack source, int port, boolean allowCommands, @Nullable GameType type) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> publish(source, port, allowCommands, type))) {
++            return 0;
++        }
++
+         if (source.getServer().isPublished()) {
+             throw ERROR_ALREADY_PUBLISHED.create(source.getServer().getPort());
+         } else if (!source.getServer().publishServer(type, allowCommands, port)) {

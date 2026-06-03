@@ -1,0 +1,150 @@
+--- a/net/minecraft/world/level/block/entity/BaseContainerBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BaseContainerBlockEntity.java
+@@ -35,37 +_,37 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.lockKey = LockCode.fromTag(input);
+         this.name = parseCustomNameSafe(input, "CustomName");
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         this.lockKey.addToTag(output);
+         output.storeNullable("CustomName", ComponentSerialization.CODEC, this.name);
+     }
+ 
+     @Override
+-    public Component getName() {
++    public synchronized Component getName() {
+         return this.name != null ? this.name : this.getDefaultName();
+     }
+ 
+     @Override
+-    public Component getDisplayName() {
++    public synchronized Component getDisplayName() {
+         return this.getName();
+     }
+ 
+     @Override
+-    public @Nullable Component getCustomName() {
++    public synchronized @Nullable Component getCustomName() {
+         return this.name;
+     }
+ 
+     protected abstract Component getDefaultName();
+ 
+-    public boolean canOpen(Player player) {
++    public synchronized boolean canOpen(Player player) {
+         return this.lockKey.canUnlock(player);
+     }
+ 
+@@ -77,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean isLocked() {
++    public synchronized boolean isLocked() {
+         return !this.lockKey.equals(LockCode.NO_LOCK);
+     }
+ 
+@@ -86,7 +_,7 @@
+     protected abstract void setItems(NonNullList<ItemStack> items);
+ 
+     @Override
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         for (ItemStack itemStack : this.getItems()) {
+             if (!itemStack.isEmpty()) {
+                 return false;
+@@ -97,12 +_,12 @@
+     }
+ 
+     @Override
+-    public ItemStack getItem(int slot) {
++    public synchronized ItemStack getItem(int slot) {
+         return this.getItems().get(slot);
+     }
+ 
+     @Override
+-    public ItemStack removeItem(int slot, int count) {
++    public synchronized ItemStack removeItem(int slot, int count) {
+         ItemStack result = ContainerHelper.removeItem(this.getItems(), slot, count);
+         if (!result.isEmpty()) {
+             this.setChanged();
+@@ -112,29 +_,37 @@
+     }
+ 
+     @Override
+-    public ItemStack removeItemNoUpdate(int slot) {
++    public synchronized ItemStack removeItemNoUpdate(int slot) {
+         return ContainerHelper.takeItem(this.getItems(), slot);
+     }
+ 
+     @Override
+-    public void setItem(int slot, ItemStack itemStack) {
++    public synchronized void setItem(int slot, ItemStack itemStack) {
++        setItem(slot, itemStack, false);
++    }
++
++    // Neo: Skip side-effects if insideTransaction is true so the caller can defer them until the transaction commits
++    @Override
++    public synchronized void setItem(int slot, ItemStack itemStack, boolean insideTransaction) {
+         this.getItems().set(slot, itemStack);
+         itemStack.limitSize(this.getMaxStackSize(itemStack));
+-        this.setChanged();
++        if (!insideTransaction) {
++            this.setChanged();
++        }
+     }
+ 
+     @Override
+-    public boolean stillValid(Player player) {
++    public synchronized boolean stillValid(Player player) {
+         return Container.stillValidBlockEntity(this, player);
+     }
+ 
+     @Override
+-    public void clearContent() {
++    public synchronized void clearContent() {
+         this.getItems().clear();
+     }
+ 
+     @Override
+-    public @Nullable AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
++    public synchronized @Nullable AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
+         if (this.canOpen(player)) {
+             return this.createMenu(containerId, inventory);
+         } else {
+@@ -146,7 +_,7 @@
+     protected abstract AbstractContainerMenu createMenu(final int containerId, final Inventory inventory);
+ 
+     @Override
+-    protected void applyImplicitComponents(DataComponentGetter components) {
++    protected synchronized void applyImplicitComponents(DataComponentGetter components) {
+         super.applyImplicitComponents(components);
+         this.name = components.get(DataComponents.CUSTOM_NAME);
+         this.lockKey = components.getOrDefault(DataComponents.LOCK, LockCode.NO_LOCK);
+@@ -154,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void collectImplicitComponents(DataComponentMap.Builder components) {
++    protected synchronized void collectImplicitComponents(DataComponentMap.Builder components) {
+         super.collectImplicitComponents(components);
+         components.set(DataComponents.CUSTOM_NAME, this.name);
+         if (this.isLocked()) {
+@@ -165,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removeComponentsFromTag(ValueOutput output) {
++    public synchronized void removeComponentsFromTag(ValueOutput output) {
+         output.discard("CustomName");
+         output.discard("lock");
+         output.discard("Items");

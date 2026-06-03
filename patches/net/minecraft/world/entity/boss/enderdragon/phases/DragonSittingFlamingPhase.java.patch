@@ -1,0 +1,45 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonSittingFlamingPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonSittingFlamingPhase.java
+@@ -25,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doClientTick() {
++    public synchronized void doClientTick() {
+         this.flameTicks++;
+         if (this.flameTicks % 2 == 0 && this.flameTicks < 10) {
+             Vec3 look = this.dragon.getHeadLookVector(1.0F).normalize();
+@@ -53,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         this.flameTicks++;
+         if (this.flameTicks >= 200) {
+             if (this.flameCount >= 4) {
+@@ -92,13 +_,13 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.flameTicks = 0;
+         this.flameCount++;
+     }
+ 
+     @Override
+-    public void end() {
++    public synchronized void end() {
+         if (this.flame != null) {
+             this.flame.discard();
+             this.flame = null;
+@@ -110,7 +_,7 @@
+         return EnderDragonPhase.SITTING_FLAMING;
+     }
+ 
+-    public void resetFlameCount() {
++    public synchronized void resetFlameCount() {
+         this.flameCount = 0;
+     }
+ }

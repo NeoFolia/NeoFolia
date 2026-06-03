@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/entity/animal/allay/AllayAi.java
++++ b/net/minecraft/world/entity/animal/allay/AllayAi.java
+@@ -39,6 +_,7 @@
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Blocks;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class AllayAi {
+     private static final float SPEED_MULTIPLIER_WHEN_IDLING = 1.0F;
+@@ -131,10 +_,15 @@
+         Optional<Integer> likedNoteblockCooldown = brain.getMemory(MemoryModuleType.LIKED_NOTEBLOCK_COOLDOWN_TICKS);
+         Level level = allay.level();
+         return likedNoteblockPos.isCloseEnough(level.dimension(), allay.blockPosition(), 1024)
++            && canReadBlock(level, likedNoteblockPos.pos())
+             && level.getBlockState(likedNoteblockPos.pos()).is(Blocks.NOTE_BLOCK)
+             && likedNoteblockCooldown.isPresent();
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private static Optional<PositionTracker> getLikedPlayerPositionTracker(LivingEntity allay) {
+         return getLikedPlayer(allay).map(serverPlayer -> new EntityTracker(serverPlayer, true));
+     }
+@@ -158,10 +_,33 @@
+     }
+ 
+     private static void onItemThrown(ServerLevel level, Allay thrower, ItemStack item, BlockPos targetPos) {
+-        getLikedPlayer(thrower).ifPresent(player -> CriteriaTriggers.ALLAY_DROP_ITEM_ON_BLOCK.trigger(player, targetPos.below(), item));
+-        if (level.getGameTime() % 7L == 0L && level.getRandom().nextDouble() < 0.9) {
+-            float pitch = Util.getRandom(Allay.THROW_SOUND_PITCHES, level.getRandom());
++        triggerDropItemOnBlock(level, thrower, item, targetPos);
++        if (level.getGameTime() % 7L == 0L && thrower.getRandom().nextDouble() < 0.9) {
++            float pitch = Util.getRandom(Allay.THROW_SOUND_PITCHES, thrower.getRandom());
+             level.playSound(null, thrower, SoundEvents.ALLAY_THROW, SoundSource.NEUTRAL, 1.0F, pitch);
+         }
++    }
++
++    private static void triggerDropItemOnBlock(ServerLevel level, Allay thrower, ItemStack item, BlockPos targetPos) {
++        Optional<UUID> likedPlayer = thrower.getBrain().getMemory(MemoryModuleType.LIKED_PLAYER);
++        if (likedPlayer.isEmpty()) {
++            return;
++        }
++
++        ServerPlayer player = level.getServer().getPlayerList().getAnyRegionPlayer(likedPlayer.get());
++        if (player == null) {
++            return;
++        }
++
++        double throwerX = thrower.getX();
++        double throwerY = thrower.getY();
++        double throwerZ = thrower.getZ();
++        BlockPos triggerPos = targetPos.below().immutable();
++        ItemStack triggerItem = item.copy();
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++            if ((player.gameMode.isSurvival() || player.gameMode.isCreative()) && player.distanceToSqr(throwerX, throwerY, throwerZ) < 4096.0) {
++                CriteriaTriggers.ALLAY_DROP_ITEM_ON_BLOCK.trigger(player, triggerPos, triggerItem);
++            }
++        });
+     }
+ }

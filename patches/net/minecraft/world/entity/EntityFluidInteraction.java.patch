@@ -1,0 +1,21 @@
+--- a/net/minecraft/world/entity/EntityFluidInteraction.java
++++ b/net/minecraft/world/entity/EntityFluidInteraction.java
+@@ -18,6 +_,7 @@
+ import net.minecraft.world.level.material.FluidState;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class EntityFluidInteraction {
+@@ -99,6 +_,10 @@
+ 
+         for (int chunkZ = sectionZ0; chunkZ <= sectionZ1; chunkZ++) {
+             for (int chunkX = sectionX0; chunkX <= sectionX1; chunkX++) {
++                if (!RegionizedWorldGuard.shouldLoadChunk(level, chunkX, chunkZ)) {
++                    return false;
++                }
++
+                 ChunkAccess chunk = level.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+                 if (chunk == null) {
+                     return false;

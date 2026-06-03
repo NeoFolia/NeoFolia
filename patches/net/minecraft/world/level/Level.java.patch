@@ -1,0 +1,695 @@
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -3,12 +_,17 @@
+ import com.google.common.collect.Lists;
+ import com.mojang.serialization.Codec;
+ import java.io.IOException;
++import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.Iterator;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Locale;
++import java.util.Map;
+ import java.util.Optional;
++import java.util.Queue;
+ import java.util.UUID;
++import java.util.concurrent.ConcurrentLinkedQueue;
+ import java.util.function.Consumer;
+ import java.util.function.Predicate;
+ import java.util.stream.Collectors;
+@@ -30,6 +_,7 @@
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.FullChunkStatus;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+@@ -87,10 +_,14 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.scores.Scoreboard;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.apache.commons.lang3.mutable.MutableBoolean;
+ import org.jspecify.annotations.Nullable;
+ 
+-public abstract class Level implements LevelAccessor, AutoCloseable, net.neoforged.neoforge.common.extensions.ILevelExtension {
++public abstract class Level extends net.neoforged.neoforge.attachment.AttachmentHolder implements LevelAccessor, AutoCloseable, net.neoforged.neoforge.common.extensions.ILevelExtension {
+     public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
+     public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, Identifier.withDefaultNamespace("overworld"));
+     public static final ResourceKey<Level> NETHER = ResourceKey.create(Registries.DIMENSION, Identifier.withDefaultNamespace("the_nether"));
+@@ -108,6 +_,7 @@
+     protected final List<TickingBlockEntity> blockEntityTickers = Lists.newArrayList();
+     protected final CollectingNeighborUpdater neighborUpdater;
+     private final List<TickingBlockEntity> pendingBlockEntityTickers = Lists.newArrayList();
++    private final Queue<TickingBlockEntity> pendingOffThreadBlockEntityTickers = new ConcurrentLinkedQueue<>();
+     private boolean tickingBlockEntities;
+     private final Thread thread;
+     private final boolean isDebug;
+@@ -130,6 +_,14 @@
+     private final DamageSources damageSources;
+     private final PalettedContainerFactory palettedContainerFactory;
+     private long subTickCount;
++    public boolean restoringBlockSnapshots = false;
++    public boolean captureBlockSnapshots = false;
++    public java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot> capturedBlockSnapshots = new java.util.ArrayList<>();
++    private final ThreadLocal<java.util.Deque<java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot>>> capturedBlockSnapshotStack = ThreadLocal.withInitial(java.util.ArrayDeque::new);
++    private final ThreadLocal<Boolean> restoringBlockSnapshotsForThread = ThreadLocal.withInitial(() -> Boolean.FALSE);
++    private final java.util.ArrayList<BlockEntity> freshBlockEntities = new java.util.ArrayList<>();
++    private final java.util.ArrayList<BlockEntity> pendingFreshBlockEntities = new java.util.ArrayList<>();
++    private final Queue<BlockEntity> pendingOffThreadFreshBlockEntities = new ConcurrentLinkedQueue<>();
+ 
+     protected Level(
+         WritableLevelData levelData,
+@@ -190,6 +_,11 @@
+         return y < -20000000 || y >= 20000000;
+     }
+ 
++    @Override
++    public boolean hasChunk(int chunkX, int chunkZ) {
++        return RegionizedWorldGuard.shouldLoadChunk(this, chunkX, chunkZ) && this.getChunkSource().hasChunk(chunkX, chunkZ);
++    }
++
+     public LevelChunk getChunkAt(BlockPos pos) {
+         return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+     }
+@@ -200,8 +_,16 @@
+ 
+     @Override
+     public @Nullable ChunkAccess getChunk(int chunkX, int chunkZ, ChunkStatus status, boolean loadOrGenerate) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(this, chunkX, chunkZ)) {
++            if (loadOrGenerate) {
++                RegionizedWorldGuard.ensureChunkLoadIfRegionized(this, chunkX, chunkZ, "getChunk");
++            }
++
++            return null;
++        }
++
+         ChunkAccess chunk = this.getChunkSource().getChunk(chunkX, chunkZ, status, loadOrGenerate);
+-        if (chunk == null && loadOrGenerate) {
++        if (chunk == null && loadOrGenerate && !RegionizedTickContext.isRegionThread()) {
+             throw new IllegalStateException("Should always be able to create a chunk!");
+         } else {
+             return chunk;
+@@ -215,6 +_,13 @@
+ 
+     @Override
+     public boolean setBlock(BlockPos pos, BlockState blockState, @Block.UpdateFlags int updateFlags, int updateLimit) {
++        BlockPos immutablePos = pos.immutable();
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this, immutablePos, () -> this.setBlock(immutablePos, blockState, updateFlags, updateLimit))) {
++            return false;
++        }
++
++        RegionizedWorldGuard.ensureRegionThreadIfRegionized(this, immutablePos, "setBlock");
++        pos = immutablePos;
+         if (!this.isInValidBounds(pos)) {
+             return false;
+         } else if (!this.isClientSide() && this.isDebug()) {
+@@ -222,11 +_,101 @@
+         } else {
+             LevelChunk chunk = this.getChunkAt(pos);
+             Block block = blockState.getBlock();
++
++            pos = pos.immutable(); // Forge - prevent mutable BlockPos leaks
++            net.neoforged.neoforge.common.util.BlockSnapshot blockSnapshot = null;
++            if (this.isCapturingBlockSnapshots() && !this.isClientSide) {
++                blockSnapshot = net.neoforged.neoforge.common.util.BlockSnapshot.create(this.dimension, this, pos, updateFlags);
++                this.addCapturedBlockSnapshot(blockSnapshot);
++            }
++
+             BlockState oldState = chunk.setBlockState(pos, blockState, updateFlags);
+             if (oldState == null) {
++                if (blockSnapshot != null) this.removeCapturedBlockSnapshot(blockSnapshot);
+                 return false;
+             } else {
+                 BlockState newState = this.getBlockState(pos);
++
++                if (blockSnapshot == null) { // Don't notify clients or update physics while capturing blockstates
++                    this.markAndNotifyBlock(pos, chunk, oldState, blockState, updateFlags, updateLimit);
++                }
++
++                return true;
++            }
++        }
++    }
++
++    public boolean isCapturingBlockSnapshots() {
++        return this.captureBlockSnapshots || !this.capturedBlockSnapshotStack.get().isEmpty();
++    }
++
++    public void beginCapturingBlockSnapshots() {
++        this.capturedBlockSnapshotStack.get().push(new java.util.ArrayList<>());
++    }
++
++    public java.util.List<net.neoforged.neoforge.common.util.BlockSnapshot> endCapturingBlockSnapshots() {
++        java.util.Deque<java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot>> snapshots = this.capturedBlockSnapshotStack.get();
++        if (snapshots.isEmpty()) {
++            java.util.List<net.neoforged.neoforge.common.util.BlockSnapshot> legacySnapshots = new java.util.ArrayList<>(this.capturedBlockSnapshots);
++            this.capturedBlockSnapshots.clear();
++            return legacySnapshots;
++        }
++
++        java.util.List<net.neoforged.neoforge.common.util.BlockSnapshot> captured = snapshots.pop();
++        if (snapshots.isEmpty()) {
++            this.capturedBlockSnapshotStack.remove();
++        }
++        return captured;
++    }
++
++    public void discardCapturedBlockSnapshots() {
++        java.util.Deque<java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot>> snapshots = this.capturedBlockSnapshotStack.get();
++        if (snapshots.isEmpty()) {
++            this.capturedBlockSnapshots.clear();
++        } else {
++            snapshots.pop();
++            if (snapshots.isEmpty()) {
++                this.capturedBlockSnapshotStack.remove();
++            }
++        }
++    }
++
++    private void addCapturedBlockSnapshot(net.neoforged.neoforge.common.util.BlockSnapshot blockSnapshot) {
++        java.util.Deque<java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot>> snapshots = this.capturedBlockSnapshotStack.get();
++        if (snapshots.isEmpty()) {
++            this.capturedBlockSnapshots.add(blockSnapshot);
++        } else {
++            snapshots.peek().add(blockSnapshot);
++        }
++    }
++
++    private void removeCapturedBlockSnapshot(net.neoforged.neoforge.common.util.BlockSnapshot blockSnapshot) {
++        java.util.Deque<java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot>> snapshots = this.capturedBlockSnapshotStack.get();
++        if (snapshots.isEmpty()) {
++            this.capturedBlockSnapshots.remove(blockSnapshot);
++        } else {
++            snapshots.peek().remove(blockSnapshot);
++        }
++    }
++
++    public boolean isRestoringBlockSnapshots() {
++        return this.restoringBlockSnapshots || Boolean.TRUE.equals(this.restoringBlockSnapshotsForThread.get());
++    }
++
++    public void setRestoringBlockSnapshotsForThread(boolean restoring) {
++        if (restoring) {
++            this.restoringBlockSnapshotsForThread.set(Boolean.TRUE);
++        } else {
++            this.restoringBlockSnapshotsForThread.remove();
++        }
++    }
++
++    // Split off from original setBlockState(BlockPos, BlockState, int, int) method in order to directly send client and physic updates
++    public void markAndNotifyBlock(BlockPos pos, @Nullable LevelChunk chunk, BlockState oldState, BlockState blockState, int updateFlags, int updateLimit) {
++        Block block = blockState.getBlock();
++        BlockState newState = getBlockState(pos);
++        {
++            {
+                 if (newState == blockState) {
+                     if (oldState != newState) {
+                         this.setBlocksDirty(pos, oldState, newState);
+@@ -253,9 +_,8 @@
+                     }
+ 
+                     this.updatePOIOnBlockStateChange(pos, oldState, newState);
++                    blockState.onBlockStateChange(this, pos, oldState);
+                 }
+-
+-                return true;
+             }
+         }
+     }
+@@ -265,12 +_,24 @@
+ 
+     @Override
+     public boolean removeBlock(BlockPos pos, boolean movedByPiston) {
++        BlockPos immutablePos = pos.immutable();
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this, immutablePos, () -> this.removeBlock(immutablePos, movedByPiston))) {
++            return false;
++        }
++
++        pos = immutablePos;
+         FluidState fluidState = this.getFluidState(pos);
+         return this.setBlock(pos, fluidState.createLegacyBlock(), 3 | (movedByPiston ? 64 : 0));
+     }
+ 
+     @Override
+     public boolean destroyBlock(BlockPos pos, boolean dropResources, @Nullable Entity breaker, int updateLimit) {
++        BlockPos immutablePos = pos.immutable();
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this, immutablePos, () -> this.destroyBlock(immutablePos, dropResources, breaker, updateLimit))) {
++            return false;
++        }
++
++        pos = immutablePos;
+         BlockState blockState = this.getBlockState(pos);
+         if (blockState.isAir()) {
+             return false;
+@@ -307,6 +_,7 @@
+     }
+ 
+     public void updateNeighborsAt(BlockPos pos, Block sourceBlock, @Nullable Orientation orientation) {
++        net.neoforged.neoforge.event.EventHooks.onNeighborNotify(this, pos, this.getBlockState(pos), java.util.EnumSet.allOf(Direction.class), false).isCanceled();
+     }
+ 
+     public void updateNeighborsAtExceptFromFacing(BlockPos pos, Block blockObject, Direction skipDirection, @Nullable Orientation orientation) {
+@@ -329,11 +_,10 @@
+     public int getHeight(Heightmap.Types type, int x, int z) {
+         int y;
+         if (x >= -30000000 && z >= -30000000 && x < 30000000 && z < 30000000) {
+-            if (this.hasChunk(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z))) {
+-                y = this.getChunk(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z)).getHeight(type, x & 15, z & 15) + 1;
+-            } else {
+-                y = this.getMinY();
+-            }
++            int chunkX = SectionPos.blockToSectionCoord(x);
++            int chunkZ = SectionPos.blockToSectionCoord(z);
++            ChunkAccess chunk = this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, RegionizedWorldGuard.shouldLoadChunk(this, chunkX, chunkZ));
++            y = chunk == null ? this.getMinY() : chunk.getHeight(type, x & 15, z & 15) + 1;
+         } else {
+             y = this.getSeaLevel() + 1;
+         }
+@@ -351,8 +_,10 @@
+         if (!this.isInValidBounds(pos)) {
+             return Blocks.VOID_AIR.defaultBlockState();
+         } else {
+-            LevelChunk chunk = this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+-            return chunk.getBlockState(pos);
++            int chunkX = SectionPos.blockToSectionCoord(pos.getX());
++            int chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
++            ChunkAccess chunk = this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, RegionizedWorldGuard.shouldLoadChunk(this, chunkX, chunkZ));
++            return chunk == null ? Blocks.VOID_AIR.defaultBlockState() : chunk.getBlockState(pos);
+         }
+     }
+ 
+@@ -361,8 +_,10 @@
+         if (!this.isInValidBounds(pos)) {
+             return Fluids.EMPTY.defaultFluidState();
+         } else {
+-            LevelChunk chunk = this.getChunkAt(pos);
+-            return chunk.getFluidState(pos);
++            int chunkX = SectionPos.blockToSectionCoord(pos.getX());
++            int chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
++            ChunkAccess chunk = this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, RegionizedWorldGuard.shouldLoadChunk(this, chunkX, chunkZ));
++            return chunk == null ? Fluids.EMPTY.defaultFluidState() : chunk.getFluidState(pos);
+         }
+     }
+ 
+@@ -452,18 +_,69 @@
+     }
+ 
+     public void addBlockEntityTicker(TickingBlockEntity ticker) {
++        if (RegionizedTickContext.isRegionThread()) {
++            this.pendingOffThreadBlockEntityTickers.add(ticker);
++            return;
++        }
++
+         (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
+     }
+ 
++    public void addFreshBlockEntities(java.util.Collection<BlockEntity> beList) {
++        if (RegionizedTickContext.isRegionThread()) {
++            this.pendingOffThreadFreshBlockEntities.addAll(beList);
++            return;
++        }
++
++        if (this.tickingBlockEntities) {
++            this.pendingFreshBlockEntities.addAll(beList);
++        } else {
++            this.freshBlockEntities.addAll(beList);
++        }
++    }
++
+     public void tickBlockEntities() {
++        this.drainOffThreadBlockEntityUpdates();
++        if (!this.pendingFreshBlockEntities.isEmpty()) {
++            this.freshBlockEntities.addAll(this.pendingFreshBlockEntities);
++            this.pendingFreshBlockEntities.clear();
++        }
+         this.tickingBlockEntities = true;
+-        if (!this.pendingBlockEntityTickers.isEmpty()) {
+-            this.blockEntityTickers.addAll(this.pendingBlockEntityTickers);
+-            this.pendingBlockEntityTickers.clear();
++        try {
++            if (!this.freshBlockEntities.isEmpty()) {
++                this.freshBlockEntities.forEach(blockEntity -> {
++                    // Only call onLoad() on BEs which have been fully added to the level, prevents crashes with BEs that
++                    // were discarded due to incompatibility with the BlockState at their position
++                    if (!blockEntity.isRemoved() && blockEntity.hasLevel()) {
++                        blockEntity.onLoad();
++                    }
++                });
++                this.freshBlockEntities.clear();
++            }
++            if (!this.pendingBlockEntityTickers.isEmpty()) {
++                this.blockEntityTickers.addAll(this.pendingBlockEntityTickers);
++                this.pendingBlockEntityTickers.clear();
++            }
++
++            boolean tickBlockEntities = this.tickRateManager().runsNormally();
++            if (tickBlockEntities && this.shouldTickBlockEntitiesRegionized()) {
++                this.tickBlockEntitiesRegionized((ServerLevel)this);
++            } else {
++                this.tickBlockEntitiesVanilla(tickBlockEntities);
++            }
++        } finally {
++            this.tickingBlockEntities = false;
+         }
+-
++    }
++
++    private boolean shouldTickBlockEntitiesRegionized() {
++        return this instanceof ServerLevel serverLevel
++            && RegionizedServerSettings.regionizedBlockEntityTicksEnabled()
++            && serverLevel.getServer().regionizedTaskDispatcher().isRunning();
++    }
++
++    private void tickBlockEntitiesVanilla(boolean tickBlockEntities) {
+         Iterator<TickingBlockEntity> iterator = this.blockEntityTickers.iterator();
+-        boolean tickBlockEntities = this.tickRateManager().runsNormally();
+ 
+         while (iterator.hasNext()) {
+             TickingBlockEntity ticker = iterator.next();
+@@ -473,18 +_,62 @@
+                 ticker.tick();
+             }
+         }
+-
+-        this.tickingBlockEntities = false;
++    }
++
++    private void tickBlockEntitiesRegionized(ServerLevel serverLevel) {
++        Map<RegionKey, List<TickingBlockEntity>> tickersByRegion = new LinkedHashMap<>();
++        Iterator<TickingBlockEntity> iterator = this.blockEntityTickers.iterator();
++
++        while (iterator.hasNext()) {
++            TickingBlockEntity ticker = iterator.next();
++            if (ticker.isRemoved()) {
++                iterator.remove();
++            } else if (this.shouldTickBlocksAt(ticker.getPos())) {
++                tickersByRegion.computeIfAbsent(serverLevel.regionKeyForBlock(ticker.getPos()), key -> new ArrayList<>()).add(ticker);
++            }
++        }
++
++        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
++        tickersByRegion.forEach((region, tickers) -> tasksByRegion.put(region, () -> {
++            for (TickingBlockEntity ticker : tickers) {
++                BlockPos pos = ticker.getPos();
++                serverLevel.ensureRegionThreadFor(pos, "block entity tick");
++                if (!ticker.isRemoved()) {
++                    ticker.tick();
++                }
++            }
++        }));
++
++        serverLevel.getServer().regionizedTaskDispatcher().executeCoalescedAll("block-entity-ticks", tasksByRegion);
++    }
++
++    private void drainOffThreadBlockEntityUpdates() {
++        BlockEntity blockEntity;
++        while ((blockEntity = this.pendingOffThreadFreshBlockEntities.poll()) != null) {
++            this.freshBlockEntities.add(blockEntity);
++        }
++
++        TickingBlockEntity ticker;
++        while ((ticker = this.pendingOffThreadBlockEntityTickers.poll()) != null) {
++            this.blockEntityTickers.add(ticker);
++        }
+     }
+ 
+     public <T extends Entity> void guardEntityTick(Consumer<T> tick, T entity) {
+         try {
++            net.neoforged.neoforge.server.timings.TimeTracker.ENTITY_UPDATE.trackStart(entity);
+             tick.accept(entity);
+         } catch (Throwable var6) {
+             CrashReport report = CrashReport.forThrowable(var6, "Ticking entity");
+             CrashReportCategory category = report.addCategory("Entity being ticked");
+             entity.fillCrashReportCategory(category);
++            if (net.neoforged.neoforge.common.config.NeoForgeServerConfig.INSTANCE.removeErroringEntities.get()) {
++                com.mojang.logging.LogUtils.getLogger().error("{}", report.getFriendlyReport(net.minecraft.ReportType.CRASH));
++                entity.discard();
++            } else
+             throw new ReportedException(report);
++        } finally {
++            net.neoforged.neoforge.server.timings.TimeTracker.ENTITY_UPDATE.trackEnd(entity);
+         }
+     }
+ 
+@@ -613,29 +_,42 @@
+         if (!this.isInValidBounds(pos)) {
+             return null;
+         } else {
+-            return !this.isClientSide() && Thread.currentThread() != this.thread
++            return !this.isClientSide() && Thread.currentThread() != this.thread && !RegionizedWorldGuard.isRegionThreadFor(this, pos)
+                 ? null
+                 : this.getChunkAt(pos).getBlockEntity(pos, LevelChunk.EntityCreationType.IMMEDIATE);
+         }
+     }
+ 
+     public void setBlockEntity(BlockEntity blockEntity) {
+-        BlockPos pos = blockEntity.getBlockPos();
++        BlockPos pos = blockEntity.getBlockPos().immutable();
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this, pos, () -> this.setBlockEntity(blockEntity))) {
++            return;
++        }
++
++        RegionizedWorldGuard.ensureRegionThreadIfRegionized(this, pos, "setBlockEntity");
+         if (this.isInValidBounds(pos)) {
+             this.getChunkAt(pos).addAndRegisterBlockEntity(blockEntity);
+         }
+     }
+ 
+     public void removeBlockEntity(BlockPos pos) {
++        BlockPos immutablePos = pos.immutable();
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this, immutablePos, () -> this.removeBlockEntity(immutablePos))) {
++            return;
++        }
++
++        RegionizedWorldGuard.ensureRegionThreadIfRegionized(this, immutablePos, "removeBlockEntity");
++        pos = immutablePos;
+         if (this.isInValidBounds(pos)) {
+             this.getChunkAt(pos).removeBlockEntity(pos);
+         }
++        this.updateNeighbourForOutputSignal(pos, getBlockState(pos).getBlock()); //Notify neighbors of changes
+     }
+ 
+     public boolean isLoaded(BlockPos pos) {
+         return !this.isInValidBounds(pos)
+             ? false
+-            : this.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
++            : this.hasChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+     }
+ 
+     public boolean loadedAndEntityCanStandOnFace(BlockPos pos, Entity entity, Direction faceDirection) {
+@@ -682,6 +_,10 @@
+ 
+     @Override
+     public @Nullable BlockGetter getChunkForCollisions(int chunkX, int chunkZ) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(this, chunkX, chunkZ)) {
++            return null;
++        }
++
+         return this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+     }
+ 
+@@ -689,14 +_,23 @@
+     public List<Entity> getEntities(@Nullable Entity except, AABB bb, Predicate<? super Entity> selector) {
+         Profiler.get().incrementCounter("getEntities");
+         List<Entity> output = Lists.newArrayList();
+-        this.getEntities().get(bb, entity -> {
+-            if (entity != except && selector.test(entity)) {
++        @Nullable AABB queryBox = RegionizedWorldGuard.restrictToCurrentRegion(this, bb);
++        if (queryBox == null) {
++            return output;
++        }
++
++        this.getEntities().get(queryBox, entity -> {
++            if (entity != except && RegionizedWorldGuard.restrictEntityToCurrentRegion(this, entity) != null && selector.test(entity)) {
+                 output.add(entity);
+             }
+         });
+ 
+-        for (EnderDragonPart dragonPart : this.dragonParts()) {
+-            if (dragonPart != except && dragonPart.parentMob != except && selector.test(dragonPart) && bb.intersects(dragonPart.getBoundingBox())) {
++        for (net.neoforged.neoforge.entity.PartEntity<?> dragonPart : this.dragonParts()) {
++            if (dragonPart != except
++                && dragonPart.getParent() != except
++                && RegionizedWorldGuard.restrictEntityToCurrentRegion(this, dragonPart) != null
++                && selector.test(dragonPart)
++                && queryBox.intersects(dragonPart.getBoundingBox())) {
+                 output.add(dragonPart);
+             }
+         }
+@@ -717,14 +_,20 @@
+ 
+     public <T extends Entity> void getEntities(EntityTypeTest<Entity, T> type, AABB bb, Predicate<? super T> selector, List<? super T> output, int maxResults) {
+         Profiler.get().incrementCounter("getEntities");
+-        this.getEntities().get(type, bb, e -> {
+-            if (selector.test(e)) {
++        @Nullable AABB queryBox = RegionizedWorldGuard.restrictToCurrentRegion(this, bb);
++        if (queryBox == null) {
++            return;
++        }
++
++        this.getEntities().get(type, queryBox, e -> {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this, e) != null && selector.test(e)) {
+                 output.add(e);
+                 if (output.size() >= maxResults) {
+                     return AbortableIterationConsumer.Continuation.ABORT;
+                 }
+             }
+ 
++            if (false)
+             if (e instanceof EnderDragon enderDragon) {
+                 for (EnderDragonPart subEntity : enderDragon.getSubEntities()) {
+                     T castSubPart = type.tryCast(subEntity);
+@@ -739,16 +_,34 @@
+ 
+             return AbortableIterationConsumer.Continuation.CONTINUE;
+         });
++        for (net.neoforged.neoforge.entity.PartEntity<?> p : this.dragonParts()) {
++            T t = type.tryCast(p);
++            if (t != null
++                && RegionizedWorldGuard.restrictEntityToCurrentRegion(this, t) != null
++                && t.getBoundingBox().intersects(queryBox)
++                && selector.test(t)) {
++                output.add(t);
++                if (output.size() >= maxResults) {
++                    break;
++                }
++            }
++        }
+     }
+ 
+     public <T extends Entity> boolean hasEntities(EntityTypeTest<Entity, T> type, AABB bb, Predicate<? super T> selector) {
+         Profiler.get().incrementCounter("hasEntities");
++        @Nullable AABB queryBox = RegionizedWorldGuard.restrictToCurrentRegion(this, bb);
++        if (queryBox == null) {
++            return false;
++        }
++
+         MutableBoolean hasEntities = new MutableBoolean();
+-        this.getEntities().get(type, bb, e -> {
+-            if (selector.test(e)) {
++        this.getEntities().get(type, queryBox, e -> {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this, e) != null && selector.test(e)) {
+                 hasEntities.setTrue();
+                 return AbortableIterationConsumer.Continuation.ABORT;
+             } else {
++                if (false)
+                 if (e instanceof EnderDragon enderDragon) {
+                     for (EnderDragonPart subEntity : enderDragon.getSubEntities()) {
+                         T castSubPart = type.tryCast(subEntity);
+@@ -762,6 +_,16 @@
+                 return AbortableIterationConsumer.Continuation.CONTINUE;
+             }
+         });
++        for (net.neoforged.neoforge.entity.PartEntity<?> p : this.dragonParts()) {
++            T t = type.tryCast(p);
++            if (t != null
++                && RegionizedWorldGuard.restrictEntityToCurrentRegion(this, t) != null
++                && t.getBoundingBox().intersects(queryBox)
++                && selector.test(t)) {
++                hasEntities.setTrue();
++                break;
++            }
++        }
+         return hasEntities.isTrue();
+     }
+ 
+@@ -772,7 +_,7 @@
+     public abstract @Nullable Entity getEntity(int id);
+ 
+     public @Nullable Entity getEntity(UUID uuid) {
+-        return this.getEntities().get(uuid);
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this, this.getEntities().get(uuid));
+     }
+ 
+     public @Nullable Entity getEntityInAnyDimension(UUID uuid) {
+@@ -783,9 +_,16 @@
+         return this.getPlayerByUUID(uuid);
+     }
+ 
+-    public abstract Collection<EnderDragonPart> dragonParts();
++    public abstract Collection<? extends net.neoforged.neoforge.entity.PartEntity<?>> dragonParts();
+ 
+     public void blockEntityChanged(BlockPos pos) {
++        BlockPos immutablePos = pos.immutable();
++        if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(this, immutablePos, () -> this.blockEntityChanged(immutablePos))) {
++            return;
++        }
++
++        RegionizedWorldGuard.ensureRegionThreadIfRegionized(this, immutablePos, "blockEntityChanged");
++        pos = immutablePos;
+         if (this.hasChunkAt(pos)) {
+             this.getChunkAt(pos).markUnsaved();
+         }
+@@ -907,17 +_,20 @@
+ 
+     public abstract Scoreboard getScoreboard();
+ 
++    private static final Direction[] NEIGHBOR_UPDATE_LIST = java.util.stream.Stream.concat(Direction.Plane.HORIZONTAL.stream(), Direction.Plane.VERTICAL.stream()).toArray(Direction[]::new);
++
+     public void updateNeighbourForOutputSignal(BlockPos pos, Block changedBlock) {
+-        for (Direction direction : Direction.Plane.HORIZONTAL) {
++        // Neo: send update to vertical directions as well, after horizontal ones
++        for (Direction direction : NEIGHBOR_UPDATE_LIST) {
+             BlockPos relativePos = pos.relative(direction);
+             if (this.hasChunkAt(relativePos)) {
+                 BlockState state = this.getBlockState(relativePos);
+-                if (state.is(Blocks.COMPARATOR)) {
+-                    this.neighborChanged(state, relativePos, changedBlock, null, false);
+-                } else if (state.isRedstoneConductor(this, relativePos)) {
++                state.onNeighborChange(this, relativePos, pos);
++                if (state.isRedstoneConductor(this, relativePos)) {
+                     relativePos = relativePos.relative(direction);
+                     state = this.getBlockState(relativePos);
+-                    if (state.is(Blocks.COMPARATOR)) {
++                    // Neo: send to any blockstate that wants weak changes, but exclude vanilla comparators from vertical updates
++                    if (state.getWeakChanges(this, relativePos) && (direction.getAxis().isHorizontal() || !state.is(Blocks.COMPARATOR))) {
+                         this.neighborChanged(state, relativePos, changedBlock, null, false);
+                     }
+                 }
+@@ -952,7 +_,7 @@
+ 
+     @Override
+     public RandomSource getRandom() {
+-        return this.random;
++        return RegionizedTickContext.currentRandom().orElse(this.random);
+     }
+ 
+     @Override
+@@ -968,6 +_,12 @@
+     public abstract RecipeAccess recipeAccess();
+ 
+     public BlockPos getBlockRandomPos(int xo, int yo, int zo, int yMask) {
++        RandomSource regionRandom = RegionizedTickContext.currentRandom().orElse(null);
++        if (regionRandom != null) {
++            int val = regionRandom.nextInt() >> 2;
++            return new BlockPos(xo + (val & 15), yo + (val >> 16 & yMask), zo + (val >> 8 & 15));
++        }
++
+         this.randValue = this.randValue * 3 + 1013904223;
+         int val = this.randValue >> 2;
+         return new BlockPos(xo + (val & 15), yo + (val >> 16 & yMask), zo + (val >> 8 & 15));
+@@ -980,6 +_,18 @@
+     @Override
+     public BiomeManager getBiomeManager() {
+         return this.biomeManager;
++    }
++
++    private double maxEntityRadius = 2.0D;
++    @Override
++    public double getMaxEntityRadius() {
++        return maxEntityRadius;
++    }
++    @Override
++    public double increaseMaxEntityRadius(double value) {
++        if (value > maxEntityRadius)
++            maxEntityRadius = value;
++        return maxEntityRadius;
+     }
+ 
+     public final boolean isDebug() {

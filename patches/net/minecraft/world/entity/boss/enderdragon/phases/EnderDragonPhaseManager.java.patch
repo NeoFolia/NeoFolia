@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/EnderDragonPhaseManager.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/EnderDragonPhaseManager.java
+@@ -17,7 +_,7 @@
+         this.setPhase(EnderDragonPhase.HOVERING);
+     }
+ 
+-    public void setPhase(EnderDragonPhase<?> target) {
++    public synchronized void setPhase(EnderDragonPhase<?> target) {
+         if (this.currentPhase == null || target != this.currentPhase.getPhase()) {
+             if (this.currentPhase != null) {
+                 this.currentPhase.end();
+@@ -33,11 +_,11 @@
+         }
+     }
+ 
+-    public DragonPhaseInstance getCurrentPhase() {
++    public synchronized DragonPhaseInstance getCurrentPhase() {
+         return Objects.requireNonNull(this.currentPhase);
+     }
+ 
+-    public <T extends DragonPhaseInstance> T getPhase(EnderDragonPhase<T> phase) {
++    public synchronized <T extends DragonPhaseInstance> T getPhase(EnderDragonPhase<T> phase) {
+         int id = phase.getId();
+         DragonPhaseInstance phaseInstance = this.phases[id];
+         if (phaseInstance == null) {

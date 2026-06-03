@@ -1,0 +1,59 @@
+--- a/net/minecraft/world/inventory/RemoteSlot.java
++++ b/net/minecraft/world/inventory/RemoteSlot.java
+@@ -8,15 +_,15 @@
+ public interface RemoteSlot {
+     RemoteSlot PLACEHOLDER = new RemoteSlot() {
+         @Override
+-        public void receive(HashedStack incoming) {
+-        }
+-
+-        @Override
+-        public void force(ItemStack outgoing) {
+-        }
+-
+-        @Override
+-        public boolean matches(ItemStack local) {
++        public synchronized void receive(HashedStack incoming) {
++        }
++
++        @Override
++        public synchronized void force(ItemStack outgoing) {
++        }
++
++        @Override
++        public synchronized boolean matches(ItemStack local) {
+             return true;
+         }
+     };
+@@ -37,19 +_,19 @@
+         }
+ 
+         @Override
+-        public void force(ItemStack outgoing) {
++        public synchronized void force(ItemStack outgoing) {
+             this.remoteStack = outgoing.copy();
+             this.remoteHash = null;
+         }
+ 
+         @Override
+-        public void receive(HashedStack incoming) {
++        public synchronized void receive(HashedStack incoming) {
+             this.remoteStack = null;
+             this.remoteHash = incoming;
+         }
+ 
+         @Override
+-        public boolean matches(ItemStack local) {
++        public synchronized boolean matches(ItemStack local) {
+             if (this.remoteStack != null) {
+                 return ItemStack.matches(this.remoteStack, local);
+             } else if (this.remoteHash != null && this.remoteHash.matches(local, this.hasher)) {
+@@ -60,7 +_,7 @@
+             }
+         }
+ 
+-        public void copyFrom(RemoteSlot.Synchronized other) {
++        public synchronized void copyFrom(RemoteSlot.Synchronized other) {
+             this.remoteStack = other.remoteStack;
+             this.remoteHash = other.remoteHash;
+         }

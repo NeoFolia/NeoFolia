@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/entity/ai/sensing/FrogAttackablesSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/FrogAttackablesSensor.java
+@@ -14,24 +_,24 @@
+     public static final float TARGET_DETECTION_DISTANCE = 10.0F;
+ 
+     @Override
+-    protected boolean isMatchingEntity(ServerLevel level, LivingEntity body, LivingEntity mob) {
++    protected synchronized boolean isMatchingEntity(ServerLevel level, LivingEntity body, LivingEntity mob) {
+         return Sensor.isEntityAttackable(level, body, mob) && Frog.canEat(mob) && !this.isUnreachableAttackTarget(body, mob)
+             ? mob.closerThan(body, 10.0)
+             : false;
+     }
+ 
+-    private boolean isUnreachableAttackTarget(LivingEntity body, LivingEntity mob) {
+-        List<UUID> unreachableAttackTargets = body.getBrain().getMemory(MemoryModuleType.UNREACHABLE_TONGUE_TARGETS).orElseGet(ArrayList::new);
++    private synchronized boolean isUnreachableAttackTarget(LivingEntity body, LivingEntity mob) {
++        List<UUID> unreachableAttackTargets = List.copyOf(body.getBrain().getMemory(MemoryModuleType.UNREACHABLE_TONGUE_TARGETS).orElseGet(ArrayList::new));
+         return unreachableAttackTargets.contains(mob.getUUID());
+     }
+ 
+     @Override
+-    protected MemoryModuleType<LivingEntity> getMemoryToSet() {
++    protected synchronized MemoryModuleType<LivingEntity> getMemoryToSet() {
+         return MemoryModuleType.NEAREST_ATTACKABLE;
+     }
+ 
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return Sets.union(super.requires(), Set.of(MemoryModuleType.UNREACHABLE_TONGUE_TARGETS));
+     }
+ }

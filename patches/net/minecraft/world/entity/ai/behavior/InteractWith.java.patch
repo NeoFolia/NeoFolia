@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/ai/behavior/InteractWith.java
++++ b/net/minecraft/world/entity/ai/behavior/InteractWith.java
+@@ -10,13 +_,13 @@
+ import net.minecraft.world.entity.ai.memory.WalkTarget;
+ 
+ public class InteractWith {
+-    public static <T extends LivingEntity> BehaviorControl<LivingEntity> of(
++    public static synchronized <T extends LivingEntity> BehaviorControl<LivingEntity> of(
+         EntityType<? extends T> type, int interactionRange, MemoryModuleType<T> interactionTarget, float speedModifier, int stopDistance
+     ) {
+         return of(type, interactionRange, mob -> true, mob -> true, interactionTarget, speedModifier, stopDistance);
+     }
+ 
+-    public static <E extends LivingEntity, T extends LivingEntity> BehaviorControl<E> of(
++    public static synchronized <E extends LivingEntity, T extends LivingEntity> BehaviorControl<E> of(
+         EntityType<? extends T> type,
+         int interactionRange,
+         Predicate<E> selfFilter,
+@@ -37,7 +_,9 @@
+                 .apply(i, (target, lookTarget, walkTarget, nearestEntities) -> (level, body, timestamp) -> {
+                     NearestVisibleLivingEntities entities = i.get(nearestEntities);
+                     if (selfFilter.test(body) && entities.contains(isTargetValid)) {
+-                        Optional<LivingEntity> closest = entities.findClosest(mob -> mob.distanceToSqr(body) <= interactionRangeSqr && isTargetValid.test(mob));
++                        Optional<LivingEntity> closest = entities.findClosest(
++                            mob -> BehaviorUtils.regionSafeEntity(body, mob) != null && mob.distanceToSqr(body) <= interactionRangeSqr && isTargetValid.test(mob)
++                        );
+                         closest.ifPresent(mob -> {
+                             target.set((T)mob);
+                             lookTarget.set(new EntityTracker(mob, true));

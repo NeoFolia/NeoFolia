@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/AbstractThrownPotion.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/AbstractThrownPotion.java
+@@ -21,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.HitResult;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class AbstractThrownPotion extends ThrowableItemProjectile {
+     public static final double SPLASH_RANGE = 4.0;
+@@ -84,6 +_,10 @@
+ 
+     private void onHitAsWater(ServerLevel level) {
+         AABB aabb = this.getBoundingBox().inflate(4.0, 2.0, 4.0);
++        aabb = RegionizedWorldGuard.restrictToCurrentRegion(level, aabb);
++        if (aabb == null) {
++            return;
++        }
+ 
+         for (LivingEntity entity : this.level().getEntitiesOfClass(LivingEntity.class, aabb, WATER_SENSITIVE_OR_ON_FIRE)) {
+             double dist = this.distanceToSqr(entity);
+@@ -106,6 +_,10 @@
+     protected abstract void onHitAsPotion(ServerLevel level, ItemStack potionItem, HitResult hitResult);
+ 
+     private void dowseFire(BlockPos pos) {
++        if (!this.canReadBlock(pos)) {
++            return;
++        }
++
+         BlockState blockState = this.level().getBlockState(pos);
+         if (blockState.is(BlockTags.FIRE)) {
+             this.level().destroyBlock(pos, false, this);

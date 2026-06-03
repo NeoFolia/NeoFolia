@@ -1,0 +1,174 @@
+--- a/net/minecraft/world/level/BaseSpawner.java
++++ b/net/minecraft/world/level/BaseSpawner.java
+@@ -25,6 +_,8 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -52,7 +_,7 @@
+     private int requiredPlayerRange = 16;
+     private int spawnRange = 4;
+ 
+-    public void setEntityId(EntityType<?> type, @Nullable Level level, RandomSource random, BlockPos pos) {
++    public synchronized void setEntityId(EntityType<?> type, @Nullable Level level, RandomSource random, BlockPos pos) {
+         this.getOrCreateNextSpawnData(level, random, pos).getEntityToSpawn().putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(type).toString());
+     }
+ 
+@@ -60,7 +_,7 @@
+         return level.hasNearbyAlivePlayer(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, this.requiredPlayerRange);
+     }
+ 
+-    public void clientTick(Level level, BlockPos pos) {
++    public synchronized void clientTick(Level level, BlockPos pos) {
+         if (!this.isNearPlayer(level, pos)) {
+             this.oSpin = this.spin;
+         } else if (this.displayEntity != null) {
+@@ -79,7 +_,7 @@
+         }
+     }
+ 
+-    public void serverTick(ServerLevel level, BlockPos pos) {
++    public synchronized void serverTick(ServerLevel level, BlockPos pos) {
+         if (this.isNearPlayer(level, pos) && level.isSpawnerBlockEnabled()) {
+             if (this.spawnDelay == -1) {
+                 this.delay(level, pos);
+@@ -89,7 +_,7 @@
+                 this.spawnDelay--;
+             } else {
+                 boolean delay = false;
+-                RandomSource random = level.getRandom();
++                RandomSource random = spawnerRandom(level);
+                 SpawnData nextSpawnData = this.getOrCreateNextSpawnData(level, random, pos);
+ 
+                 for (int c = 0; c < this.spawnCount; c++) {
+@@ -111,6 +_,10 @@
+                             );
+                         if (level.noCollision(entityType.get().getSpawnAABB(spawnPos.x, spawnPos.y, spawnPos.z))) {
+                             BlockPos spawnBlockPos = BlockPos.containing(spawnPos);
++                            if (RegionizedTickContext.isRegionThread() && !RegionizedWorldGuard.isRegionThreadFor(level, spawnBlockPos)) {
++                                continue;
++                            }
++
+                             if (nextSpawnData.getCustomSpawnRules().isPresent()) {
+                                 if (!entityType.get().getCategory().isFriendly() && level.getDifficulty() == Difficulty.PEACEFUL) {
+                                     continue;
+@@ -120,7 +_,7 @@
+                                 if (!customSpawnRules.isValidPosition(spawnBlockPos, level)) {
+                                     continue;
+                                 }
+-                            } else if (!SpawnPlacements.checkSpawnRules(entityType.get(), level, EntitySpawnReason.SPAWNER, spawnBlockPos, level.getRandom())) {
++                            } else if (!SpawnPlacements.checkSpawnRules(entityType.get(), level, EntitySpawnReason.SPAWNER, spawnBlockPos, random)) {
+                                 continue;
+                             }
+ 
+@@ -146,16 +_,15 @@
+ 
+                             entity.snapTo(entity.getX(), entity.getY(), entity.getZ(), random.nextFloat() * 360.0F, 0.0F);
+                             if (entity instanceof Mob mob) {
+-                                if (nextSpawnData.getCustomSpawnRules().isEmpty() && !mob.checkSpawnRules(level, EntitySpawnReason.SPAWNER)
+-                                    || !mob.checkSpawnObstruction(level)) {
++                                if (!net.neoforged.neoforge.event.EventHooks.checkSpawnPositionSpawner(mob, level, EntitySpawnReason.SPAWNER, nextSpawnData, this)) {
+                                     continue;
+                                 }
+ 
+                                 boolean hasNoConfiguration = nextSpawnData.getEntityToSpawn().size() == 1
+                                     && nextSpawnData.getEntityToSpawn().getString("id").isPresent();
+-                                if (hasNoConfiguration) {
+-                                    ((Mob)entity).finalizeSpawn(level, level.getCurrentDifficultyAt(entity.blockPosition()), EntitySpawnReason.SPAWNER, null);
+-                                }
++                                // Neo: Patch in FinalizeSpawn for spawners so it may be fired unconditionally, instead of only when vanilla would normally call it.
++                                // The local hasNoConfiguration is the conditions under which the spawner will normally call Mob#finalizeSpawn.
++                                net.neoforged.neoforge.event.EventHooks.finalizeMobSpawnSpawner(mob, level, level.getCurrentDifficultyAt(entity.blockPosition()), EntitySpawnReason.SPAWNER, null, this, hasNoConfiguration);
+ 
+                                 nextSpawnData.getEquipment().ifPresent(mob::equip);
+                             }
+@@ -186,7 +_,7 @@
+     }
+ 
+     private void delay(Level level, BlockPos pos) {
+-        RandomSource random = level.random;
++        RandomSource random = spawnerRandom(level);
+         if (this.maxSpawnDelay <= this.minSpawnDelay) {
+             this.spawnDelay = this.minSpawnDelay;
+         } else {
+@@ -197,7 +_,11 @@
+         this.broadcastEvent(level, pos, 1);
+     }
+ 
+-    public void load(@Nullable Level level, BlockPos pos, ValueInput input) {
++    private static RandomSource spawnerRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.random) : level.getRandom();
++    }
++
++    public synchronized void load(@Nullable Level level, BlockPos pos, ValueInput input) {
+         this.spawnDelay = input.getShortOr("Delay", (short)20);
+         input.read("SpawnData", SpawnData.CODEC).ifPresent(nextSpawnData -> this.setNextSpawnData(level, pos, nextSpawnData));
+         this.spawnPotentials = input.read("SpawnPotentials", SpawnData.LIST_CODEC)
+@@ -211,7 +_,7 @@
+         this.displayEntity = null;
+     }
+ 
+-    public void save(ValueOutput output) {
++    public synchronized void save(ValueOutput output) {
+         output.putShort("Delay", (short)this.spawnDelay);
+         output.putShort("MinSpawnDelay", (short)this.minSpawnDelay);
+         output.putShort("MaxSpawnDelay", (short)this.maxSpawnDelay);
+@@ -223,9 +_,9 @@
+         output.store("SpawnPotentials", SpawnData.LIST_CODEC, this.spawnPotentials);
+     }
+ 
+-    public @Nullable Entity getOrCreateDisplayEntity(Level level, BlockPos pos) {
++    public synchronized @Nullable Entity getOrCreateDisplayEntity(Level level, BlockPos pos) {
+         if (this.displayEntity == null) {
+-            CompoundTag entityToSpawn = this.getOrCreateNextSpawnData(level, level.getRandom(), pos).getEntityToSpawn();
++            CompoundTag entityToSpawn = this.getOrCreateNextSpawnData(level, spawnerRandom(level), pos).getEntityToSpawn();
+             if (entityToSpawn.getString("id").isEmpty()) {
+                 return null;
+             }
+@@ -238,7 +_,7 @@
+         return this.displayEntity;
+     }
+ 
+-    public boolean onEventTriggered(Level level, int id) {
++    public synchronized boolean onEventTriggered(Level level, int id) {
+         if (id == 1) {
+             if (level.isClientSide()) {
+                 this.spawnDelay = this.minSpawnDelay;
+@@ -250,11 +_,11 @@
+         }
+     }
+ 
+-    protected void setNextSpawnData(@Nullable Level level, BlockPos pos, SpawnData nextSpawnData) {
++    protected synchronized void setNextSpawnData(@Nullable Level level, BlockPos pos, SpawnData nextSpawnData) {
+         this.nextSpawnData = nextSpawnData;
+     }
+ 
+-    private SpawnData getOrCreateNextSpawnData(@Nullable Level level, RandomSource random, BlockPos pos) {
++    private synchronized SpawnData getOrCreateNextSpawnData(@Nullable Level level, RandomSource random, BlockPos pos) {
+         if (this.nextSpawnData != null) {
+             return this.nextSpawnData;
+         } else {
+@@ -265,11 +_,17 @@
+ 
+     public abstract void broadcastEvent(final Level level, final BlockPos pos, int id);
+ 
+-    public double getSpin() {
++    public synchronized double getSpin() {
+         return this.spin;
+     }
+ 
+-    public double getOSpin() {
++    public synchronized double getOSpin() {
+         return this.oSpin;
++    }
++
++    @Override
++    public com.mojang.datafixers.util.@Nullable Either<net.minecraft.world.level.block.entity.BlockEntity, Entity> getOwner() {
++        // The vanilla anonymous classes have proper overrides, but we return null here for compatibility.
++        return null;
+     }
+ }

@@ -1,0 +1,67 @@
+--- a/net/minecraft/client/renderer/ScreenEffectRenderer.java
++++ b/net/minecraft/client/renderer/ScreenEffectRenderer.java
+@@ -60,19 +_,21 @@
+         Player player = this.minecraft.player;
+         if (isFirstPerson && !isSleeping) {
+             if (!player.noPhysics) {
+-                BlockState blockState = getViewBlockingState(player);
+-                if (blockState != null) {
+-                    renderTex(this.minecraft.getModelManager().getBlockStateModelSet().getParticleMaterial(blockState).sprite(), poseStack, this.bufferSource);
++                org.apache.commons.lang3.tuple.Pair<BlockState, BlockPos> overlay = getOverlayBlock(player);
++                if (overlay != null && !net.neoforged.neoforge.client.ClientHooks.renderBlockOverlay(player, poseStack, net.neoforged.neoforge.client.event.RenderBlockScreenEffectEvent.OverlayType.BLOCK, overlay.getLeft(), overlay.getRight(), this.sprites, bufferSource)) {
++                    renderTex(this.minecraft.getModelManager().getBlockStateModelSet().getParticleMaterial(overlay.getLeft(), this.minecraft.level, overlay.getRight()).sprite(), poseStack, this.bufferSource);
+                 }
+             }
+ 
+             if (!this.minecraft.player.isSpectator()) {
+                 if (this.minecraft.player.isEyeInFluid(FluidTags.WATER)) {
++                    if (!net.neoforged.neoforge.client.ClientHooks.renderWaterOverlay(player, poseStack, this.sprites, bufferSource))
+                     renderWater(this.minecraft, poseStack, this.bufferSource);
+                 }
+ 
+                 if (this.minecraft.player.isOnFire()) {
+                     TextureAtlasSprite fireSprite = this.sprites.get(ModelBakery.FIRE_1);
++                    if (!net.neoforged.neoforge.client.ClientHooks.renderFireOverlay(player, poseStack, this.sprites, bufferSource))
+                     renderFire(poseStack, this.bufferSource, fireSprite);
+                 }
+             }
+@@ -122,6 +_,10 @@
+     }
+ 
+     private static @Nullable BlockState getViewBlockingState(Player player) {
++        return getOverlayBlock(player).getLeft();
++    }
++
++    private static org.apache.commons.lang3.tuple.@Nullable Pair<BlockState, BlockPos> getOverlayBlock(Player player) {
+         BlockPos.MutableBlockPos testPos = new BlockPos.MutableBlockPos();
+ 
+         for (int i = 0; i < 8; i++) {
+@@ -131,7 +_,7 @@
+             testPos.set(xo, yo, zo);
+             BlockState blockState = player.level().getBlockState(testPos);
+             if (blockState.getRenderShape() != RenderShape.INVISIBLE && blockState.isViewBlocking(player.level(), testPos)) {
+-                return blockState;
++                return org.apache.commons.lang3.tuple.Pair.of(blockState, testPos.immutable());
+             }
+         }
+ 
+@@ -159,6 +_,10 @@
+     }
+ 
+     private static void renderWater(Minecraft minecraft, PoseStack poseStack, MultiBufferSource bufferSource) {
++        renderFluid(minecraft, poseStack, bufferSource, UNDERWATER_LOCATION);
++    }
++
++    public static void renderFluid(Minecraft minecraft, PoseStack poseStack, MultiBufferSource bufferSource, Identifier texture) {
+         BlockPos pos = BlockPos.containing(minecraft.player.getX(), minecraft.player.getEyeY(), minecraft.player.getZ());
+         float br = Lightmap.getBrightness(minecraft.player.level().dimensionType(), minecraft.player.level().getMaxLocalRawBrightness(pos));
+         int color = ARGB.colorFromFloat(0.1F, br, br, br);
+@@ -171,7 +_,7 @@
+         float uo = -minecraft.player.getYRot() / 64.0F;
+         float vo = minecraft.player.getXRot() / 64.0F;
+         Matrix4f pose = poseStack.last().pose();
+-        VertexConsumer builder = bufferSource.getBuffer(RenderTypes.blockScreenEffect(UNDERWATER_LOCATION));
++        VertexConsumer builder = bufferSource.getBuffer(RenderTypes.blockScreenEffect(texture));
+         builder.addVertex(pose, -1.0F, -1.0F, -0.5F).setUv(4.0F + uo, 4.0F + vo).setColor(color);
+         builder.addVertex(pose, 1.0F, -1.0F, -0.5F).setUv(0.0F + uo, 4.0F + vo).setColor(color);
+         builder.addVertex(pose, 1.0F, 1.0F, -0.5F).setUv(0.0F + uo, 0.0F + vo).setColor(color);

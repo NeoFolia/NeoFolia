@@ -1,0 +1,46 @@
+--- a/net/minecraft/world/level/block/entity/SculkSensorBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/SculkSensorBlockEntity.java
+@@ -39,21 +_,21 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.lastVibrationFrequency = input.getIntOr("last_vibration_frequency", 0);
+         this.vibrationData = input.read("listener", VibrationSystem.Data.CODEC).orElseGet(VibrationSystem.Data::new);
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         output.putInt("last_vibration_frequency", this.lastVibrationFrequency);
+         output.store("listener", VibrationSystem.Data.CODEC, this.vibrationData);
+     }
+ 
+     @Override
+-    public VibrationSystem.Data getVibrationData() {
++    public synchronized VibrationSystem.Data getVibrationData() {
+         return this.vibrationData;
+     }
+ 
+@@ -62,15 +_,15 @@
+         return this.vibrationUser;
+     }
+ 
+-    public int getLastVibrationFrequency() {
++    public synchronized int getLastVibrationFrequency() {
+         return this.lastVibrationFrequency;
+     }
+ 
+-    public void setLastVibrationFrequency(int lastVibrationFrequency) {
++    public synchronized void setLastVibrationFrequency(int lastVibrationFrequency) {
+         this.lastVibrationFrequency = lastVibrationFrequency;
+     }
+ 
+-    public VibrationSystem.Listener getListener() {
++    public synchronized VibrationSystem.Listener getListener() {
+         return this.vibrationListener;
+     }
+ 

@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/GoToClosestVillage.java
++++ b/net/minecraft/world/entity/ai/behavior/GoToClosestVillage.java
+@@ -11,7 +_,7 @@
+ import net.minecraft.world.phys.Vec3;
+ 
+ public class GoToClosestVillage {
+-    public static BehaviorControl<Villager> create(float speedModifier, int closeEnoughDistance) {
++    public static synchronized BehaviorControl<Villager> create(float speedModifier, int closeEnoughDistance) {
+         return BehaviorBuilder.create(i -> i.group(i.absent(MemoryModuleType.WALK_TARGET)).apply(i, walkTarget -> (level, body, timestamp) -> {
+             if (level.isVillage(body.blockPosition())) {
+                 return false;

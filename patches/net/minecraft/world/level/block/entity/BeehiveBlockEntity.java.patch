@@ -1,0 +1,68 @@
+--- a/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java
+@@ -45,6 +_,8 @@
+ import net.minecraft.world.level.storage.TagValueOutput;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -105,7 +_,7 @@
+             return false;
+         } else {
+             for (BlockPos pos : BlockPos.betweenClosed(this.worldPosition.offset(-1, -1, -1), this.worldPosition.offset(1, 1, 1))) {
+-                if (this.level.getBlockState(pos).getBlock() instanceof FireBlock) {
++                if (canReadBlock(this.level, pos) && this.level.getBlockState(pos).getBlock() instanceof FireBlock) {
+                     return true;
+                 }
+             }
+@@ -171,7 +_,7 @@
+             bee.dropLeash();
+             this.storeBee(BeehiveBlockEntity.Occupant.of(bee));
+             if (this.level != null) {
+-                if (bee.hasSavedFlowerPos() && (!this.hasSavedFlowerPos() || this.level.getRandom().nextBoolean())) {
++                if (bee.hasSavedFlowerPos() && (!this.hasSavedFlowerPos() || beehiveRandom(this.level).nextBoolean())) {
+                     this.savedFlowerPos = bee.getSavedFlowerPos();
+                 }
+ 
+@@ -214,14 +_,14 @@
+         } else {
+             Direction facing = state.getValue(BeehiveBlock.FACING);
+             BlockPos facingPos = blockPos.relative(facing);
+-            boolean frontBlocked = !level.getBlockState(facingPos).getCollisionShape(level, facingPos).isEmpty();
++            boolean frontBlocked = !canReadBlock(level, facingPos) || !level.getBlockState(facingPos).getCollisionShape(level, facingPos).isEmpty();
+             if (frontBlocked && releaseStatus != BeehiveBlockEntity.BeeReleaseStatus.EMERGENCY) {
+                 return false;
+             } else {
+                 Entity entity = beeData.createEntity(level, blockPos);
+                 if (entity != null) {
+                     if (entity instanceof Bee bee) {
+-                        RandomSource random = level.getRandom();
++                        RandomSource random = beehiveRandom(level);
+                         if (savedFlowerPos != null && !bee.hasSavedFlowerPos() && random.nextFloat() < 0.9F) {
+                             bee.setSavedFlowerPos(savedFlowerPos);
+                         }
+@@ -291,12 +_,20 @@
+ 
+     public static void serverTick(Level level, BlockPos blockPos, BlockState state, BeehiveBlockEntity entity) {
+         tickOccupants(level, blockPos, state, entity.stored, entity.savedFlowerPos);
+-        if (!entity.stored.isEmpty() && level.getRandom().nextDouble() < 0.005) {
++        if (!entity.stored.isEmpty() && beehiveRandom(level).nextDouble() < 0.005) {
+             double x = blockPos.getX() + 0.5;
+             double y = blockPos.getY();
+             double z = blockPos.getZ() + 0.5;
+             level.playSound(null, x, y, z, SoundEvents.BEEHIVE_WORK, SoundSource.BLOCKS, 1.0F, 1.0F);
+         }
++    }
++
++    private static RandomSource beehiveRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override

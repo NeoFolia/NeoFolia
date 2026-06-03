@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/ticks/ProtoChunkTicks.java
++++ b/net/minecraft/world/ticks/ProtoChunkTicks.java
+@@ -11,33 +_,33 @@
+     private final Set<SavedTick<?>> ticksPerPosition = new ObjectOpenCustomHashSet<>(SavedTick.UNIQUE_TICK_HASH);
+ 
+     @Override
+-    public void schedule(ScheduledTick<T> tick) {
++    public synchronized void schedule(ScheduledTick<T> tick) {
+         SavedTick<T> newTick = new SavedTick<>(tick.type(), tick.pos(), 0, tick.priority());
+         this.schedule(newTick);
+     }
+ 
+-    private void schedule(SavedTick<T> newTick) {
++    private synchronized void schedule(SavedTick<T> newTick) {
+         if (this.ticksPerPosition.add(newTick)) {
+             this.ticks.add(newTick);
+         }
+     }
+ 
+     @Override
+-    public boolean hasScheduledTick(BlockPos pos, T type) {
++    public synchronized boolean hasScheduledTick(BlockPos pos, T type) {
+         return this.ticksPerPosition.contains(SavedTick.probe(type, pos));
+     }
+ 
+     @Override
+-    public int count() {
++    public synchronized int count() {
+         return this.ticks.size();
+     }
+ 
+     @Override
+-    public List<SavedTick<T>> pack(long currentTick) {
+-        return this.ticks;
++    public synchronized List<SavedTick<T>> pack(long currentTick) {
++        return List.copyOf(this.ticks);
+     }
+ 
+-    public List<SavedTick<T>> scheduledTicks() {
++    public synchronized List<SavedTick<T>> scheduledTicks() {
+         return List.copyOf(this.ticks);
+     }
+ 

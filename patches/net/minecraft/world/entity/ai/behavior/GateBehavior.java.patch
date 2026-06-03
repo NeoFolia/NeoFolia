@@ -1,0 +1,71 @@
+--- a/net/minecraft/world/entity/ai/behavior/GateBehavior.java
++++ b/net/minecraft/world/entity/ai/behavior/GateBehavior.java
+@@ -29,20 +_,20 @@
+         GateBehavior.RunningPolicy runningPolicy,
+         List<Pair<? extends BehaviorControl<? super E>, Integer>> behaviors
+     ) {
+-        this.entryCondition = entryCondition;
+-        this.exitErasedMemories = exitErasedMemories;
++        this.entryCondition = Map.copyOf(entryCondition);
++        this.exitErasedMemories = Set.copyOf(exitErasedMemories);
+         this.orderPolicy = orderPolicy;
+         this.runningPolicy = runningPolicy;
+         behaviors.forEach(entry -> this.behaviors.add(entry.getFirst(), entry.getSecond()));
+     }
+ 
+     @Override
+-    public Behavior.Status getStatus() {
++    public synchronized Behavior.Status getStatus() {
+         return this.status;
+     }
+ 
+     @Override
+-    public Set<MemoryModuleType<?>> getRequiredMemories() {
++    public synchronized Set<MemoryModuleType<?>> getRequiredMemories() {
+         Set<MemoryModuleType<?>> memories = new HashSet<>(this.entryCondition.keySet());
+ 
+         for (BehaviorControl<? super E> behavior : this.behaviors) {
+@@ -52,7 +_,7 @@
+         return memories;
+     }
+ 
+-    private boolean hasRequiredMemories(E body) {
++    private synchronized boolean hasRequiredMemories(E body) {
+         for (Entry<MemoryModuleType<?>, MemoryStatus> entry : this.entryCondition.entrySet()) {
+             MemoryModuleType<?> memoryType = entry.getKey();
+             MemoryStatus requiredStatus = entry.getValue();
+@@ -65,7 +_,7 @@
+     }
+ 
+     @Override
+-    public final boolean tryStart(ServerLevel level, E body, long timestamp) {
++    public final synchronized boolean tryStart(ServerLevel level, E body, long timestamp) {
+         if (this.hasRequiredMemories(body)) {
+             this.status = Behavior.Status.RUNNING;
+             this.orderPolicy.apply(this.behaviors);
+@@ -77,7 +_,7 @@
+     }
+ 
+     @Override
+-    public final void tickOrStop(ServerLevel level, E body, long timestamp) {
++    public final synchronized void tickOrStop(ServerLevel level, E body, long timestamp) {
+         this.behaviors.stream().filter(goal -> goal.getStatus() == Behavior.Status.RUNNING).forEach(goal -> goal.tickOrStop(level, body, timestamp));
+         if (this.behaviors.stream().noneMatch(g -> g.getStatus() == Behavior.Status.RUNNING)) {
+             this.doStop(level, body, timestamp);
+@@ -85,14 +_,14 @@
+     }
+ 
+     @Override
+-    public final void doStop(ServerLevel level, E body, long timestamp) {
++    public final synchronized void doStop(ServerLevel level, E body, long timestamp) {
+         this.status = Behavior.Status.STOPPED;
+         this.behaviors.stream().filter(goal -> goal.getStatus() == Behavior.Status.RUNNING).forEach(goal -> goal.doStop(level, body, timestamp));
+         this.exitErasedMemories.forEach(body.getBrain()::eraseMemory);
+     }
+ 
+     @Override
+-    public String debugString() {
++    public synchronized String debugString() {
+         Set<String> runningBehaviours = this.behaviors
+             .stream()
+             .filter(goal -> goal.getStatus() == Behavior.Status.RUNNING)

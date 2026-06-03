@@ -1,0 +1,112 @@
+--- a/net/minecraft/world/entity/ai/behavior/ChargeAttack.java
++++ b/net/minecraft/world/entity/ai/behavior/ChargeAttack.java
+@@ -19,7 +_,9 @@
+ import net.minecraft.world.entity.animal.Animal;
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.level.entity.EntityTypeTest;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class ChargeAttack extends Behavior<Animal> {
+     private final int timeBetweenAttacks;
+@@ -53,13 +_,13 @@
+         this.startPosition = Vec3.ZERO;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Animal body) {
+-        return body.getBrain().hasMemoryValue(MemoryModuleType.ATTACK_TARGET);
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Animal body) {
++        return this.getAttackTarget(body).isPresent();
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Animal body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+-        Optional<LivingEntity> attackCandidate = brain.getMemory(MemoryModuleType.ATTACK_TARGET);
++        Optional<LivingEntity> attackCandidate = this.getAttackTarget(body);
+         if (attackCandidate.isEmpty()) {
+             return false;
+         } else {
+@@ -76,26 +_,39 @@
+         }
+     }
+ 
+-    protected void start(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Animal body, long timestamp) {
+         Brain<?> brain = body.getBrain();
++        Optional<LivingEntity> attackCandidate = this.getAttackTarget(body);
++        if (attackCandidate.isEmpty()) {
++            return;
++        }
++
+         this.startPosition = body.position();
+-        LivingEntity attackCandidate = brain.getMemory(MemoryModuleType.ATTACK_TARGET).get();
+-        Vec3 direction = attackCandidate.position().subtract(body.position()).normalize();
++        Vec3 direction = attackCandidate.get().position().subtract(body.position()).normalize();
+         this.chargeVelocityVector = direction.scale(this.speed);
+         if (this.canStillUse(level, body, timestamp)) {
+             body.playSound(this.chargeSound);
+         }
+     }
+ 
+-    protected void tick(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Animal body, long timestamp) {
+         Brain<?> brain = body.getBrain();
+-        LivingEntity attackTarget = brain.getMemory(MemoryModuleType.ATTACK_TARGET).orElseThrow();
++        Optional<LivingEntity> attackCandidate = this.getAttackTarget(body);
++        if (attackCandidate.isEmpty()) {
++            this.stop(level, body, timestamp);
++            return;
++        }
++
++        LivingEntity attackTarget = attackCandidate.get();
+         body.lookAt(attackTarget, 360.0F, 360.0F);
+         body.setDeltaMovement(this.chargeVelocityVector);
+         List<LivingEntity> collidingEntities = new ArrayList<>(1);
+-        level.getEntities(
+-            EntityTypeTest.forClass(LivingEntity.class), body.getBoundingBox(), e -> this.chargeTargeting.test(level, body, e), collidingEntities, 1
+-        );
++        AABB collisionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, body.getBoundingBox());
++        if (collisionBox != null) {
++            level.getEntities(
++                EntityTypeTest.forClass(LivingEntity.class), collisionBox, e -> this.chargeTargeting.test(level, body, e), collidingEntities, 1
++            );
++        }
+         if (!collidingEntities.isEmpty()) {
+             LivingEntity closestAttackTarget = collidingEntities.get(0);
+             if (body.hasPassenger(closestAttackTarget)) {
+@@ -108,7 +_,7 @@
+         }
+     }
+ 
+-    private void dealDamageToTarget(ServerLevel level, Animal body, LivingEntity target) {
++    private synchronized void dealDamageToTarget(ServerLevel level, Animal body, LivingEntity target) {
+         DamageSource damageSource = level.damageSources().mobAttack(body);
+         float damage = (float)body.getAttributeValue(Attributes.ATTACK_DAMAGE);
+         if (target.hurtServer(level, damageSource, damage)) {
+@@ -116,7 +_,7 @@
+         }
+     }
+ 
+-    private void dealKnockBack(Animal body, LivingEntity target) {
++    private synchronized void dealKnockBack(Animal body, LivingEntity target) {
+         int movementSpeedLevel = body.hasEffect(MobEffects.SPEED) ? body.getEffect(MobEffects.SPEED).getAmplifier() + 1 : 0;
+         int movementSlowdownLevel = body.hasEffect(MobEffects.SLOWNESS) ? body.getEffect(MobEffects.SLOWNESS).getAmplifier() + 1 : 0;
+         float speedBoostPower = 0.25F * (movementSpeedLevel - movementSlowdownLevel);
+@@ -124,8 +_,14 @@
+         body.causeExtraKnockback(target, speedFactor * this.knockbackForce, body.getDeltaMovement());
+     }
+ 
+-    protected void stop(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Animal body, long timestamp) {
+         body.getBrain().setMemory(MemoryModuleType.CHARGE_COOLDOWN_TICKS, this.timeBetweenAttacks);
+         body.getBrain().eraseMemory(MemoryModuleType.ATTACK_TARGET);
++        this.chargeVelocityVector = Vec3.ZERO;
++        this.startPosition = Vec3.ZERO;
++    }
++
++    private synchronized Optional<LivingEntity> getAttackTarget(Animal body) {
++        return body.getBrain().getMemory(MemoryModuleType.ATTACK_TARGET).filter(target -> BehaviorUtils.regionSafeEntity(body, target) != null);
+     }
+ }

@@ -1,0 +1,103 @@
+--- a/net/minecraft/world/entity/ai/control/MoveControl.java
++++ b/net/minecraft/world/entity/ai/control/MoveControl.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.NodeEvaluator;
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class MoveControl implements Control {
+     public static final float MIN_SPEED = 5.0E-4F;
+@@ -29,15 +_,15 @@
+         this.mob = mob;
+     }
+ 
+-    public boolean hasWanted() {
++    public synchronized boolean hasWanted() {
+         return this.operation == MoveControl.Operation.MOVE_TO;
+     }
+ 
+-    public double getSpeedModifier() {
++    public synchronized double getSpeedModifier() {
+         return this.speedModifier;
+     }
+ 
+-    public void setWantedPosition(double x, double y, double z, double speedModifier) {
++    public synchronized void setWantedPosition(double x, double y, double z, double speedModifier) {
+         this.wantedX = x;
+         this.wantedY = y;
+         this.wantedZ = z;
+@@ -47,14 +_,14 @@
+         }
+     }
+ 
+-    public void strafe(float forwards, float right) {
++    public synchronized void strafe(float forwards, float right) {
+         this.operation = MoveControl.Operation.STRAFE;
+         this.strafeForwards = forwards;
+         this.strafeRight = right;
+         this.speedModifier = 0.25;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.operation == MoveControl.Operation.STRAFE) {
+             float speed = (float)this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
+             float speedModified = (float)this.speedModifier * speed;
+@@ -96,6 +_,10 @@
+             this.mob.setYRot(this.rotlerp(this.mob.getYRot(), yRotD, 90.0F));
+             this.mob.setSpeed((float)(this.speedModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
+             BlockPos pos = this.mob.blockPosition();
++            if (!this.canReadBlock(pos)) {
++                return;
++            }
++
+             BlockState blockState = this.mob.level().getBlockState(pos);
+             VoxelShape shape = blockState.getCollisionShape(this.mob.level(), pos);
+             if (yd > this.mob.maxUpStep() && xd * xd + zd * zd < Math.max(1.0F, this.mob.getBbWidth())
+@@ -116,7 +_,7 @@
+         }
+     }
+ 
+-    private boolean isWalkable(float dx, float dz) {
++    private synchronized boolean isWalkable(float dx, float dz) {
+         PathNavigation pathNavigation = this.mob.getNavigation();
+         if (pathNavigation != null) {
+             NodeEvaluator nodeEvaluator = pathNavigation.getNodeEvaluator();
+@@ -130,7 +_,11 @@
+         return true;
+     }
+ 
+-    protected float rotlerp(float a, float b, float max) {
++    private synchronized boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.mob.level(), pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
++    protected synchronized float rotlerp(float a, float b, float max) {
+         float diff = Mth.wrapDegrees(b - a);
+         if (diff > max) {
+             diff = max;
+@@ -150,19 +_,19 @@
+         return result;
+     }
+ 
+-    public double getWantedX() {
++    public synchronized double getWantedX() {
+         return this.wantedX;
+     }
+ 
+-    public double getWantedY() {
++    public synchronized double getWantedY() {
+         return this.wantedY;
+     }
+ 
+-    public double getWantedZ() {
++    public synchronized double getWantedZ() {
+         return this.wantedZ;
+     }
+ 
+-    public void setWait() {
++    public synchronized void setWait() {
+         this.operation = MoveControl.Operation.WAIT;
+     }
+ 

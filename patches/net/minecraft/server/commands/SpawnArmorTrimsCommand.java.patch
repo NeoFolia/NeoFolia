@@ -1,0 +1,164 @@
+--- a/net/minecraft/server/commands/SpawnArmorTrimsCommand.java
++++ b/net/minecraft/server/commands/SpawnArmorTrimsCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
+ import java.util.ArrayList;
+ import java.util.Comparator;
+@@ -31,6 +_,7 @@
+ import net.minecraft.world.item.equipment.trim.TrimMaterials;
+ import net.minecraft.world.item.equipment.trim.TrimPattern;
+ import net.minecraft.world.item.equipment.trim.TrimPatterns;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class SpawnArmorTrimsCommand {
+     private static final List<ResourceKey<TrimPattern>> VANILLA_TRIM_PATTERNS = List.of(
+@@ -76,20 +_,36 @@
+         dispatcher.register(
+             Commands.literal("spawn_armor_trims")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .then(Commands.literal("*_lag_my_game").executes(c -> spawnAllArmorTrims(c.getSource(), c.getSource().getPlayerOrException())))
++                .then(Commands.literal("*_lag_my_game").executes(SpawnArmorTrimsCommand::spawnAllArmorTrims))
+                 .then(
+                     Commands.argument("pattern", ResourceKeyArgument.key(Registries.TRIM_PATTERN))
+-                        .executes(
+-                            c -> spawnArmorTrim(
+-                                c.getSource(),
+-                                c.getSource().getPlayerOrException(),
+-                                ResourceKeyArgument.getRegistryKey(c, "pattern", Registries.TRIM_PATTERN, ERROR_INVALID_PATTERN)
+-                            )
+-                        )
++                        .executes(SpawnArmorTrimsCommand::spawnArmorTrim)
+                 )
+         );
+     }
+ 
++    private static int spawnAllArmorTrims(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> spawnAllArmorTrims(context))) {
++            return 0;
++        }
++
++        return spawnAllArmorTrims(source, source.getPlayerOrException());
++    }
++
++    private static int spawnArmorTrim(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> spawnArmorTrim(context))) {
++            return 0;
++        }
++
++        return spawnArmorTrim(
++            source,
++            source.getPlayerOrException(),
++            ResourceKeyArgument.getRegistryKey(context, "pattern", Registries.TRIM_PATTERN, ERROR_INVALID_PATTERN)
++        );
++    }
++
+     private static int spawnAllArmorTrims(CommandSourceStack source, Player player) {
+         return spawnArmorTrims(source, player, source.getServer().registryAccess().lookupOrThrow(Registries.TRIM_PATTERN).listElements());
+     }
+@@ -99,7 +_,12 @@
+     }
+ 
+     private static int spawnArmorTrims(CommandSourceStack source, Player player, Stream<Holder.Reference<TrimPattern>> patterns) {
+-        ServerLevel level = source.getLevel();
++        SpawnOrigin spawnOrigin = RegionizedCommandHelper.callOnEntityRegion(
++            source,
++            player,
++            () -> new SpawnOrigin((ServerLevel)player.level(), player.blockPosition().relative(player.getDirection(), 5))
++        );
++        ServerLevel level = spawnOrigin.level();
+         List<Holder.Reference<TrimPattern>> sortedPatterns = patterns.sorted(Comparator.comparing(h -> TRIM_PATTERN_ORDER.applyAsInt(h.key()))).toList();
+         List<Holder.Reference<TrimMaterial>> sortedMaterials = level.registryAccess()
+             .lookupOrThrow(Registries.TRIM_MATERIAL)
+@@ -107,44 +_,55 @@
+             .sorted(Comparator.comparing(h -> TRIM_MATERIAL_ORDER.applyAsInt(h.key())))
+             .toList();
+         List<Holder.Reference<Item>> equippableItems = findEquippableItemsWithAssets(level.registryAccess().lookupOrThrow(Registries.ITEM));
+-        BlockPos origin = player.blockPosition().relative(player.getDirection(), 5);
++        BlockPos origin = spawnOrigin.position();
+         double padding = 3.0;
+ 
+-        for (int materialIndex = 0; materialIndex < sortedMaterials.size(); materialIndex++) {
+-            Holder.Reference<TrimMaterial> material = sortedMaterials.get(materialIndex);
+-
+-            for (int patternIndex = 0; patternIndex < sortedPatterns.size(); patternIndex++) {
+-                Holder.Reference<TrimPattern> pattern = sortedPatterns.get(patternIndex);
+-                ArmorTrim trim = new ArmorTrim(material, pattern);
+-
+-                for (int itemIndex = 0; itemIndex < equippableItems.size(); itemIndex++) {
+-                    Holder.Reference<Item> equippableItem = equippableItems.get(itemIndex);
+-                    double x = origin.getX() + 0.5 - itemIndex * 3.0;
+-                    double y = origin.getY() + 0.5 + materialIndex * 3.0;
+-                    double z = origin.getZ() + 0.5 + patternIndex * 10;
+-                    ArmorStand armorStand = new ArmorStand(level, x, y, z);
+-                    armorStand.setYRot(180.0F);
+-                    armorStand.setNoGravity(true);
+-                    ItemStack stack = new ItemStack(equippableItem);
+-                    Equippable equippable = Objects.requireNonNull(stack.get(DataComponents.EQUIPPABLE));
+-                    stack.set(DataComponents.TRIM, trim);
+-                    armorStand.setItemSlot(equippable.slot(), stack);
+-                    if (itemIndex == 0) {
+-                        armorStand.setCustomName(
+-                            trim.pattern().value().copyWithStyle(trim.material()).copy().append(" & ").append(trim.material().value().description())
+-                        );
+-                        armorStand.setCustomNameVisible(true);
+-                    } else {
+-                        armorStand.setInvisible(true);
++        RegionizedCommandHelper.callOnRegion(source, level, origin, () -> {
++            for (int materialIndex = 0; materialIndex < sortedMaterials.size(); materialIndex++) {
++                Holder.Reference<TrimMaterial> material = sortedMaterials.get(materialIndex);
++
++                for (int patternIndex = 0; patternIndex < sortedPatterns.size(); patternIndex++) {
++                    Holder.Reference<TrimPattern> pattern = sortedPatterns.get(patternIndex);
++                    ArmorTrim trim = new ArmorTrim(material, pattern);
++
++                    for (int itemIndex = 0; itemIndex < equippableItems.size(); itemIndex++) {
++                        Holder.Reference<Item> equippableItem = equippableItems.get(itemIndex);
++                        double x = origin.getX() + 0.5 - itemIndex * 3.0;
++                        double y = origin.getY() + 0.5 + materialIndex * 3.0;
++                        double z = origin.getZ() + 0.5 + patternIndex * 10;
++                        ArmorStand armorStand = new ArmorStand(level, x, y, z);
++                        armorStand.setYRot(180.0F);
++                        armorStand.setNoGravity(true);
++                        ItemStack stack = new ItemStack(equippableItem);
++                        Equippable equippable = Objects.requireNonNull(stack.get(DataComponents.EQUIPPABLE));
++                        stack.set(DataComponents.TRIM, trim);
++                        armorStand.setItemSlot(equippable.slot(), stack);
++                        if (itemIndex == 0) {
++                            armorStand.setCustomName(
++                                trim.pattern().value().copyWithStyle(trim.material()).copy().append(" & ").append(trim.material().value().description())
++                            );
++                            armorStand.setCustomNameVisible(true);
++                        } else {
++                            armorStand.setInvisible(true);
++                        }
++
++                        if (RegionizedWorldGuard.scheduleEntityIfRegionized(level, armorStand, "Spawn armor trim stand", () -> level.addFreshEntity(armorStand))) {
++                            continue;
++                        }
++
++                        level.addFreshEntity(armorStand);
+                     }
+-
+-                    level.addFreshEntity(armorStand);
+                 }
+             }
+-        }
++
++            return null;
++        });
+ 
+         source.sendSuccess(() -> Component.literal("Armorstands with trimmed armor spawned around you"), true);
+         return 1;
++    }
++
++    private record SpawnOrigin(ServerLevel level, BlockPos position) {
+     }
+ 
+     private static List<Holder.Reference<Item>> findEquippableItemsWithAssets(HolderLookup<Item> items) {

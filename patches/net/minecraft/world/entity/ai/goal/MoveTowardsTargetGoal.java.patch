@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/entity/ai/goal/MoveTowardsTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/MoveTowardsTargetGoal.java
+@@ -5,6 +_,7 @@
+ import net.minecraft.world.entity.PathfinderMob;
+ import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MoveTowardsTargetGoal extends Goal {
+@@ -24,8 +_,8 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        this.target = this.mob.getTarget();
++    public synchronized boolean canUse() {
++        this.target = this.regionSafeTarget(this.mob.getTarget());
+         if (this.target == null) {
+             return false;
+         } else if (this.target.distanceToSqr(this.mob) > this.within * this.within) {
+@@ -44,17 +_,22 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return !this.mob.getNavigation().isDone() && this.target.isAlive() && this.target.distanceToSqr(this.mob) < this.within * this.within;
++    public synchronized boolean canContinueToUse() {
++        LivingEntity target = this.regionSafeTarget(this.target);
++        return target != null && !this.mob.getNavigation().isDone() && target.isAlive() && target.distanceToSqr(this.mob) < this.within * this.within;
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.target = null;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         this.mob.getNavigation().moveTo(this.wantedX, this.wantedY, this.wantedZ, this.speedModifier);
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

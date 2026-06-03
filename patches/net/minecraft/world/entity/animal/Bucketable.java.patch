@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/entity/animal/Bucketable.java
++++ b/net/minecraft/world/entity/animal/Bucketable.java
+@@ -16,6 +_,7 @@
+ import net.minecraft.world.item.Items;
+ import net.minecraft.world.item.component.CustomData;
+ import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public interface Bucketable {
+     boolean fromBucket();
+@@ -77,8 +_,8 @@
+             ItemStack result = ItemUtils.createFilledResult(itemStack, player, bucket, false);
+             player.setItemInHand(hand, result);
+             Level level = pickupEntity.level();
+-            if (!level.isClientSide()) {
+-                CriteriaTriggers.FILLED_BUCKET.trigger((ServerPlayer)player, bucket);
++            if (!level.isClientSide() && player instanceof ServerPlayer serverPlayer) {
++                triggerFilledBucket(serverPlayer, bucket);
+             }
+ 
+             pickupEntity.discard();
+@@ -86,5 +_,10 @@
+         } else {
+             return Optional.empty();
+         }
++    }
++
++    private static void triggerFilledBucket(ServerPlayer player, ItemStack bucket) {
++        ItemStack bucketSnapshot = bucket.copy();
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.FILLED_BUCKET.trigger(player, bucketSnapshot));
+     }
+ }

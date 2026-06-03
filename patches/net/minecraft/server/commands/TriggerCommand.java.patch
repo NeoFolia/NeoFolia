@@ -1,0 +1,35 @@
+--- a/net/minecraft/server/commands/TriggerCommand.java
++++ b/net/minecraft/server/commands/TriggerCommand.java
+@@ -89,6 +_,10 @@
+     }
+ 
+     private static int addValue(CommandSourceStack source, ServerPlayer player, Objective objective, int amount) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> addValue(source, player, objective, amount))) {
++            return 0;
++        }
++
+         ScoreAccess score = getScore(source.getServer().getScoreboard(), player, objective);
+         int newValue = score.add(amount);
+         source.sendSuccess(() -> Component.translatable("commands.trigger.add.success", objective.getFormattedDisplayName(), amount), true);
+@@ -96,6 +_,10 @@
+     }
+ 
+     private static int setValue(CommandSourceStack source, ServerPlayer player, Objective objective, int amount) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setValue(source, player, objective, amount))) {
++            return 0;
++        }
++
+         ScoreAccess score = getScore(source.getServer().getScoreboard(), player, objective);
+         score.set(amount);
+         source.sendSuccess(() -> Component.translatable("commands.trigger.set.success", objective.getFormattedDisplayName(), amount), true);
+@@ -103,6 +_,10 @@
+     }
+ 
+     private static int simpleTrigger(CommandSourceStack source, ServerPlayer player, Objective objective) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> simpleTrigger(source, player, objective))) {
++            return 0;
++        }
++
+         ScoreAccess score = getScore(source.getServer().getScoreboard(), player, objective);
+         int newValue = score.add(1);
+         source.sendSuccess(() -> Component.translatable("commands.trigger.simple.success", objective.getFormattedDisplayName()), true);

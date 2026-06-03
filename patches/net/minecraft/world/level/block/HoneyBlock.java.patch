@@ -1,0 +1,31 @@
+--- a/net/minecraft/world/level/block/HoneyBlock.java
++++ b/net/minecraft/world/level/block/HoneyBlock.java
+@@ -21,6 +_,7 @@
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class HoneyBlock extends HalfTransparentBlock {
+     public static final MapCodec<HoneyBlock> CODEC = simpleCodec(HoneyBlock::new);
+@@ -95,8 +_,9 @@
+     }
+ 
+     private void maybeDoSlideAchievement(Entity entity, BlockPos pos) {
+-        if (entity instanceof ServerPlayer && entity.level().getGameTime() % 20L == 0L) {
+-            CriteriaTriggers.HONEY_BLOCK_SLIDE.trigger((ServerPlayer)entity, entity.level().getBlockState(pos));
++        if (entity instanceof ServerPlayer player && entity.level().getGameTime() % 20L == 0L) {
++            BlockState state = entity.level().getBlockState(pos);
++            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.HONEY_BLOCK_SLIDE.trigger(player, state));
+         }
+     }
+ 
+@@ -114,7 +_,7 @@
+ 
+     private void maybeDoSlideEffects(Level level, Entity entity) {
+         if (doesEntityDoHoneyBlockSlideEffects(entity)) {
+-            RandomSource random = level.getRandom();
++            RandomSource random = entity.getRandom();
+             if (random.nextInt(5) == 0) {
+                 entity.playSound(SoundEvents.HONEY_BLOCK_SLIDE, 1.0F, 1.0F);
+             }

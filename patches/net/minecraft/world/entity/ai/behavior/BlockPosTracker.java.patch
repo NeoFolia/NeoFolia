@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/ai/behavior/BlockPosTracker.java
++++ b/net/minecraft/world/entity/ai/behavior/BlockPosTracker.java
+@@ -19,22 +_,22 @@
+     }
+ 
+     @Override
+-    public Vec3 currentPosition() {
++    public synchronized Vec3 currentPosition() {
+         return this.centerPosition;
+     }
+ 
+     @Override
+-    public BlockPos currentBlockPosition() {
++    public synchronized BlockPos currentBlockPosition() {
+         return this.blockPos;
+     }
+ 
+     @Override
+-    public boolean isVisibleBy(LivingEntity body) {
++    public synchronized boolean isVisibleBy(LivingEntity body) {
+         return true;
+     }
+ 
+     @Override
+-    public String toString() {
++    public synchronized String toString() {
+         return "BlockPosTracker{blockPos=" + this.blockPos + ", centerPosition=" + this.centerPosition + "}";
+     }
+ }

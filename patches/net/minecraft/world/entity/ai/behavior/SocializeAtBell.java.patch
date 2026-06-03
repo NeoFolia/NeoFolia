@@ -1,0 +1,27 @@
+--- a/net/minecraft/world/entity/ai/behavior/SocializeAtBell.java
++++ b/net/minecraft/world/entity/ai/behavior/SocializeAtBell.java
+@@ -11,7 +_,7 @@
+ public class SocializeAtBell {
+     private static final float SPEED_MODIFIER = 0.3F;
+ 
+-    public static OneShot<LivingEntity> create() {
++    public static synchronized OneShot<LivingEntity> create() {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.registered(MemoryModuleType.WALK_TARGET),
+@@ -25,11 +_,13 @@
+                     (walkTarget, lookTarget, meetingPoint, nearestEntities, interactionTarget) -> (level, body, timestamp) -> {
+                         GlobalPos memory = i.get(meetingPoint);
+                         NearestVisibleLivingEntities visibleEntities = i.get(nearestEntities);
+-                        if (level.getRandom().nextInt(100) == 0
++                        if (body.getRandom().nextInt(100) == 0
+                             && level.dimension() == memory.dimension()
+                             && memory.pos().closerToCenterThan(body.position(), 4.0)
+                             && visibleEntities.contains(mob -> mob.is(EntityType.VILLAGER))) {
+-                            visibleEntities.findClosest(mob -> mob.is(EntityType.VILLAGER) && mob.distanceToSqr(body) <= 32.0).ifPresent(mob -> {
++                            visibleEntities.findClosest(
++                                mob -> BehaviorUtils.regionSafeEntity(body, mob) != null && mob.is(EntityType.VILLAGER) && mob.distanceToSqr(body) <= 32.0
++                            ).ifPresent(mob -> {
+                                 interactionTarget.set(mob);
+                                 lookTarget.set(new EntityTracker(mob, true));
+                                 walkTarget.set(new WalkTarget(new EntityTracker(mob, false), 0.3F, 1));

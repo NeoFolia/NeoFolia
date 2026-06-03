@@ -1,0 +1,13 @@
+--- a/net/minecraft/server/commands/DeOpCommands.java
++++ b/net/minecraft/server/commands/DeOpCommands.java
+@@ -28,6 +_,10 @@
+     }
+ 
+     private static int deopPlayers(CommandSourceStack source, Collection<NameAndId> players) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> deopPlayers(source, players))) {
++            return players.size();
++        }
++
+         PlayerList list = source.getServer().getPlayerList();
+         int count = 0;
+ 

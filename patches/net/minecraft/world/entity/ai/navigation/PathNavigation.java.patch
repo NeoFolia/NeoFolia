@@ -1,0 +1,329 @@
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -28,6 +_,7 @@
+ import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class PathNavigation {
+@@ -66,39 +_,39 @@
+         }
+     }
+ 
+-    public void updatePathfinderMaxVisitedNodes() {
++    public synchronized void updatePathfinderMaxVisitedNodes() {
+         int maxVisitedNodes = Mth.floor(this.getMaxPathLength() * 16.0F);
+         this.pathFinder.setMaxVisitedNodes(maxVisitedNodes);
+     }
+ 
+-    public void setRequiredPathLength(float length) {
++    public synchronized void setRequiredPathLength(float length) {
+         this.requiredPathLength = length;
+         this.updatePathfinderMaxVisitedNodes();
+     }
+ 
+-    private float getMaxPathLength() {
++    private synchronized float getMaxPathLength() {
+         return Math.max((float)this.mob.getAttributeValue(Attributes.FOLLOW_RANGE), this.requiredPathLength);
+     }
+ 
+-    public void resetMaxVisitedNodesMultiplier() {
++    public synchronized void resetMaxVisitedNodesMultiplier() {
+         this.maxVisitedNodesMultiplier = 1.0F;
+     }
+ 
+-    public void setMaxVisitedNodesMultiplier(float maxVisitedNodesMultiplier) {
++    public synchronized void setMaxVisitedNodesMultiplier(float maxVisitedNodesMultiplier) {
+         this.maxVisitedNodesMultiplier = maxVisitedNodesMultiplier;
+     }
+ 
+-    public @Nullable BlockPos getTargetPos() {
++    public synchronized @Nullable BlockPos getTargetPos() {
+         return this.targetPos;
+     }
+ 
+     protected abstract PathFinder createPathFinder(final int maxVisitedNodes);
+ 
+-    public void setSpeedModifier(double speedModifier) {
++    public synchronized void setSpeedModifier(double speedModifier) {
+         this.speedModifier = speedModifier;
+     }
+ 
+-    public void recomputePath() {
++    public synchronized void recomputePath() {
+         if (this.level.getGameTime() - this.timeLastRecompute <= 20L || !this.canUpdatePath()) {
+             this.hasDelayedRecomputation = true;
+         } else if (this.targetPos != null) {
+@@ -109,35 +_,35 @@
+         }
+     }
+ 
+-    public final @Nullable Path createPath(double x, double y, double z, int reachRange) {
++    public final synchronized @Nullable Path createPath(double x, double y, double z, int reachRange) {
+         return this.createPath(BlockPos.containing(x, y, z), reachRange);
+     }
+ 
+-    public @Nullable Path createPath(Stream<BlockPos> positions, int reachRange) {
++    public synchronized @Nullable Path createPath(Stream<BlockPos> positions, int reachRange) {
+         return this.createPath(positions.collect(Collectors.toSet()), 8, false, reachRange);
+     }
+ 
+-    public @Nullable Path createPath(Set<BlockPos> positions, int reachRange) {
++    public synchronized @Nullable Path createPath(Set<BlockPos> positions, int reachRange) {
+         return this.createPath(positions, 8, false, reachRange);
+     }
+ 
+-    public @Nullable Path createPath(BlockPos pos, int reachRange) {
++    public synchronized @Nullable Path createPath(BlockPos pos, int reachRange) {
+         return this.createPath(ImmutableSet.of(pos), 8, false, reachRange);
+     }
+ 
+-    public @Nullable Path createPath(BlockPos pos, int reachRange, int maxPathLength) {
++    public synchronized @Nullable Path createPath(BlockPos pos, int reachRange, int maxPathLength) {
+         return this.createPath(ImmutableSet.of(pos), 8, false, reachRange, maxPathLength);
+     }
+ 
+-    public @Nullable Path createPath(Entity target, int reachRange) {
++    public synchronized @Nullable Path createPath(Entity target, int reachRange) {
+         return this.createPath(ImmutableSet.of(target.blockPosition()), 16, true, reachRange);
+     }
+ 
+-    protected @Nullable Path createPath(Set<BlockPos> targets, int radiusOffset, boolean above, int reachRange) {
++    protected synchronized @Nullable Path createPath(Set<BlockPos> targets, int radiusOffset, boolean above, int reachRange) {
+         return this.createPath(targets, radiusOffset, above, reachRange, this.getMaxPathLength());
+     }
+ 
+-    protected @Nullable Path createPath(Set<BlockPos> targets, int radiusOffset, boolean above, int reachRange, float maxPathLength) {
++    protected synchronized @Nullable Path createPath(Set<BlockPos> targets, int radiusOffset, boolean above, int reachRange, float maxPathLength) {
+         if (targets.isEmpty()) {
+             return null;
+         } else if (this.mob.getY() < this.level.getMinY()) {
+@@ -166,20 +_,20 @@
+         }
+     }
+ 
+-    public boolean moveTo(double x, double y, double z, double speedModifier) {
++    public synchronized boolean moveTo(double x, double y, double z, double speedModifier) {
+         return this.moveTo(this.createPath(x, y, z, 1), speedModifier);
+     }
+ 
+-    public boolean moveTo(double x, double y, double z, int reachRange, double speedModifier) {
++    public synchronized boolean moveTo(double x, double y, double z, int reachRange, double speedModifier) {
+         return this.moveTo(this.createPath(x, y, z, reachRange), speedModifier);
+     }
+ 
+-    public boolean moveTo(Entity target, double speedModifier) {
++    public synchronized boolean moveTo(Entity target, double speedModifier) {
+         Path newPath = this.createPath(target, 1);
+         return newPath != null && this.moveTo(newPath, speedModifier);
+     }
+ 
+-    public boolean moveTo(@Nullable Path newPath, double speedModifier) {
++    public synchronized boolean moveTo(@Nullable Path newPath, double speedModifier) {
+         if (newPath == null) {
+             this.path = null;
+             return false;
+@@ -205,7 +_,7 @@
+         }
+     }
+ 
+-    public @Nullable Path getPath() {
++    public synchronized @Nullable Path getPath() {
+         return this.path;
+     }
+ 
+@@ -233,19 +_,23 @@
+         }
+     }
+ 
+-    protected double getGroundY(Vec3 target) {
++    protected synchronized double getGroundY(Vec3 target) {
+         BlockPos blockPos = BlockPos.containing(target);
++        if (!this.canReadBlock(blockPos) || !this.canReadBlock(blockPos.below())) {
++            return target.y;
++        }
++
+         return this.level.getBlockState(blockPos.below()).isAir() ? target.y : WalkNodeEvaluator.getFloorLevel(this.level, blockPos);
+     }
+ 
+-    protected void followThePath() {
++    protected synchronized void followThePath() {
+         Vec3 mobPos = this.getTempMobPos();
+         this.maxDistanceToWaypoint = this.mob.getBbWidth() > 0.75F ? this.mob.getBbWidth() / 2.0F : 0.75F - this.mob.getBbWidth() / 2.0F;
+         Vec3i currentNodePos = this.path.getNextNodePos();
+-        double xDistance = Math.abs(this.mob.getX() - (currentNodePos.getX() + 0.5));
++        double xDistance = Math.abs(this.mob.getX() - (currentNodePos.getX() + ((int)(this.mob.getBbWidth() + 1)) / 2D)); //Forge: Fix MC-94054. The casting to int must match what is done in Path#getEntityPosAtNode
+         double yDistance = Math.abs(this.mob.getY() - currentNodePos.getY());
+-        double zDistance = Math.abs(this.mob.getZ() - (currentNodePos.getZ() + 0.5));
+-        boolean isCloseEnoughToCurrentNode = xDistance < this.maxDistanceToWaypoint && zDistance < this.maxDistanceToWaypoint && yDistance < 1.0;
++        double zDistance = Math.abs(this.mob.getZ() - (currentNodePos.getZ() + ((int)(this.mob.getBbWidth() + 1)) / 2D)); //Forge: Fix MC-94054. The casting to int must match what is done in Path#getEntityPosAtNode
++        boolean isCloseEnoughToCurrentNode = xDistance <= this.maxDistanceToWaypoint && zDistance <= this.maxDistanceToWaypoint && yDistance < 1.0; //Forge: Fix MC-94054
+         if (isCloseEnoughToCurrentNode || this.canCutCorner(this.path.getNextNode().type) && this.shouldTargetNextNodeInDirection(mobPos)) {
+             this.path.advance();
+         }
+@@ -253,7 +_,7 @@
+         this.doStuckDetection(mobPos);
+     }
+ 
+-    private boolean shouldTargetNextNodeInDirection(Vec3 mobPosition) {
++    private synchronized boolean shouldTargetNextNodeInDirection(Vec3 mobPosition) {
+         if (this.path.getNextNodeIndex() + 1 >= this.path.getNodeCount()) {
+             return false;
+         } else {
+@@ -281,7 +_,7 @@
+         }
+     }
+ 
+-    protected void doStuckDetection(Vec3 mobPos) {
++    protected synchronized void doStuckDetection(Vec3 mobPos) {
+         if (this.tick - this.lastStuckCheck > 100) {
+             float effectiveSpeed = this.mob.getSpeed() >= 1.0F ? this.mob.getSpeed() : this.mob.getSpeed() * this.mob.getSpeed();
+             float thresholdDistance = effectiveSpeed * 100.0F * 0.25F;
+@@ -315,27 +_,27 @@
+         }
+     }
+ 
+-    private void timeoutPath() {
++    private synchronized void timeoutPath() {
+         this.resetStuckTimeout();
+         this.stop();
+     }
+ 
+-    private void resetStuckTimeout() {
++    private synchronized void resetStuckTimeout() {
+         this.timeoutCachedNode = Vec3i.ZERO;
+         this.timeoutTimer = 0L;
+         this.timeoutLimit = 0.0;
+         this.isStuck = false;
+     }
+ 
+-    public boolean isDone() {
++    public synchronized boolean isDone() {
+         return this.path == null || this.path.isDone();
+     }
+ 
+-    public boolean isInProgress() {
++    public synchronized boolean isInProgress() {
+         return !this.isDone();
+     }
+ 
+-    public void stop() {
++    public synchronized void stop() {
+         this.path = null;
+     }
+ 
+@@ -343,12 +_,17 @@
+ 
+     protected abstract boolean canUpdatePath();
+ 
+-    protected void trimPath() {
++    protected synchronized void trimPath() {
+         if (this.path != null) {
+             for (int i = 0; i < this.path.getNodeCount(); i++) {
+                 Node node = this.path.getNode(i);
+                 Node nextNode = i + 1 < this.path.getNodeCount() ? this.path.getNode(i + 1) : null;
+-                BlockState state = this.level.getBlockState(new BlockPos(node.x, node.y, node.z));
++                BlockPos nodePos = new BlockPos(node.x, node.y, node.z);
++                if (!this.canReadBlock(nodePos)) {
++                    continue;
++                }
++
++                BlockState state = this.level.getBlockState(nodePos);
+                 if (state.is(BlockTags.CAULDRONS)) {
+                     this.path.replaceNode(i, node.cloneAndMove(node.x, node.y + 1, node.z));
+                     if (nextNode != null && node.y >= nextNode.y) {
+@@ -359,36 +_,65 @@
+         }
+     }
+ 
+-    protected boolean canMoveDirectly(Vec3 startPos, Vec3 stopPos) {
++    protected synchronized boolean canMoveDirectly(Vec3 startPos, Vec3 stopPos) {
+         return false;
+     }
+ 
+-    public boolean canCutCorner(PathType pathType) {
++    public synchronized boolean canCutCorner(PathType pathType) {
+         return pathType != PathType.FIRE_IN_NEIGHBOR && pathType != PathType.DAMAGING_IN_NEIGHBOR && pathType != PathType.WALKABLE_DOOR;
+     }
+ 
+     protected static boolean isClearForMovementBetween(Mob mob, Vec3 startPos, Vec3 stopPos, boolean blockedByFluids) {
+         Vec3 to = new Vec3(stopPos.x, stopPos.y + mob.getBbHeight() * 0.5, stopPos.z);
++        if (!canReadBetween(mob, startPos, to)) {
++            return false;
++        }
++
+         return mob.level()
+                 .clip(new ClipContext(startPos, to, ClipContext.Block.COLLIDER, blockedByFluids ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE, mob))
+                 .getType()
+             == HitResult.Type.MISS;
+     }
+ 
+-    public boolean isStableDestination(BlockPos pos) {
++    public synchronized boolean isStableDestination(BlockPos pos) {
+         BlockPos below = pos.below();
++        if (!this.canReadBlock(below)) {
++            return false;
++        }
++
+         return this.level.getBlockState(below).isSolidRender();
+     }
+ 
+-    public NodeEvaluator getNodeEvaluator() {
++    protected synchronized boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
++    private static boolean canReadBetween(Mob mob, Vec3 startPos, Vec3 stopPos) {
++        int minChunkX = Mth.floor(Math.min(startPos.x, stopPos.x) - mob.getBbWidth()) >> 4;
++        int maxChunkX = Mth.floor(Math.max(startPos.x, stopPos.x) + mob.getBbWidth()) >> 4;
++        int minChunkZ = Mth.floor(Math.min(startPos.z, stopPos.z) - mob.getBbWidth()) >> 4;
++        int maxChunkZ = Mth.floor(Math.max(startPos.z, stopPos.z) + mob.getBbWidth()) >> 4;
++
++        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
++            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
++                if (!RegionizedWorldGuard.shouldLoadChunk(mob.level(), chunkX, chunkZ)) {
++                    return false;
++                }
++            }
++        }
++
++        return true;
++    }
++
++    public synchronized NodeEvaluator getNodeEvaluator() {
+         return this.nodeEvaluator;
+     }
+ 
+-    public void setCanFloat(boolean canFloat) {
++    public synchronized void setCanFloat(boolean canFloat) {
+         this.nodeEvaluator.setCanFloat(canFloat);
+     }
+ 
+-    public boolean canFloat() {
++    public synchronized boolean canFloat() {
+         return this.nodeEvaluator.canFloat();
+     }
+ 
+@@ -404,17 +_,17 @@
+         }
+     }
+ 
+-    public float getMaxDistanceToWaypoint() {
++    public synchronized float getMaxDistanceToWaypoint() {
+         return this.maxDistanceToWaypoint;
+     }
+ 
+-    public boolean isStuck() {
++    public synchronized boolean isStuck() {
+         return this.isStuck;
+     }
+ 
+     public abstract boolean canNavigateGround();
+ 
+-    public void setCanOpenDoors(boolean canOpenDoors) {
++    public synchronized void setCanOpenDoors(boolean canOpenDoors) {
+         this.nodeEvaluator.setCanOpenDoors(canOpenDoors);
+     }
+ }

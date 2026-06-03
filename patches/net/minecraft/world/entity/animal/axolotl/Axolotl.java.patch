@@ -1,0 +1,55 @@
+--- a/net/minecraft/world/entity/animal/axolotl/Axolotl.java
++++ b/net/minecraft/world/entity/animal/axolotl/Axolotl.java
+@@ -68,7 +_,9 @@
+ import net.minecraft.world.level.pathfinder.PathType;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Axolotl extends Animal implements Bucketable {
+@@ -160,7 +_,7 @@
+         if (spawnReason == EntitySpawnReason.BUCKET) {
+             return groupData;
+         } else {
+-            RandomSource random = level.getRandom();
++            RandomSource random = this.getRandom();
+             if (groupData instanceof Axolotl.AxolotlGroupData) {
+                 if (((Axolotl.AxolotlGroupData)groupData).getGroupSize() >= 2) {
+                     isBaby = true;
+@@ -403,7 +_,10 @@
+             && (this.random.nextInt(3) < damage || currentHealth / this.getMaxHealth() < 0.5F)
+             && damage < currentHealth
+             && this.isInWater()
+-            && (source.getEntity() != null || source.getDirectEntity() != null)
++            && (
++                RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity()) != null
++                    || RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity()) != null
++            )
+             && !this.isPlayingDead()) {
+             this.brain.setMemory(MemoryModuleType.PLAY_DEAD_TICKS, 200);
+         }
+@@ -470,8 +_,9 @@
+     public static void onStopAttacking(ServerLevel level, Axolotl body, LivingEntity target) {
+         if (target.isDeadOrDying()) {
+             DamageSource lastDamageSource = target.getLastDamageSource();
+-            if (lastDamageSource != null && lastDamageSource.getEntity() instanceof Player player) {
+-                List<Player> playersInRange = level.getEntitiesOfClass(Player.class, body.getBoundingBox().inflate(20.0));
++            if (lastDamageSource != null && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, lastDamageSource.getEntity()) instanceof Player player) {
++                AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, body.getBoundingBox().inflate(20.0));
++                List<Player> playersInRange = searchBox == null ? List.of() : level.getEntitiesOfClass(Player.class, searchBox);
+                 if (playersInRange.contains(player)) {
+                     body.applySupportingEffects(player);
+                 }
+@@ -559,7 +_,8 @@
+     public static boolean checkAxolotlSpawnRules(
+         EntityType<? extends LivingEntity> type, ServerLevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return level.getBlockState(pos.below()).is(BlockTags.AXOLOTLS_SPAWNABLE_ON);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.AXOLOTLS_SPAWNABLE_ON);
+     }
+ 
+     @Override

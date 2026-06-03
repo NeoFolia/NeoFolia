@@ -1,0 +1,137 @@
+--- a/net/minecraft/world/level/block/entity/vault/VaultBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/vault/VaultBlockEntity.java
+@@ -20,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Util;
+@@ -38,6 +_,7 @@
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
+ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class VaultBlockEntity extends BlockEntity {
+@@ -57,45 +_,51 @@
+ 
+     @Override
+     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+-        return Util.make(
+-            new CompoundTag(), tag -> tag.store("shared_data", VaultSharedData.CODEC, registries.createSerializationContext(NbtOps.INSTANCE), this.sharedData)
+-        );
++        synchronized (this.sharedData) {
++            return Util.make(
++                new CompoundTag(), tag -> tag.store("shared_data", VaultSharedData.CODEC, registries.createSerializationContext(NbtOps.INSTANCE), this.sharedData)
++            );
++        }
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         output.store("config", VaultConfig.CODEC, this.config);
+-        output.store("shared_data", VaultSharedData.CODEC, this.sharedData);
+-        output.store("server_data", VaultServerData.CODEC, this.serverData);
++        synchronized (this.sharedData) {
++            output.store("shared_data", VaultSharedData.CODEC, this.sharedData);
++        }
++        synchronized (this.serverData) {
++            output.store("server_data", VaultServerData.CODEC, this.serverData);
++        }
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         input.read("server_data", VaultServerData.CODEC).ifPresent(this.serverData::set);
+         this.config = input.read("config", VaultConfig.CODEC).orElse(VaultConfig.DEFAULT);
+         input.read("shared_data", VaultSharedData.CODEC).ifPresent(this.sharedData::set);
+     }
+ 
+-    public @Nullable VaultServerData getServerData() {
++    public synchronized @Nullable VaultServerData getServerData() {
+         return this.level != null && !this.level.isClientSide() ? this.serverData : null;
+     }
+ 
+-    public VaultSharedData getSharedData() {
++    public synchronized VaultSharedData getSharedData() {
+         return this.sharedData;
+     }
+ 
+-    public VaultClientData getClientData() {
++    public synchronized VaultClientData getClientData() {
+         return this.clientData;
+     }
+ 
+-    public VaultConfig getConfig() {
++    public synchronized VaultConfig getConfig() {
+         return this.config;
+     }
+ 
+     @VisibleForTesting
+-    public void setConfig(VaultConfig config) {
++    public synchronized void setConfig(VaultConfig config) {
+         this.config = config;
+     }
+ 
+@@ -236,14 +_,16 @@
+                 }
+             }
+ 
+-            if (serverData.isDirty || sharedData.isDirty) {
++            boolean serverDirty = serverData.isDirty();
++            boolean sharedDirty = sharedData.isDirty();
++            if (serverDirty || sharedDirty) {
+                 VaultBlockEntity.setChanged(serverLevel, pos, blockState);
+-                if (sharedData.isDirty) {
++                if (sharedDirty) {
+                     serverLevel.sendBlockUpdated(pos, blockState, nextBlockState, 2);
+                 }
+ 
+-                serverData.isDirty = false;
+-                sharedData.isDirty = false;
++                serverData.clearDirty();
++                sharedData.clearDirty();
+             }
+         }
+ 
+@@ -266,7 +_,7 @@
+                 } else {
+                     List<ItemStack> itemsToEject = resolveItemsToEject(serverLevel, config, pos, player, stackToInsert);
+                     if (!itemsToEject.isEmpty()) {
+-                        player.awardStat(Stats.ITEM_USED.get(stackToInsert.getItem()));
++                        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(stackToInsert.getItem()));
+                         stackToInsert.consume(config.keyItem().getCount(), player);
+                         unlock(serverLevel, blockState, pos, config, serverData, sharedData, itemsToEject);
+                         serverData.addToRewardedPlayers(player);
+@@ -299,8 +_,9 @@
+             LootParams params = new LootParams.Builder(serverLevel)
+                 .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(pos))
+                 .create(LootContextParamSets.VAULT);
+-            List<ItemStack> results = lootTable.getRandomItems(params, serverLevel.getRandom());
+-            return results.isEmpty() ? ItemStack.EMPTY : Util.getRandom(results, serverLevel.getRandom());
++            RandomSource random = vaultRandom(serverLevel);
++            List<ItemStack> results = lootTable.getRandomItems(params, random);
++            return results.isEmpty() ? ItemStack.EMPTY : Util.getRandom(results, random);
+         }
+ 
+         private static void unlock(
+@@ -326,7 +_,11 @@
+                 .withParameter(LootContextParams.THIS_ENTITY, player)
+                 .withParameter(LootContextParams.TOOL, insertedStack)
+                 .create(LootContextParamSets.VAULT);
+-            return lootTable.getRandomItems(params);
++            return lootTable.getRandomItems(params, vaultRandom(serverLevel));
++        }
++
++        private static RandomSource vaultRandom(ServerLevel serverLevel) {
++            return RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom());
+         }
+ 
+         private static boolean canEjectReward(VaultConfig config, VaultState vaultState) {

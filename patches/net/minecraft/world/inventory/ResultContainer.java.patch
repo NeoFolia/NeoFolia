@@ -1,0 +1,81 @@
+--- a/net/minecraft/world/inventory/ResultContainer.java
++++ b/net/minecraft/world/inventory/ResultContainer.java
+@@ -13,12 +_,12 @@
+     private @Nullable RecipeHolder<?> recipeUsed;
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return 1;
+     }
+ 
+     @Override
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         for (ItemStack itemStack : this.itemStacks) {
+             if (!itemStack.isEmpty()) {
+                 return false;
+@@ -29,46 +_,46 @@
+     }
+ 
+     @Override
+-    public ItemStack getItem(int slot) {
++    public synchronized ItemStack getItem(int slot) {
+         return this.itemStacks.get(0);
+     }
+ 
+     @Override
+-    public ItemStack removeItem(int slot, int count) {
+-        return ContainerHelper.takeItem(this.itemStacks, 0);
+-    }
+-
+-    @Override
+-    public ItemStack removeItemNoUpdate(int slot) {
+-        return ContainerHelper.takeItem(this.itemStacks, 0);
+-    }
+-
+-    @Override
+-    public void setItem(int slot, ItemStack itemStack) {
++    public synchronized ItemStack removeItem(int slot, int count) {
++        return ContainerHelper.takeItem(this.itemStacks, 0);
++    }
++
++    @Override
++    public synchronized ItemStack removeItemNoUpdate(int slot) {
++        return ContainerHelper.takeItem(this.itemStacks, 0);
++    }
++
++    @Override
++    public synchronized void setItem(int slot, ItemStack itemStack) {
+         this.itemStacks.set(0, itemStack);
+     }
+ 
+     @Override
+-    public void setChanged() {
++    public synchronized void setChanged() {
+     }
+ 
+     @Override
+-    public boolean stillValid(Player player) {
++    public synchronized boolean stillValid(Player player) {
+         return true;
+     }
+ 
+     @Override
+-    public void clearContent() {
++    public synchronized void clearContent() {
+         this.itemStacks.clear();
+     }
+ 
+     @Override
+-    public void setRecipeUsed(@Nullable RecipeHolder<?> recipeUsed) {
++    public synchronized void setRecipeUsed(@Nullable RecipeHolder<?> recipeUsed) {
+         this.recipeUsed = recipeUsed;
+     }
+ 
+     @Override
+-    public @Nullable RecipeHolder<?> getRecipeUsed() {
++    public synchronized @Nullable RecipeHolder<?> getRecipeUsed() {
+         return this.recipeUsed;
+     }
+ }

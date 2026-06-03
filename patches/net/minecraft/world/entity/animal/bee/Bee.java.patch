@@ -1,0 +1,182 @@
+--- a/net/minecraft/world/entity/animal/bee/Bee.java
++++ b/net/minecraft/world/entity/animal/bee/Bee.java
+@@ -94,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Bee extends Animal implements FlyingAnimal, NeutralMob {
+@@ -170,7 +_,7 @@
+ 
+     @Override
+     public float getWalkTargetValue(BlockPos pos, LevelReader level) {
+-        return level.getBlockState(pos).isAir() ? 10.0F : 0.0F;
++        return canReadBlock(level, pos) && level.getBlockState(pos).isAir() ? 10.0F : 0.0F;
+     }
+ 
+     @Override
+@@ -266,7 +_,7 @@
+     }
+ 
+     private void spawnFluidParticle(Level level, double x1, double x2, double z1, double z2, double y, ParticleOptions dripParticle) {
+-        level.addParticle(dripParticle, Mth.lerp(level.getRandom().nextDouble(), x1, x2), y, Mth.lerp(level.getRandom().nextDouble(), z1, z2), 0.0, 0.0, 0.0);
++        level.addParticle(dripParticle, Mth.lerp(this.random.nextDouble(), x1, x2), y, Mth.lerp(this.random.nextDouble(), z1, z2), 0.0, 0.0, 0.0);
+     }
+ 
+     private void pathfindRandomlyTowards(BlockPos targetPos) {
+@@ -331,8 +_,16 @@
+         this.remainingCooldownBeforeLocatingNewFlower = Mth.nextInt(this.random, 20, 60);
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
++    protected static boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     private boolean wantsToEnterHive() {
+-        if (this.stayOutOfHiveCountdown <= 0 && !this.beePollinateGoal.isPollinating() && !this.hasStung() && this.getTarget() == null) {
++        if (this.stayOutOfHiveCountdown <= 0 && !this.beePollinateGoal.isPollinating() && !this.hasStung() && this.regionSafeTarget(this.getTarget()) == null) {
+             boolean wantsToEnterHive = this.hasNectar()
+                 || this.isTiredOfLookingForNectar()
+                 || this.level().environmentAttributes().getValue(EnvironmentAttributes.BEES_STAY_IN_HIVE, this.position());
+@@ -421,6 +_,10 @@
+     }
+ 
+     private boolean doesHiveHaveSpace(BlockPos hivePos) {
++        if (!canReadBlock(this.level(), hivePos)) {
++            return false;
++        }
++
+         BlockEntity blockEntity = this.level().getBlockEntity(hivePos);
+         return blockEntity instanceof BeehiveBlockEntity ? !((BeehiveBlockEntity)blockEntity).isFull() : false;
+     }
+@@ -468,7 +_,8 @@
+                 this.remainingCooldownBeforeLocatingNewFlower--;
+             }
+ 
+-            boolean shouldRoll = this.isAngry() && !this.hasStung() && this.getTarget() != null && this.getTarget().distanceToSqr(this) < 4.0;
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
++            boolean shouldRoll = this.isAngry() && !this.hasStung() && target != null && target.distanceToSqr(this) < 4.0;
+             this.setRolling(shouldRoll);
+             if (this.tickCount % 20 == 0 && !this.isHiveValid()) {
+                 this.hivePos = null;
+@@ -479,12 +_,18 @@
+     private @Nullable BeehiveBlockEntity getBeehiveBlockEntity() {
+         if (this.hivePos == null) {
+             return null;
++        } else if (!canReadBlock(this.level(), this.hivePos)) {
++            return null;
+         } else {
+-            return this.isTooFarAway(this.hivePos) ? null : this.level().getBlockEntity(this.hivePos, BlockEntityType.BEEHIVE).orElse(null);
++            return this.isTooFarAway(this.hivePos) ? null : this.level().getBlockEntity(this.hivePos) instanceof BeehiveBlockEntity hive ? hive : null;
+         }
+     }
+ 
+     private boolean isHiveValid() {
++        if (this.hivePos != null && !canReadBlock(this.level(), this.hivePos)) {
++            return true;
++        }
++
+         return this.getBeehiveBlockEntity() != null;
+     }
+ 
+@@ -549,7 +_,7 @@
+ 
+             @Override
+             public boolean isStableDestination(BlockPos pos) {
+-                return !this.level.getBlockState(pos.below()).isAir();
++                return this.canReadBlock(pos.below()) && !this.level.getBlockState(pos.below()).isAir();
+             }
+ 
+             @Override
+@@ -646,11 +_,21 @@
+     }
+ 
+     @Override
++    @Deprecated // FORGE: use jumpInFluid instead
+     protected void jumpInLiquid(TagKey<Fluid> type) {
++        this.jumpInLiquidInternal();
++    }
++
++    private void jumpInLiquidInternal() {
+         this.setDeltaMovement(this.getDeltaMovement().add(0.0, 0.01, 0.0));
+     }
+ 
+     @Override
++    public void jumpInFluid(net.neoforged.neoforge.fluids.FluidType type) {
++        this.jumpInLiquidInternal();
++    }
++
++    @Override
+     public Vec3 getLeashOffset() {
+         return new Vec3(0.0, 0.5F * this.getEyeHeight(), this.getBbWidth() * 0.2F);
+     }
+@@ -737,7 +_,7 @@
+         @Override
+         public boolean canContinueToUse() {
+             boolean beeCanTarget = this.beeCanTarget();
+-            if (beeCanTarget && this.mob.getTarget() != null) {
++            if (beeCanTarget && RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), this.mob.getTarget()) != null) {
+                 return super.canContinueToUse();
+             } else {
+                 this.targetMob = null;
+@@ -811,6 +_,7 @@
+                 && !Bee.this.hasHome()
+                 && Bee.this.wantsToEnterHive()
+                 && !this.hasReachedTarget(Bee.this.hivePos)
++                && Bee.canReadBlock(Bee.this.level(), Bee.this.hivePos)
+                 && Bee.this.level().getBlockState(Bee.this.hivePos).is(BlockTags.BEEHIVES);
+         }
+ 
+@@ -987,6 +_,10 @@
+             if (Bee.this.random.nextInt(this.adjustedTickDelay(30)) == 0) {
+                 for (int i = 1; i <= 2; i++) {
+                     BlockPos belowPos = Bee.this.blockPosition().below(i);
++                    if (!Bee.canReadBlock(Bee.this.level(), belowPos)) {
++                        continue;
++                    }
++
+                     BlockState belowState = Bee.this.level().getBlockState(belowPos);
+                     Block belowBlock = belowState.getBlock();
+                     BlockState growState = null;
+@@ -1267,7 +_,7 @@
+                 long unreachableUntilTime = this.unreachableFlowerCache.getOrDefault(pos.asLong(), Long.MIN_VALUE);
+                 if (Bee.this.level().getGameTime() < unreachableUntilTime) {
+                     tempCache.put(pos.asLong(), unreachableUntilTime);
+-                } else if (Bee.attractsBees(Bee.this.level().getBlockState(pos))) {
++                } else if (Bee.canReadBlock(Bee.this.level(), pos) && Bee.attractsBees(Bee.this.level().getBlockState(pos))) {
+                     Path path = Bee.this.navigation.createPath(pos, 1);
+                     if (path != null && path.canReach()) {
+                         return Optional.of(pos);
+@@ -1342,7 +_,7 @@
+ 
+         @Override
+         public void start() {
+-            if (Bee.this.savedFlowerPos != null && Bee.this.level().isLoaded(Bee.this.savedFlowerPos) && !this.isFlower(Bee.this.savedFlowerPos)) {
++            if (Bee.this.savedFlowerPos != null && Bee.canReadBlock(Bee.this.level(), Bee.this.savedFlowerPos) && !this.isFlower(Bee.this.savedFlowerPos)) {
+                 Bee.this.dropFlower();
+             }
+ 
+@@ -1360,7 +_,7 @@
+         }
+ 
+         private boolean isFlower(BlockPos flowerPos) {
+-            return Bee.attractsBees(Bee.this.level().getBlockState(flowerPos));
++            return Bee.canReadBlock(Bee.this.level(), flowerPos) && Bee.attractsBees(Bee.this.level().getBlockState(flowerPos));
+         }
+     }
+ 
+@@ -1377,7 +_,7 @@
+ 
+         @Override
+         public void start() {
+-            if (Bee.this.hivePos != null && Bee.this.level().isLoaded(Bee.this.hivePos) && !Bee.this.isHiveValid()) {
++            if (Bee.this.hivePos != null && Bee.canReadBlock(Bee.this.level(), Bee.this.hivePos) && !Bee.this.isHiveValid()) {
+                 Bee.this.dropHive();
+             }
+ 

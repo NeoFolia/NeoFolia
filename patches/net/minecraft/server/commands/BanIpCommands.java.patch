@@ -1,0 +1,39 @@
+--- a/net/minecraft/server/commands/BanIpCommands.java
++++ b/net/minecraft/server/commands/BanIpCommands.java
+@@ -36,10 +_,14 @@
+     }
+ 
+     private static int banIpOrName(CommandSourceStack source, String target, @Nullable Component reason) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> banIpOrName(source, target, reason))) {
++            return 0;
++        }
++
+         if (InetAddresses.isInetAddress(target)) {
+             return banIp(source, target, reason);
+         } else {
+-            ServerPlayer player = source.getServer().getPlayerList().getPlayerByName(target);
++            ServerPlayer player = source.getServer().getPlayerList().getAllPlayerByName(target);
+             if (player != null) {
+                 return banIp(source, player.getIpAddress(), reason);
+             } else {
+@@ -53,7 +_,7 @@
+         if (list.isBanned(ip)) {
+             throw ERROR_ALREADY_BANNED.create();
+         } else {
+-            List<ServerPlayer> players = source.getServer().getPlayerList().getPlayersWithAddress(ip);
++            List<ServerPlayer> players = source.getServer().getPlayerList().getAllPlayersWithAddress(ip);
+             IpBanListEntry entry = new IpBanListEntry(ip, null, source.getTextName(), null, reason == null ? null : reason.getString());
+             list.add(entry);
+             source.sendSuccess(() -> Component.translatable("commands.banip.success", ip, entry.getReasonMessage()), true);
+@@ -62,7 +_,10 @@
+             }
+ 
+             for (ServerPlayer player : players) {
+-                player.connection.disconnect(Component.translatable("multiplayer.disconnect.ip_banned"));
++                RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                    player.connection.disconnect(Component.translatable("multiplayer.disconnect.ip_banned"));
++                    return null;
++                });
+             }
+ 
+             return players.size();

@@ -1,0 +1,27 @@
+--- a/net/minecraft/world/entity/animal/camel/Camel.java
++++ b/net/minecraft/world/entity/animal/camel/Camel.java
+@@ -132,13 +_,14 @@
+     public SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        CamelAi.initMemories(this, level.getRandom());
++        CamelAi.initMemories(this, this.getRandom());
+         this.resetLastPoseChangeTickToFullStand(level.getLevel().getGameTime());
+         return super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+     }
+ 
+     public static boolean checkCamelSpawnRules(EntityType<Camel> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random) {
+-        return level.getBlockState(pos.below()).is(BlockTags.CAMELS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.CAMELS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
+     }
+ 
+     @Override
+@@ -306,6 +_,7 @@
+         this.dashCooldown = 55;
+         this.setDashing(true);
+         this.needsSync = true;
++        net.neoforged.neoforge.common.CommonHooks.onLivingJump(this);
+     }
+ 
+     public boolean isDashing() {

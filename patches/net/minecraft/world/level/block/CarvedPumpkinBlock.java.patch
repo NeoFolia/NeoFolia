@@ -1,0 +1,35 @@
+--- a/net/minecraft/world/level/block/CarvedPumpkinBlock.java
++++ b/net/minecraft/world/level/block/CarvedPumpkinBlock.java
+@@ -26,6 +_,8 @@
+ import net.minecraft.world.level.block.state.pattern.BlockPatternBuilder;
+ import net.minecraft.world.level.block.state.predicate.BlockStatePredicate;
+ import net.minecraft.world.level.block.state.properties.EnumProperty;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CarvedPumpkinBlock extends HorizontalDirectionalBlock {
+@@ -109,11 +_,21 @@
+         golem.snapTo(spawnPos.getX() + 0.5, spawnPos.getY() + 0.05, spawnPos.getZ() + 0.5, 0.0F, 0.0F);
+         level.addFreshEntity(golem);
+ 
+-        for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class, golem.getBoundingBox().inflate(5.0))) {
+-            CriteriaTriggers.SUMMONED_ENTITY.trigger(player, golem);
++        AABB triggerBox = RegionizedWorldGuard.restrictToCurrentRegion(level, golem.getBoundingBox().inflate(5.0));
++        if (triggerBox != null) {
++            for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class, triggerBox)) {
++                triggerSummonedEntity(player, golem);
++            }
+         }
+ 
+         updatePatternBlocks(level, match);
++    }
++
++    private static void triggerSummonedEntity(ServerPlayer player, Entity golem) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.SUMMONED_ENTITY.trigger(player, golem));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(golem.level(), "Summoned golem advancement", trigger)) {
++            trigger.run();
++        }
+     }
+ 
+     public static void clearPatternBlocks(Level level, BlockPattern.BlockPatternMatch match) {

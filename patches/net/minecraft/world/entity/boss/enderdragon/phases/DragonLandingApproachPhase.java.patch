@@ -1,0 +1,41 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonLandingApproachPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonLandingApproachPhase.java
+@@ -28,13 +_,13 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.currentPath = null;
+         this.targetLocation = null;
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         double distToTarget = this.targetLocation == null ? 0.0 : this.targetLocation.distanceToSqr(this.dragon.getX(), this.dragon.getY(), this.dragon.getZ());
+         if (distToTarget < 100.0 || distToTarget > 22500.0 || this.dragon.horizontalCollision || this.dragon.verticalCollision) {
+             this.findNewTarget(level);
+@@ -42,11 +_,11 @@
+     }
+ 
+     @Override
+-    public @Nullable Vec3 getFlyTargetLocation() {
++    public synchronized @Nullable Vec3 getFlyTargetLocation() {
+         return this.targetLocation;
+     }
+ 
+-    private void findNewTarget(ServerLevel level) {
++    private synchronized void findNewTarget(ServerLevel level) {
+         if (this.currentPath == null || this.currentPath.isDone()) {
+             int currentNodeIndex = this.dragon.findClosestNode();
+             BlockPos egg = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, EndPodiumFeature.getLocation(this.dragon.getFightOrigin()));
+@@ -72,7 +_,7 @@
+         }
+     }
+ 
+-    private void navigateToNextPathNode() {
++    private synchronized void navigateToNextPathNode() {
+         if (this.currentPath != null && !this.currentPath.isDone()) {
+             Vec3i current = this.currentPath.getNextNodePos();
+             this.currentPath.advance();

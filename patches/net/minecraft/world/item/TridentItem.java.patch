@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/item/TridentItem.java
++++ b/net/minecraft/world/item/TridentItem.java
+@@ -27,6 +_,7 @@
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TridentItem extends Item implements ProjectileItem {
+     public static final int THROW_THRESHOLD_TIME = 10;
+@@ -76,7 +_,7 @@
+                     } else {
+                         Holder<SoundEvent> sound = EnchantmentHelper.pickHighestLevel(itemStack, EnchantmentEffectComponents.TRIDENT_SOUND)
+                             .orElse(SoundEvents.TRIDENT_THROW);
+-                        player.awardStat(Stats.ITEM_USED.get(this));
++                        RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+                         if (level instanceof ServerLevel serverLevel) {
+                             itemStack.hurtWithoutBreaking(1, player);
+                             if (riptideStrength == 0.0F) {
+@@ -143,5 +_,10 @@
+         ThrownTrident trident = new ThrownTrident(level, position.x(), position.y(), position.z(), itemStack.copyWithCount(1));
+         trident.pickup = AbstractArrow.Pickup.ALLOWED;
+         return trident;
++    }
++
++    @Override
++    public boolean canPerformAction(ItemInstance stack, net.neoforged.neoforge.common.ItemAbility itemAbility) {
++        return net.neoforged.neoforge.common.ItemAbilities.DEFAULT_TRIDENT_ACTIONS.contains(itemAbility);
+     }
+ }

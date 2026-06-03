@@ -1,0 +1,77 @@
+--- a/net/minecraft/world/inventory/StonecutterMenu.java
++++ b/net/minecraft/world/inventory/StonecutterMenu.java
+@@ -40,7 +_,7 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             super.setChanged();
+             StonecutterMenu.this.slotsChanged(this);
+             StonecutterMenu.this.slotUpdateListener.run();
+@@ -63,12 +_,12 @@
+             }
+ 
+             @Override
+-            public boolean mayPlace(ItemStack itemStack) {
++            public synchronized boolean mayPlace(ItemStack itemStack) {
+                 return false;
+             }
+ 
+             @Override
+-            public void onTake(Player player, ItemStack carried) {
++            public synchronized void onTake(Player player, ItemStack carried) {
+                 carried.onCraftedBy(player, carried.getCount());
+                 StonecutterMenu.this.resultContainer.awardUsedRecipes(player, this.getRelevantItems());
+                 ItemStack remaining = StonecutterMenu.this.inputSlot.remove(1);
+@@ -116,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean clickMenuButton(Player player, int buttonId) {
++    public synchronized boolean clickMenuButton(Player player, int buttonId) {
+         if (this.selectedRecipeIndex.get() == buttonId) {
+             return false;
+         } else {
+@@ -134,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         ItemStack input = this.inputSlot.getItem();
+         if (!input.is(this.input.getItem())) {
+             this.input = input.copy();
+@@ -172,7 +_,7 @@
+     }
+ 
+     @Override
+-    public MenuType<?> getType() {
++    public synchronized MenuType<?> getType() {
+         return MenuType.STONECUTTER;
+     }
+ 
+@@ -181,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
++    public synchronized boolean canTakeItemForPickAll(ItemStack carried, Slot target) {
+         return target.container != this.resultContainer && super.canTakeItemForPickAll(carried, target);
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {
+@@ -237,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.resultContainer.removeItemNoUpdate(1);
+         this.access.execute((level, pos) -> this.clearContainer(player, this.container));

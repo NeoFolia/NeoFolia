@@ -1,0 +1,46 @@
+--- a/net/minecraft/world/inventory/ArmorSlot.java
++++ b/net/minecraft/world/inventory/ArmorSlot.java
+@@ -23,28 +_,28 @@
+     }
+ 
+     @Override
+-    public void setByPlayer(ItemStack itemStack, ItemStack previous) {
++    public synchronized void setByPlayer(ItemStack itemStack, ItemStack previous) {
+         this.owner.onEquipItem(this.slot, previous, itemStack);
+         super.setByPlayer(itemStack, previous);
+     }
+ 
+     @Override
+-    public int getMaxStackSize() {
++    public synchronized int getMaxStackSize() {
+         return 1;
+     }
+ 
+     @Override
+-    public boolean mayPlace(ItemStack itemStack) {
+-        return this.owner.isEquippableInSlot(itemStack, this.slot);
++    public synchronized boolean mayPlace(ItemStack itemStack) {
++        return itemStack.canEquip(this.slot, this.owner);
+     }
+ 
+     @Override
+-    public boolean isActive() {
++    public synchronized boolean isActive() {
+         return this.owner.canUseSlot(this.slot);
+     }
+ 
+     @Override
+-    public boolean mayPickup(Player player) {
++    public synchronized boolean mayPickup(Player player) {
+         ItemStack itemStack = this.getItem();
+         return !itemStack.isEmpty() && !player.isCreative() && EnchantmentHelper.has(itemStack, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE)
+             ? false
+@@ -52,7 +_,7 @@
+     }
+ 
+     @Override
+-    public @Nullable Identifier getNoItemIcon() {
++    public synchronized @Nullable Identifier getNoItemIcon() {
+         return this.emptyIcon;
+     }
+ }

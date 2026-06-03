@@ -1,0 +1,120 @@
+--- a/net/minecraft/world/entity/ai/goal/MeleeAttackGoal.java
++++ b/net/minecraft/world/entity/ai/goal/MeleeAttackGoal.java
+@@ -7,6 +_,8 @@
+ import net.minecraft.world.entity.PathfinderMob;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.pathfinder.Path;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+ public class MeleeAttackGoal extends Goal {
+     protected final PathfinderMob mob;
+@@ -30,13 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         long time = this.mob.level().getGameTime();
+         if (time - this.lastCanUseCheck < 20L) {
+             return false;
+         } else {
+             this.lastCanUseCheck = time;
+-            LivingEntity target = this.mob.getTarget();
++            LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
+             if (target == null) {
+                 return false;
+             } else if (!target.isAlive()) {
+@@ -49,8 +_,8 @@
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        LivingEntity target = this.mob.getTarget();
++    public synchronized boolean canContinueToUse() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
+         if (target == null) {
+             return false;
+         } else if (!target.isAlive()) {
+@@ -63,16 +_,18 @@
+     }
+ 
+     @Override
+-    public void start() {
+-        this.mob.getNavigation().moveTo(this.path, this.speedModifier);
++    public synchronized void start() {
++        if (this.path != null) {
++            this.mob.getNavigation().moveTo(this.path, this.speedModifier);
++        }
+         this.mob.setAggressive(true);
+         this.ticksUntilNextPathRecalculation = 0;
+         this.ticksUntilNextAttack = 0;
+     }
+ 
+     @Override
+-    public void stop() {
+-        LivingEntity target = this.mob.getTarget();
++    public synchronized void stop() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
+         if (!EntitySelector.NO_CREATIVE_OR_SPECTATOR.test(target)) {
+             this.mob.setTarget(null);
+         }
+@@ -82,13 +_,13 @@
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
+-        LivingEntity target = this.mob.getTarget();
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
+         if (target != null) {
+             this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+             this.ticksUntilNextPathRecalculation = Math.max(this.ticksUntilNextPathRecalculation - 1, 0);
+@@ -122,7 +_,7 @@
+         }
+     }
+ 
+-    protected void checkAndPerformAttack(LivingEntity target) {
++    protected synchronized void checkAndPerformAttack(LivingEntity target) {
+         if (this.canPerformAttack(target)) {
+             this.resetAttackCooldown();
+             this.mob.swing(InteractionHand.MAIN_HAND);
+@@ -130,23 +_,27 @@
+         }
+     }
+ 
+-    protected void resetAttackCooldown() {
++    protected synchronized void resetAttackCooldown() {
+         this.ticksUntilNextAttack = this.adjustedTickDelay(20);
+     }
+ 
+-    protected boolean isTimeToAttack() {
++    protected synchronized boolean isTimeToAttack() {
+         return this.ticksUntilNextAttack <= 0;
+     }
+ 
+-    protected boolean canPerformAttack(LivingEntity target) {
++    protected synchronized boolean canPerformAttack(LivingEntity target) {
+         return this.isTimeToAttack() && this.mob.isWithinMeleeAttackRange(target) && this.mob.getSensing().hasLineOfSight(target);
+     }
+ 
+-    protected int getTicksUntilNextAttack() {
++    protected synchronized int getTicksUntilNextAttack() {
+         return this.ticksUntilNextAttack;
+     }
+ 
+-    protected int getAttackInterval() {
++    protected synchronized int getAttackInterval() {
+         return this.adjustedTickDelay(20);
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

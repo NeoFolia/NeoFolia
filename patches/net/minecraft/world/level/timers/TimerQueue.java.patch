@@ -1,0 +1,53 @@
+--- a/net/minecraft/world/level/timers/TimerQueue.java
++++ b/net/minecraft/world/level/timers/TimerQueue.java
+@@ -7,7 +_,6 @@
+ import com.mojang.serialization.Codec;
+ import com.mojang.serialization.codecs.RecordCodecBuilder;
+ import java.util.Collection;
+-import java.util.Collections;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.PriorityQueue;
+@@ -48,7 +_,7 @@
+     public TimerQueue() {
+     }
+ 
+-    public void tick(T context, long currentTick) {
++    public synchronized void tick(T context, long currentTick) {
+         while (true) {
+             TimerQueue.Event<T> event = this.queue.peek();
+             if (event == null || event.triggerTime > currentTick) {
+@@ -62,7 +_,7 @@
+         }
+     }
+ 
+-    public void schedule(String id, long time, TimerCallback<T> callback) {
++    public synchronized void schedule(String id, long time, TimerCallback<T> callback) {
+         if (!this.events.contains(id, time)) {
+             this.sequentialId = this.sequentialId.plus(UnsignedLong.ONE);
+             TimerQueue.Event<T> newEvent = new TimerQueue.Event<>(time, this.sequentialId, id, callback);
+@@ -72,7 +_,7 @@
+         }
+     }
+ 
+-    public int remove(String id) {
++    public synchronized int remove(String id) {
+         Collection<TimerQueue.Event<T>> eventsToRemove = this.events.row(id).values();
+         eventsToRemove.forEach(this.queue::remove);
+         int size = eventsToRemove.size();
+@@ -81,12 +_,12 @@
+         return size;
+     }
+ 
+-    public Set<String> getEventsIds() {
+-        return Collections.unmodifiableSet(this.events.rowKeySet());
++    public synchronized Set<String> getEventsIds() {
++        return Set.copyOf(this.events.rowKeySet());
+     }
+ 
+     @VisibleForTesting
+-    protected TimerQueue.Packed<T> pack() {
++    protected synchronized TimerQueue.Packed<T> pack() {
+         return new TimerQueue.Packed<>(
+             this.queue.stream().sorted(createComparator()).map(event -> new TimerQueue.Event.Packed<>(event.triggerTime, event.id, event.callback)).toList()
+         );

@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/entity/ai/behavior/StartCelebratingIfTargetDead.java
++++ b/net/minecraft/world/entity/ai/behavior/StartCelebratingIfTargetDead.java
+@@ -8,7 +_,7 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ 
+ public class StartCelebratingIfTargetDead {
+-    public static BehaviorControl<LivingEntity> create(int celebrateDuration, BiPredicate<LivingEntity, LivingEntity> dancePredicate) {
++    public static synchronized BehaviorControl<LivingEntity> create(int celebrateDuration, BiPredicate<LivingEntity, LivingEntity> dancePredicate) {
+         return BehaviorBuilder.create(
+             i -> i.group(
+                     i.present(MemoryModuleType.ATTACK_TARGET),
+@@ -17,7 +_,12 @@
+                     i.registered(MemoryModuleType.DANCING)
+                 )
+                 .apply(i, (attackTarget, angryAt, celebrateAt, dancing) -> (level, body, timestamp) -> {
+-                    LivingEntity target = i.get(attackTarget);
++                    LivingEntity target = BehaviorUtils.regionSafeEntity(body, i.get(attackTarget));
++                    if (target == null) {
++                        attackTarget.erase();
++                        return true;
++                    }
++
+                     if (!target.isDeadOrDying()) {
+                         return false;
+                     } else {

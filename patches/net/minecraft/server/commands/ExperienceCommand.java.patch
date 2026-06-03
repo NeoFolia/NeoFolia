@@ -1,0 +1,208 @@
+--- a/net/minecraft/server/commands/ExperienceCommand.java
++++ b/net/minecraft/server/commands/ExperienceCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+ import com.mojang.brigadier.tree.LiteralCommandNode;
+@@ -32,35 +_,14 @@
+                             Commands.argument("target", EntityArgument.players())
+                                 .then(
+                                     Commands.argument("amount", IntegerArgumentType.integer())
+-                                        .executes(
+-                                            c -> addExperience(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "target"),
+-                                                IntegerArgumentType.getInteger(c, "amount"),
+-                                                ExperienceCommand.Type.POINTS
+-                                            )
+-                                        )
++                                        .executes(c -> addExperience(c, ExperienceCommand.Type.POINTS))
+                                         .then(
+                                             Commands.literal("points")
+-                                                .executes(
+-                                                    c -> addExperience(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getPlayers(c, "target"),
+-                                                        IntegerArgumentType.getInteger(c, "amount"),
+-                                                        ExperienceCommand.Type.POINTS
+-                                                    )
+-                                                )
++                                                .executes(c -> addExperience(c, ExperienceCommand.Type.POINTS))
+                                         )
+                                         .then(
+                                             Commands.literal("levels")
+-                                                .executes(
+-                                                    c -> addExperience(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getPlayers(c, "target"),
+-                                                        IntegerArgumentType.getInteger(c, "amount"),
+-                                                        ExperienceCommand.Type.LEVELS
+-                                                    )
+-                                                )
++                                                .executes(c -> addExperience(c, ExperienceCommand.Type.LEVELS))
+                                         )
+                                 )
+                         )
+@@ -71,35 +_,14 @@
+                             Commands.argument("target", EntityArgument.players())
+                                 .then(
+                                     Commands.argument("amount", IntegerArgumentType.integer(0))
+-                                        .executes(
+-                                            c -> setExperience(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "target"),
+-                                                IntegerArgumentType.getInteger(c, "amount"),
+-                                                ExperienceCommand.Type.POINTS
+-                                            )
+-                                        )
++                                        .executes(c -> setExperience(c, ExperienceCommand.Type.POINTS))
+                                         .then(
+                                             Commands.literal("points")
+-                                                .executes(
+-                                                    c -> setExperience(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getPlayers(c, "target"),
+-                                                        IntegerArgumentType.getInteger(c, "amount"),
+-                                                        ExperienceCommand.Type.POINTS
+-                                                    )
+-                                                )
++                                                .executes(c -> setExperience(c, ExperienceCommand.Type.POINTS))
+                                         )
+                                         .then(
+                                             Commands.literal("levels")
+-                                                .executes(
+-                                                    c -> setExperience(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getPlayers(c, "target"),
+-                                                        IntegerArgumentType.getInteger(c, "amount"),
+-                                                        ExperienceCommand.Type.LEVELS
+-                                                    )
+-                                                )
++                                                .executes(c -> setExperience(c, ExperienceCommand.Type.LEVELS))
+                                         )
+                                 )
+                         )
+@@ -110,11 +_,11 @@
+                             Commands.argument("target", EntityArgument.player())
+                                 .then(
+                                     Commands.literal("points")
+-                                        .executes(c -> queryExperience(c.getSource(), EntityArgument.getPlayer(c, "target"), ExperienceCommand.Type.POINTS))
++                                        .executes(c -> queryExperience(c, ExperienceCommand.Type.POINTS))
+                                 )
+                                 .then(
+                                     Commands.literal("levels")
+-                                        .executes(c -> queryExperience(c.getSource(), EntityArgument.getPlayer(c, "target"), ExperienceCommand.Type.LEVELS))
++                                        .executes(c -> queryExperience(c, ExperienceCommand.Type.LEVELS))
+                                 )
+                         )
+                 )
+@@ -122,20 +_,48 @@
+         dispatcher.register(Commands.literal("xp").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).redirect(command));
+     }
+ 
++    private static int queryExperience(CommandContext<CommandSourceStack> context, ExperienceCommand.Type type) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> queryExperience(context, type))) {
++            return 0;
++        }
++
++        return queryExperience(source, EntityArgument.getPlayer(context, "target"), type);
++    }
++
+     private static int queryExperience(CommandSourceStack source, ServerPlayer target, ExperienceCommand.Type type) {
+-        int result = type.query.applyAsInt(target);
+-        source.sendSuccess(() -> Component.translatable("commands.experience.query." + type.name, target.getDisplayName(), result), false);
++        QueryResult queryResult = RegionizedCommandHelper.callOnPlayerRegion(
++            source,
++            target,
++            () -> new QueryResult(type.query.applyAsInt(target), target.getDisplayName())
++        );
++        int result = queryResult.value();
++        source.sendSuccess(() -> Component.translatable("commands.experience.query." + type.name, queryResult.targetName(), result), false);
+         return result;
+     }
+ 
++    private static int addExperience(CommandContext<CommandSourceStack> context, ExperienceCommand.Type type) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> addExperience(context, type))) {
++            return 0;
++        }
++
++        return addExperience(source, EntityArgument.getPlayers(context, "target"), IntegerArgumentType.getInteger(context, "amount"), type);
++    }
++
+     private static int addExperience(CommandSourceStack source, Collection<? extends ServerPlayer> players, int amount, ExperienceCommand.Type type) {
++        Component singleTargetName = null;
+         for (ServerPlayer player : players) {
+-            type.add.accept(player, amount);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                type.add.accept(player, amount);
++                return player.getDisplayName();
++            });
+         }
+ 
+         if (players.size() == 1) {
++            Component finalSingleTargetName = singleTargetName;
+             source.sendSuccess(
+-                () -> Component.translatable("commands.experience.add." + type.name + ".success.single", amount, players.iterator().next().getDisplayName()),
++                () -> Component.translatable("commands.experience.add." + type.name + ".success.single", amount, finalSingleTargetName),
+                 true
+             );
+         } else {
+@@ -145,11 +_,27 @@
+         return players.size();
+     }
+ 
++    private static int setExperience(CommandContext<CommandSourceStack> context, ExperienceCommand.Type type) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setExperience(context, type))) {
++            return 0;
++        }
++
++        return setExperience(source, EntityArgument.getPlayers(context, "target"), IntegerArgumentType.getInteger(context, "amount"), type);
++    }
++
+     private static int setExperience(CommandSourceStack source, Collection<? extends ServerPlayer> players, int amount, ExperienceCommand.Type type) throws CommandSyntaxException {
+         int success = 0;
++        Component singleTargetName = null;
+ 
+         for (ServerPlayer player : players) {
+-            if (type.set.test(player, amount)) {
++            SetResult setResult = RegionizedCommandHelper.callOnPlayerRegion(
++                source,
++                player,
++                () -> new SetResult(type.set.test(player, amount), player.getDisplayName())
++            );
++            singleTargetName = setResult.targetName();
++            if (setResult.success()) {
+                 success++;
+             }
+         }
+@@ -158,8 +_,9 @@
+             throw ERROR_SET_POINTS_INVALID.create();
+         } else {
+             if (players.size() == 1) {
++                Component finalSingleTargetName = singleTargetName;
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.experience.set." + type.name + ".success.single", amount, players.iterator().next().getDisplayName()),
++                    () -> Component.translatable("commands.experience.set." + type.name + ".success.single", amount, finalSingleTargetName),
+                     true
+                 );
+             } else {
+@@ -168,6 +_,12 @@
+ 
+             return players.size();
+         }
++    }
++
++    private record QueryResult(int value, Component targetName) {
++    }
++
++    private record SetResult(boolean success, Component targetName) {
+     }
+ 
+     private static enum Type {

@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/ai/behavior/GoToWantedItem.java
++++ b/net/minecraft/world/entity/ai/behavior/GoToWantedItem.java
+@@ -10,11 +_,11 @@
+ import net.minecraft.world.entity.item.ItemEntity;
+ 
+ public class GoToWantedItem {
+-    public static BehaviorControl<LivingEntity> create(float speedModifier, boolean interruptOngoingWalk, int maxDistToWalk) {
++    public static synchronized BehaviorControl<LivingEntity> create(float speedModifier, boolean interruptOngoingWalk, int maxDistToWalk) {
+         return create(body -> true, speedModifier, interruptOngoingWalk, maxDistToWalk);
+     }
+ 
+-    public static <E extends LivingEntity> BehaviorControl<E> create(
++    public static synchronized <E extends LivingEntity> BehaviorControl<E> create(
+         Predicate<E> predicate, float speedModifier, boolean interruptOngoingWalk, int maxDistToWalk
+     ) {
+         return BehaviorBuilder.create(
+@@ -31,7 +_,11 @@
+                     .apply(
+                         i,
+                         (lookTarget, walkTarget, wantedItem, cooldown) -> (level, body, timestamp) -> {
+-                            ItemEntity item = i.get(wantedItem);
++                            ItemEntity item = BehaviorUtils.regionSafeEntity(body, i.get(wantedItem));
++                            if (item == null) {
++                                return false;
++                            }
++
+                             if (i.tryGet(cooldown).isEmpty()
+                                 && predicate.test(body)
+                                 && item.closerThan(body, maxDistToWalk)

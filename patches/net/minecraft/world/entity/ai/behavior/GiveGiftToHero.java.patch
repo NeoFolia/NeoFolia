@@ -1,0 +1,122 @@
+--- a/net/minecraft/world/entity/ai/behavior/GiveGiftToHero.java
++++ b/net/minecraft/world/entity/ai/behavior/GiveGiftToHero.java
+@@ -21,6 +_,8 @@
+     private static final int MIN_TIME_BETWEEN_GIFTS = 600;
+     private static final int MAX_TIME_BETWEEN_GIFTS = 6600;
+     private static final int TIME_TO_DELAY_FOR_HEAD_TO_FINISH_TURNING = 20;
++    /** @deprecated Neo: use the {@link net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps#RAID_HERO_GIFTS data map} instead */
++    @Deprecated
+     private static final Map<ResourceKey<VillagerProfession>, ResourceKey<LootTable>> GIFTS = ImmutableMap.<ResourceKey<VillagerProfession>, ResourceKey<LootTable>>builder()
+         .put(VillagerProfession.ARMORER, BuiltInLootTables.ARMORER_GIFT)
+         .put(VillagerProfession.BUTCHER, BuiltInLootTables.BUTCHER_GIFT)
+@@ -57,7 +_,7 @@
+         );
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+         if (!this.isHeroVisible(body)) {
+             return false;
+         } else if (this.timeUntilNextGift > 0) {
+@@ -68,20 +_,32 @@
+         }
+     }
+ 
+-    protected void start(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         this.giftGivenDuringThisRun = false;
+         this.timeSinceStart = timestamp;
+-        Player player = this.getNearestTargetableHero(body).get();
++        Optional<Player> playerCandidate = this.getNearestTargetableHero(body);
++        if (playerCandidate.isEmpty()) {
++            this.giftGivenDuringThisRun = true;
++            return;
++        }
++
++        Player player = playerCandidate.get();
+         body.getBrain().setMemory(MemoryModuleType.INTERACTION_TARGET, player);
+         BehaviorUtils.lookAtEntity(body, player);
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return this.isHeroVisible(body) && !this.giftGivenDuringThisRun;
+     }
+ 
+-    protected void tick(ServerLevel level, Villager villager, long timestamp) {
+-        Player player = this.getNearestTargetableHero(villager).get();
++    protected synchronized void tick(ServerLevel level, Villager villager, long timestamp) {
++        Optional<Player> playerCandidate = this.getNearestTargetableHero(villager);
++        if (playerCandidate.isEmpty()) {
++            this.giftGivenDuringThisRun = true;
++            return;
++        }
++
++        Player player = playerCandidate.get();
+         BehaviorUtils.lookAtEntity(villager, player);
+         if (this.isWithinThrowingDistance(villager, player)) {
+             if (timestamp - this.timeSinceStart > 20L) {
+@@ -93,45 +_,52 @@
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
+-        this.timeUntilNextGift = calculateTimeUntilNextGift(level);
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
++        this.timeUntilNextGift = calculateTimeUntilNextGift(body);
++        this.giftGivenDuringThisRun = false;
++        this.timeSinceStart = 0L;
+         body.getBrain().eraseMemory(MemoryModuleType.INTERACTION_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+     }
+ 
+-    private void throwGift(ServerLevel level, Villager villager, LivingEntity target) {
++    private synchronized void throwGift(ServerLevel level, Villager villager, LivingEntity target) {
+         villager.dropFromGiftLootTable(level, getLootTableToThrow(villager), (l, itemStack) -> BehaviorUtils.throwItem(villager, itemStack, target.position()));
+     }
+ 
+-    private static ResourceKey<LootTable> getLootTableToThrow(Villager villager) {
++    private static synchronized ResourceKey<LootTable> getLootTableToThrow(Villager villager) {
+         if (villager.isBaby()) {
+             return BuiltInLootTables.BABY_VILLAGER_GIFT;
+         } else {
++            var gift = villager.getVillagerData().profession().getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.RAID_HERO_GIFTS);
++            if (gift != null) return gift.lootTable();
+             Optional<ResourceKey<VillagerProfession>> profession = villager.getVillagerData().profession().unwrapKey();
+             return profession.isEmpty() ? BuiltInLootTables.UNEMPLOYED_GIFT : GIFTS.getOrDefault(profession.get(), BuiltInLootTables.UNEMPLOYED_GIFT);
+         }
+     }
+ 
+-    private boolean isHeroVisible(Villager body) {
++    private synchronized boolean isHeroVisible(Villager body) {
+         return this.getNearestTargetableHero(body).isPresent();
+     }
+ 
+-    private Optional<Player> getNearestTargetableHero(Villager body) {
+-        return body.getBrain().getMemory(MemoryModuleType.NEAREST_VISIBLE_PLAYER).filter(this::isHero);
++    private synchronized Optional<Player> getNearestTargetableHero(Villager body) {
++        return body.getBrain()
++            .getMemory(MemoryModuleType.NEAREST_VISIBLE_PLAYER)
++            .filter(player -> BehaviorUtils.regionSafeEntity(body, player) != null)
++            .filter(this::isHero);
+     }
+ 
+-    private boolean isHero(Player player) {
++    private synchronized boolean isHero(Player player) {
+         return player.hasEffect(MobEffects.HERO_OF_THE_VILLAGE);
+     }
+ 
+-    private boolean isWithinThrowingDistance(Villager villager, Player player) {
++    private synchronized boolean isWithinThrowingDistance(Villager villager, Player player) {
+         BlockPos playerPos = player.blockPosition();
+         BlockPos villagerPos = villager.blockPosition();
+         return villagerPos.closerThan(playerPos, 5.0);
+     }
+ 
+-    private static int calculateTimeUntilNextGift(ServerLevel level) {
+-        return 600 + level.getRandom().nextInt(6001);
++    private static synchronized int calculateTimeUntilNextGift(Villager body) {
++        return 600 + body.getRandom().nextInt(6001);
+     }
+ }

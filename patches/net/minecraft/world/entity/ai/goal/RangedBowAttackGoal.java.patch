@@ -1,0 +1,100 @@
+--- a/net/minecraft/world/entity/ai/goal/RangedBowAttackGoal.java
++++ b/net/minecraft/world/entity/ai/goal/RangedBowAttackGoal.java
+@@ -8,8 +_,10 @@
+ import net.minecraft.world.entity.projectile.ProjectileUtil;
+ import net.minecraft.world.item.BowItem;
+ import net.minecraft.world.item.Items;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
+ 
+-public class RangedBowAttackGoal<T extends Monster & RangedAttackMob> extends Goal {
++public class RangedBowAttackGoal<T extends net.minecraft.world.entity.Mob & RangedAttackMob> extends Goal {
+     private final T mob;
+     private final double speedModifier;
+     private int attackIntervalMin;
+@@ -20,6 +_,10 @@
+     private boolean strafingBackwards;
+     private int strafingTime = -1;
+ 
++    public <M extends Monster & RangedAttackMob> RangedBowAttackGoal(M mob, double speedModifier, int attackIntervalMin, float attackRadius) {
++        this((T) mob, speedModifier, attackIntervalMin, attackRadius);
++    }
++
+     public RangedBowAttackGoal(T mob, double speedModifier, int attackIntervalMin, float attackRadius) {
+         this.mob = mob;
+         this.speedModifier = speedModifier;
+@@ -28,47 +_,49 @@
+         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+     }
+ 
+-    public void setMinAttackInterval(int ticks) {
++    public synchronized void setMinAttackInterval(int ticks) {
+         this.attackIntervalMin = ticks;
+     }
+ 
+     @Override
+-    public boolean canUse() {
+-        return this.mob.getTarget() == null ? false : this.isHoldingBow();
++    public synchronized boolean canUse() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
++        return target == null ? false : target.isAlive() && this.isHoldingBow();
+     }
+ 
+-    protected boolean isHoldingBow() {
+-        return this.mob.isHolding(Items.BOW);
++    protected synchronized boolean isHoldingBow() {
++        return this.mob.isHolding(is -> is.getItem() instanceof BowItem);
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         return (this.canUse() || !this.mob.getNavigation().isDone()) && this.isHoldingBow();
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         super.start();
+         this.mob.setAggressive(true);
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         super.stop();
+         this.mob.setAggressive(false);
+         this.seeTime = 0;
+         this.attackTime = -1;
++        this.strafingTime = -1;
+         this.mob.stopUsingItem();
+     }
+ 
+     @Override
+-    public boolean requiresUpdateEveryTick() {
++    public synchronized boolean requiresUpdateEveryTick() {
+         return true;
+     }
+ 
+     @Override
+-    public void tick() {
+-        LivingEntity target = this.mob.getTarget();
++    public synchronized void tick() {
++        LivingEntity target = this.regionSafeTarget(this.mob.getTarget());
+         if (target != null) {
+             double targetDistSqr = this.mob.distanceToSqr(target.getX(), target.getY(), target.getZ());
+             boolean hasLineOfSight = this.mob.getSensing().hasLineOfSight(target);
+@@ -132,8 +_,12 @@
+                     }
+                 }
+             } else if (--this.attackTime <= 0 && this.seeTime >= -60) {
+-                this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, Items.BOW));
++                this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, item -> item instanceof BowItem));
+             }
+         }
++    }
++
++    private synchronized @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), target);
+     }
+ }

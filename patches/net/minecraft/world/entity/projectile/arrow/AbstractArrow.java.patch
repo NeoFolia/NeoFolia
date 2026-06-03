@@ -1,0 +1,105 @@
+--- a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
++++ b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+@@ -41,6 +_,7 @@
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.level.ClipContext;
+ import net.minecraft.world.level.Level;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+@@ -50,6 +_,7 @@
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class AbstractArrow extends Projectile {
+@@ -165,7 +_,7 @@
+         boolean physicsEnabled = !this.isNoPhysics();
+         Vec3 movement = this.getDeltaMovement();
+         BlockPos blockPos = this.blockPosition();
+-        BlockState blockState = this.level().getBlockState(blockPos);
++        BlockState blockState = this.canReadBlock(blockPos) ? this.level().getBlockState(blockPos) : Blocks.AIR.defaultBlockState();
+         if (!blockState.isAir() && physicsEnabled) {
+             VoxelShape shape = blockState.getCollisionShape(this.level(), blockPos);
+             if (!shape.isEmpty()) {
+@@ -278,11 +_,15 @@
+ 
+             if (entitiesHit.isEmpty()) {
+                 if (this.isAlive() && blockHitResult.getType() != HitResult.Type.MISS) {
++                    if (net.neoforged.neoforge.event.EventHooks.onProjectileImpact(this, blockHitResult))
++                        break;
+                     this.hitTargetOrDeflectSelf(blockHitResult);
+                     this.needsSync = true;
+                 }
+                 break;
+-            } else if (this.isAlive() && !this.noPhysics) {
++            } else if (this.isAlive() && !this.noPhysics && firstEntityHit.getType() != HitResult.Type.MISS) {
++                if (net.neoforged.neoforge.event.EventHooks.onProjectileImpact(this, firstEntityHit))
++                    break;
+                 ProjectileDeflection deflection = this.hitTargetsOrDeflectSelf(entitiesHit);
+                 this.needsSync = true;
+                 if (this.getPierceLevel() > 0 && deflection == ProjectileDeflection.NONE) {
+@@ -469,7 +_,7 @@
+ 
+                 this.doPostHurtEffects(mob);
+                 if (mob instanceof Player && currentOwner instanceof ServerPlayer ownerPlayer && !this.isSilent() && mob != ownerPlayer) {
+-                    ownerPlayer.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.PLAY_ARROW_HIT_SOUND, 0.0F));
++                    RegionizedWorldGuard.sendToPlayer(ownerPlayer, new ClientboundGameEventPacket(ClientboundGameEventPacket.PLAY_ARROW_HIT_SOUND, 0.0F));
+                 }
+ 
+                 if (!entity.isAlive() && this.piercedAndKilledEntities != null) {
+@@ -478,9 +_,9 @@
+ 
+                 if (!this.level().isClientSide() && currentOwner instanceof ServerPlayer player) {
+                     if (this.piercedAndKilledEntities != null) {
+-                        CriteriaTriggers.KILLED_BY_ARROW.trigger(player, this.piercedAndKilledEntities, this.firedFromWeapon);
++                        this.triggerKilledByArrow(player, this.piercedAndKilledEntities);
+                     } else if (!entity.isAlive()) {
+-                        CriteriaTriggers.KILLED_BY_ARROW.trigger(player, List.of(entity), this.firedFromWeapon);
++                        this.triggerKilledByArrow(player, List.of(entity));
+                     }
+                 }
+             }
+@@ -503,6 +_,17 @@
+         }
+     }
+ 
++    private void triggerKilledByArrow(ServerPlayer player, Collection<Entity> killedEntities) {
++        List<Entity> killedEntitiesSnapshot = List.copyOf(killedEntities);
++        ItemStack firedFromWeaponSnapshot = this.firedFromWeapon == null ? null : this.firedFromWeapon.copy();
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(
++            player, () -> CriteriaTriggers.KILLED_BY_ARROW.trigger(player, killedEntitiesSnapshot, firedFromWeaponSnapshot)
++        );
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level(), "Killed by arrow advancement", trigger)) {
++            trigger.run();
++        }
++    }
++
+     protected void doKnockback(LivingEntity mob, DamageSource damageSource) {
+         double knockback = this.firedFromWeapon != null && this.level() instanceof ServerLevel serverLevel
+             ? EnchantmentHelper.modifyKnockback(serverLevel, this.firedFromWeapon, mob, damageSource, 0.0F)
+@@ -518,6 +_,10 @@
+ 
+     @Override
+     protected void onHitBlock(BlockHitResult hitResult) {
++        if (!this.canReadBlock(hitResult.getBlockPos())) {
++            return;
++        }
++
+         this.lastState = this.level().getBlockState(hitResult.getBlockPos());
+         super.onHitBlock(hitResult);
+         ItemStack weaponItem = this.getWeaponItem();
+@@ -540,6 +_,10 @@
+     }
+ 
+     protected void hitBlockEnchantmentEffects(ServerLevel serverLevel, BlockHitResult hitResult, ItemStack weapon) {
++        if (!this.canReadBlock(hitResult.getBlockPos())) {
++            return;
++        }
++
+         Vec3 compensatedHitPosition = hitResult.getBlockPos().clampLocationWithin(hitResult.getLocation());
+         EnchantmentHelper.onHitBlock(
+             serverLevel,

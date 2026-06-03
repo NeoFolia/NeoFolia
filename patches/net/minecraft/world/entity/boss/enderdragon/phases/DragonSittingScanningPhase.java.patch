@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/entity/boss/enderdragon/phases/DragonSittingScanningPhase.java
++++ b/net/minecraft/world/entity/boss/enderdragon/phases/DragonSittingScanningPhase.java
+@@ -22,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void doServerTick(ServerLevel level) {
++    public synchronized void doServerTick(ServerLevel level) {
+         this.scanningTime++;
+         LivingEntity attackTarget = level.getNearestPlayer(this.scanTargeting, this.dragon, this.dragon.getX(), this.dragon.getY(), this.dragon.getZ());
+         if (attackTarget != null) {
+@@ -67,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void begin() {
++    public synchronized void begin() {
+         this.scanningTime = 0;
+     }
+ 

@@ -1,0 +1,89 @@
+--- a/net/minecraft/server/commands/MsgCommand.java
++++ b/net/minecraft/server/commands/MsgCommand.java
+@@ -1,6 +_,8 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.tree.LiteralCommandNode;
+ import java.util.Collection;
+ import net.minecraft.commands.CommandSourceStack;
+@@ -8,6 +_,7 @@
+ import net.minecraft.commands.arguments.EntityArgument;
+ import net.minecraft.commands.arguments.MessageArgument;
+ import net.minecraft.network.chat.ChatType;
++import net.minecraft.network.chat.Component;
+ import net.minecraft.network.chat.OutgoingChatMessage;
+ import net.minecraft.network.chat.PlayerChatMessage;
+ import net.minecraft.server.level.ServerPlayer;
+@@ -17,34 +_,55 @@
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+         LiteralCommandNode<CommandSourceStack> msg = dispatcher.register(
+             Commands.literal("msg")
+-                .then(Commands.argument("targets", EntityArgument.players()).then(Commands.argument("message", MessageArgument.message()).executes(c -> {
+-                    Collection<ServerPlayer> players = EntityArgument.getPlayers(c, "targets");
+-                    if (!players.isEmpty()) {
+-                        MessageArgument.resolveChatMessage(c, "message", message -> sendMessage(c.getSource(), players, message));
+-                    }
+-
+-                    return players.size();
+-                })))
++                .then(Commands.argument("targets", EntityArgument.players()).then(Commands.argument("message", MessageArgument.message()).executes(MsgCommand::sendMessage)))
+         );
+         dispatcher.register(Commands.literal("tell").redirect(msg));
+         dispatcher.register(Commands.literal("w").redirect(msg));
+     }
+ 
++    private static int sendMessage(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> sendMessage(context))) {
++            return 0;
++        }
++
++        Collection<ServerPlayer> players = EntityArgument.getPlayers(context, "targets");
++        if (!players.isEmpty()) {
++            MessageArgument.resolveChatMessage(context, "message", message -> sendMessage(source, players, message));
++        }
++
++        return players.size();
++    }
++
+     private static void sendMessage(CommandSourceStack source, Collection<ServerPlayer> players, PlayerChatMessage message) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> sendMessage(source, players, message))) {
++            return;
++        }
++
+         ChatType.Bound incomingChatType = ChatType.bind(ChatType.MSG_COMMAND_INCOMING, source);
+         OutgoingChatMessage tracked = OutgoingChatMessage.create(message);
+         boolean wasFullyFiltered = false;
++        ServerPlayer sourcePlayer = source.getPlayer();
++        boolean sourceFiltersText = sourcePlayer != null
++            && RegionizedCommandHelper.callOnPlayerRegion(source, sourcePlayer, sourcePlayer::isTextFilteringEnabled);
+ 
+         for (ServerPlayer player : players) {
+-            ChatType.Bound outgoingChatType = ChatType.bind(ChatType.MSG_COMMAND_OUTGOING, source).withTargetName(player.getDisplayName());
+-            source.sendChatMessage(tracked, false, outgoingChatType);
+-            boolean filtered = source.shouldFilterMessageTo(player);
+-            player.sendChatMessage(tracked, filtered, incomingChatType);
+-            wasFullyFiltered |= filtered && message.isFullyFiltered();
++            MessageDeliveryResult result = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                Component playerName = player.getDisplayName();
++                boolean filtered = player == sourcePlayer ? false : sourceFiltersText || player.isTextFilteringEnabled();
++                player.sendChatMessage(tracked, filtered, incomingChatType);
++                return new MessageDeliveryResult(playerName, filtered);
++            });
++            ChatType.Bound outgoingChatType = ChatType.bind(ChatType.MSG_COMMAND_OUTGOING, source).withTargetName(result.playerName());
++            RegionizedCommandHelper.sendChatMessage(source, sourcePlayer, tracked, false, outgoingChatType);
++            wasFullyFiltered |= result.filtered() && message.isFullyFiltered();
+         }
+ 
+         if (wasFullyFiltered) {
+-            source.sendSystemMessage(PlayerList.CHAT_FILTERED_FULL);
++            RegionizedCommandHelper.sendSystemMessage(source, sourcePlayer, PlayerList.CHAT_FILTERED_FULL);
+         }
++    }
++
++    private record MessageDeliveryResult(Component playerName, boolean filtered) {
+     }
+ }

@@ -1,0 +1,25 @@
+--- a/net/minecraft/world/item/EndCrystalItem.java
++++ b/net/minecraft/world/item/EndCrystalItem.java
+@@ -13,6 +_,7 @@
+ import net.minecraft.world.level.dimension.end.EnderDragonFight;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class EndCrystalItem extends Item {
+     public EndCrystalItem(Item.Properties properties) {
+@@ -34,7 +_,13 @@
+                 double x = above.getX();
+                 double y = above.getY();
+                 double z = above.getZ();
+-                List<Entity> entities = level.getEntities(null, new AABB(x, y, z, x + 1.0, y + 2.0, z + 1.0));
++                AABB crystalBox = new AABB(x, y, z, x + 1.0, y + 2.0, z + 1.0);
++                AABB regionCrystalBox = RegionizedWorldGuard.restrictToCurrentRegion(level, crystalBox);
++                if (regionCrystalBox == null || !regionCrystalBox.equals(crystalBox)) {
++                    return InteractionResult.FAIL;
++                }
++
++                List<Entity> entities = level.getEntities(null, crystalBox);
+                 if (!entities.isEmpty()) {
+                     return InteractionResult.FAIL;
+                 } else {

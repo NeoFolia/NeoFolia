@@ -1,0 +1,62 @@
+--- a/net/minecraft/world/entity/ai/goal/CatLieOnBedGoal.java
++++ b/net/minecraft/world/entity/ai/goal/CatLieOnBedGoal.java
+@@ -5,7 +_,9 @@
+ import net.minecraft.tags.BlockTags;
+ import net.minecraft.world.entity.PathfinderMob;
+ import net.minecraft.world.entity.animal.feline.Cat;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelReader;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class CatLieOnBedGoal extends MoveToBlockGoal {
+     private final Cat cat;
+@@ -18,29 +_,29 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         return this.cat.isTame() && !this.cat.isOrderedToSit() && !this.cat.isLying() && super.canUse();
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
+         super.start();
+         this.cat.setInSittingPose(false);
+     }
+ 
+     @Override
+-    protected int nextStartTick(PathfinderMob mob) {
++    protected synchronized int nextStartTick(PathfinderMob mob) {
+         return 40;
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         super.stop();
+         this.cat.setLying(false);
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         super.tick();
+         this.cat.setInSittingPose(false);
+         if (!this.isReachedTarget()) {
+@@ -51,7 +_,12 @@
+     }
+ 
+     @Override
+-    protected boolean isValidTarget(LevelReader level, BlockPos pos) {
+-        return level.isEmptyBlock(pos.above()) && level.getBlockState(pos).is(BlockTags.BEDS);
++    protected synchronized boolean isValidTarget(LevelReader level, BlockPos pos) {
++        BlockPos above = pos.above();
++        return this.canReadBlock(level, pos) && this.canReadBlock(level, above) && level.isEmptyBlock(above) && level.getBlockState(pos).is(BlockTags.BEDS);
++    }
++
++    private boolean canReadBlock(LevelReader level, BlockPos pos) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

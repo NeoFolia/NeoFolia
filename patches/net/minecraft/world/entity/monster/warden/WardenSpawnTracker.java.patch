@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/entity/monster/warden/WardenSpawnTracker.java
++++ b/net/minecraft/world/entity/monster/warden/WardenSpawnTracker.java
+@@ -13,6 +_,7 @@
+ import net.minecraft.util.Mth;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class WardenSpawnTracker {
+     public static final Codec<WardenSpawnTracker> CODEC = RecordCodecBuilder.create(
+@@ -94,12 +_,16 @@
+ 
+     private static boolean hasNearbyWarden(ServerLevel level, BlockPos pos) {
+         AABB areaToCheck = AABB.ofSize(Vec3.atCenterOf(pos), 48.0, 48.0, 48.0);
+-        return !level.getEntitiesOfClass(Warden.class, areaToCheck).isEmpty();
++        areaToCheck = RegionizedWorldGuard.restrictToCurrentRegion(level, areaToCheck);
++        return areaToCheck != null && !level.getEntitiesOfClass(Warden.class, areaToCheck).isEmpty();
+     }
+ 
+     private static List<ServerPlayer> getNearbyPlayers(ServerLevel level, BlockPos pos) {
+         Vec3 origin = Vec3.atCenterOf(pos);
+-        return level.getPlayers(player -> !player.isSpectator() && player.position().closerThan(origin, 16.0) && player.isAlive());
++        return level.getPlayers(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null
++            && !player.isSpectator()
++            && player.position().closerThan(origin, 16.0)
++            && player.isAlive());
+     }
+ 
+     private void increaseWarningLevel() {

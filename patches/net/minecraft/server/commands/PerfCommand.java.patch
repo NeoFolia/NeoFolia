@@ -1,0 +1,24 @@
+--- a/net/minecraft/server/commands/PerfCommand.java
++++ b/net/minecraft/server/commands/PerfCommand.java
+@@ -42,6 +_,10 @@
+     }
+ 
+     private static int startProfilingDedicatedServer(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> startProfilingDedicatedServer(source))) {
++            return 0;
++        }
++
+         MinecraftServer server = source.getServer();
+         if (server.isRecordingMetrics()) {
+             throw ERROR_ALREADY_RUNNING.create();
+@@ -55,6 +_,10 @@
+     }
+ 
+     private static int stopProfilingDedicatedServer(CommandSourceStack source) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> stopProfilingDedicatedServer(source))) {
++            return 0;
++        }
++
+         MinecraftServer server = source.getServer();
+         if (!server.isRecordingMetrics()) {
+             throw ERROR_NOT_RUNNING.create();

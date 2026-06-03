@@ -1,0 +1,123 @@
+--- a/net/minecraft/world/entity/ai/goal/FollowPlayerRiddenEntityGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowPlayerRiddenEntityGoal.java
+@@ -1,12 +_,15 @@
+ package net.minecraft.world.entity.ai.goal;
+ 
++import java.util.List;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.MoverType;
+ import net.minecraft.world.entity.PathfinderMob;
+ import net.minecraft.world.entity.player.Player;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class FollowPlayerRiddenEntityGoal extends Goal {
+@@ -22,11 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
++        this.following = this.regionSafePlayer(this.following);
+         if (this.following != null && this.following.hasMovedHorizontallyRecently()) {
+             return true;
+         } else {
+-            for (Entity entity : this.mob.level().getEntitiesOfClass(this.entityTypeToFollow, this.mob.getBoundingBox().inflate(5.0))) {
++            for (Entity entity : this.nearbyEntitiesToFollow()) {
+                 if (entity.getControllingPassenger() instanceof Player controllingPlayer && controllingPlayer.hasMovedHorizontallyRecently()) {
+                     return true;
+                 }
+@@ -37,20 +_,21 @@
+     }
+ 
+     @Override
+-    public boolean isInterruptable() {
++    public synchronized boolean isInterruptable() {
+         return true;
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
+-        return this.following != null && this.following.isPassenger() && this.following.hasMovedHorizontallyRecently();
++    public synchronized boolean canContinueToUse() {
++        Player target = this.regionSafePlayer(this.following);
++        return target != null && target.isPassenger() && target.hasMovedHorizontallyRecently();
+     }
+ 
+     @Override
+-    public void start() {
+-        for (Entity entity : this.mob.level().getEntitiesOfClass(this.entityTypeToFollow, this.mob.getBoundingBox().inflate(5.0))) {
++    public synchronized void start() {
++        for (Entity entity : this.nearbyEntitiesToFollow()) {
+             if (entity.getControllingPassenger() instanceof Player player) {
+-                this.following = player;
++                this.following = this.regionSafePlayer(player);
+                 break;
+             }
+         }
+@@ -60,30 +_,36 @@
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.following = null;
++        this.currentGoal = null;
+     }
+ 
+     @Override
+-    public void tick() {
+-        float speed = this.currentGoal == FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_IN_ENTITY_DIRECTION ? 0.01F : 0.015F;
++    public synchronized void tick() {
++        Player target = this.regionSafePlayer(this.following);
++        FollowPlayerRiddenEntityGoal.FollowEntityGoal goal = this.currentGoal;
++        if (target == null || goal == null) {
++            return;
++        }
++        float speed = goal == FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_IN_ENTITY_DIRECTION ? 0.01F : 0.015F;
+         this.mob.moveRelative(speed, new Vec3(this.mob.xxa, this.mob.yya, this.mob.zza));
+         this.mob.move(MoverType.SELF, this.mob.getDeltaMovement());
+         if (--this.timeToRecalcPath <= 0) {
+             this.timeToRecalcPath = this.adjustedTickDelay(10);
+-            if (this.currentGoal == FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_TO_ENTITY) {
+-                BlockPos behindEntityPos = this.following.blockPosition().relative(this.following.getDirection().getOpposite());
++            if (goal == FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_TO_ENTITY) {
++                BlockPos behindEntityPos = target.blockPosition().relative(target.getDirection().getOpposite());
+                 behindEntityPos = behindEntityPos.offset(0, -1, 0);
+                 this.mob.getNavigation().moveTo(behindEntityPos.getX(), behindEntityPos.getY(), behindEntityPos.getZ(), 1.0);
+-                if (this.mob.distanceTo(this.following) < 4.0F) {
++                if (this.mob.distanceTo(target) < 4.0F) {
+                     this.timeToRecalcPath = 0;
+                     this.currentGoal = FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_IN_ENTITY_DIRECTION;
+                 }
+-            } else if (this.currentGoal == FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_IN_ENTITY_DIRECTION) {
+-                Direction direction = this.following.getMotionDirection();
+-                BlockPos goTo = this.following.blockPosition().relative(direction, 10);
++            } else if (goal == FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_IN_ENTITY_DIRECTION) {
++                Direction direction = target.getMotionDirection();
++                BlockPos goTo = target.blockPosition().relative(direction, 10);
+                 this.mob.getNavigation().moveTo(goTo.getX(), goTo.getY() - 1, goTo.getZ(), 1.0);
+-                if (this.mob.distanceTo(this.following) > 12.0F) {
++                if (this.mob.distanceTo(target) > 12.0F) {
+                     this.timeToRecalcPath = 0;
+                     this.currentGoal = FollowPlayerRiddenEntityGoal.FollowEntityGoal.GO_TO_ENTITY;
+                 }
+@@ -94,5 +_,14 @@
+     private static enum FollowEntityGoal {
+         GO_TO_ENTITY,
+         GO_IN_ENTITY_DIRECTION;
++    }
++
++    private synchronized List<? extends Entity> nearbyEntitiesToFollow() {
++        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), this.mob.getBoundingBox().inflate(5.0));
++        return searchBox == null ? List.of() : List.copyOf(this.mob.level().getEntitiesOfClass(this.entityTypeToFollow, searchBox));
++    }
++
++    private synchronized @Nullable Player regionSafePlayer(@Nullable Player player) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.mob.level(), player);
+     }
+ }

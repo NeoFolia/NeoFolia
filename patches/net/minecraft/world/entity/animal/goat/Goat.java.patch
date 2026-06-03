@@ -1,0 +1,43 @@
+--- a/net/minecraft/world/entity/animal/goat/Goat.java
++++ b/net/minecraft/world/entity/animal/goat/Goat.java
+@@ -145,9 +_,10 @@
+     public @Nullable Goat getBreedOffspring(ServerLevel level, AgeableMob partner) {
+         Goat newGoat = EntityType.GOAT.create(level, EntitySpawnReason.BREEDING);
+         if (newGoat != null) {
+-            GoatAi.initMemories(newGoat, level.getRandom());
+-            AgeableMob selectedParent = (AgeableMob)(level.getRandom().nextBoolean() ? this : partner);
+-            boolean babyIsScreaming = selectedParent instanceof Goat goat && goat.isScreamingGoat() || level.getRandom().nextDouble() < 0.02;
++            RandomSource random = newGoat.getRandom();
++            GoatAi.initMemories(newGoat, random);
++            AgeableMob selectedParent = (AgeableMob)(random.nextBoolean() ? this : partner);
++            boolean babyIsScreaming = selectedParent instanceof Goat goat && goat.isScreamingGoat() || random.nextDouble() < 0.02;
+             newGoat.setScreamingGoat(babyIsScreaming);
+         }
+ 
+@@ -198,7 +_,7 @@
+                 this.isScreamingGoat() ? SoundEvents.GOAT_SCREAMING_EAT : SoundEvents.GOAT_EAT,
+                 SoundSource.NEUTRAL,
+                 1.0F,
+-                Mth.randomBetween(this.level().getRandom(), 0.8F, 1.2F)
++                Mth.randomBetween(this.getRandom(), 0.8F, 1.2F)
+             );
+     }
+ 
+@@ -229,7 +_,7 @@
+     public SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         GoatAi.initMemories(this, random);
+         this.setScreamingGoat(random.nextDouble() < 0.02);
+         this.ageBoundaryReached();
+@@ -348,6 +_,7 @@
+     public static boolean checkGoatSpawnRules(
+         EntityType<? extends Animal> type, LevelAccessor level, EntitySpawnReason spawnReason, BlockPos pos, RandomSource random
+     ) {
+-        return level.getBlockState(pos.below()).is(BlockTags.GOATS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
++        BlockPos below = pos.below();
++        return canReadBlock(level, below) && level.getBlockState(below).is(BlockTags.GOATS_SPAWNABLE_ON) && isBrightEnoughToSpawn(level, pos);
+     }
+ }

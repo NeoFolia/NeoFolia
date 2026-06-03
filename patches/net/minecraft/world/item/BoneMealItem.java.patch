@@ -1,0 +1,82 @@
+--- a/net/minecraft/world/item/BoneMealItem.java
++++ b/net/minecraft/world/item/BoneMealItem.java
+@@ -20,6 +_,7 @@
+ import net.minecraft.world.level.block.BonemealableBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.gameevent.GameEvent;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BoneMealItem extends Item {
+@@ -37,7 +_,7 @@
+         BlockPos pos = context.getClickedPos();
+         BlockPos relative = pos.relative(context.getClickedFace());
+         ItemStack boneMealStack = context.getItemInHand();
+-        if (growCrop(boneMealStack, level, pos)) {
++        if (applyBonemeal(boneMealStack, level, pos, context.getPlayer())) {
+             if (!level.isClientSide()) {
+                 boneMealStack.causeUseVibration(context.getPlayer(), GameEvent.ITEM_INTERACT_FINISH);
+                 level.levelEvent(1505, pos, 15);
+@@ -61,12 +_,22 @@
+         }
+     }
+ 
++    @Deprecated //Forge: Use Player/Hand version
+     public static boolean growCrop(ItemStack itemStack, Level level, BlockPos pos) {
++        if (level instanceof net.minecraft.server.level.ServerLevel)
++            return applyBonemeal(itemStack, level, pos, null);
++        return false;
++    }
++
++    public static boolean applyBonemeal(ItemStack itemStack, Level level, BlockPos pos, net.minecraft.world.entity.player.@Nullable Player player) {
+         BlockState state = level.getBlockState(pos);
++        var event = net.neoforged.neoforge.event.EventHooks.fireBonemealEvent(player, level, pos, state, itemStack);
++        if (event.isCanceled()) return event.isSuccessful();
+         if (state.getBlock() instanceof BonemealableBlock block && block.isValidBonemealTarget(level, pos, state)) {
+             if (level instanceof ServerLevel) {
+-                if (block.isBonemealSuccess(level, level.getRandom(), pos, state)) {
+-                    block.performBonemeal((ServerLevel)level, level.getRandom(), pos, state);
++                RandomSource random = bonemealRandom(level);
++                if (block.isBonemealSuccess(level, random, pos, state)) {
++                    block.performBonemeal((ServerLevel)level, random, pos, state);
+                 }
+ 
+                 itemStack.shrink(1);
+@@ -83,7 +_,7 @@
+             if (!(level instanceof ServerLevel)) {
+                 return true;
+             } else {
+-                RandomSource random = level.getRandom();
++                RandomSource random = bonemealRandom(level);
+ 
+                 label80:
+                 for (int j = 0; j < 128; j++) {
+@@ -101,7 +_,7 @@
+                     if (testBiome.is(BiomeTags.PRODUCES_CORALS_FROM_BONEMEAL)) {
+                         if (j == 0 && clickedFace != null && clickedFace.getAxis().isHorizontal()) {
+                             stateToGrow = BuiltInRegistries.BLOCK
+-                                .getRandomElementOf(BlockTags.WALL_CORALS, level.getRandom())
++                                .getRandomElementOf(BlockTags.WALL_CORALS, random)
+                                 .map(h -> h.value().defaultBlockState())
+                                 .orElse(stateToGrow);
+                             if (stateToGrow.hasProperty(BaseCoralWallFanBlock.FACING)) {
+@@ -109,7 +_,7 @@
+                             }
+                         } else if (random.nextInt(4) == 0) {
+                             stateToGrow = BuiltInRegistries.BLOCK
+-                                .getRandomElementOf(BlockTags.UNDERWATER_BONEMEALS, level.getRandom())
++                                .getRandomElementOf(BlockTags.UNDERWATER_BONEMEALS, random)
+                                 .map(h -> h.value().defaultBlockState())
+                                 .orElse(stateToGrow);
+                         }
+@@ -139,6 +_,10 @@
+         } else {
+             return false;
+         }
++    }
++
++    private static RandomSource bonemealRandom(Level level) {
++        return level instanceof ServerLevel serverLevel ? RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()) : level.getRandom();
+     }
+ 
+     public static void addGrowthParticles(LevelAccessor level, BlockPos pos, int count) {

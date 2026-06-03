@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/timeline/Timeline.java
++++ b/net/minecraft/world/timeline/Timeline.java
+@@ -65,8 +_,8 @@
+     ) {
+         this.clock = clock;
+         this.periodTicks = periodTicks;
+-        this.tracks = tracks;
+-        this.timeMarkers = timeMarkers;
++        this.tracks = Map.copyOf(tracks);
++        this.timeMarkers = Map.copyOf(timeMarkers);
+     }
+ 
+     public static void validateRegistry(Registry<Timeline> timelines, Map<ResourceKey<?>, Exception> loadingErrors) {
+@@ -143,7 +_,7 @@
+     }
+ 
+     public Set<EnvironmentAttribute<?>> attributes() {
+-        return this.tracks.keySet();
++        return Set.copyOf(this.tracks.keySet());
+     }
+ 
+     public <Value> AttributeTrackSampler<Value, ?> createTrackSampler(EnvironmentAttribute<Value> attribute, ClockManager clockManager) {

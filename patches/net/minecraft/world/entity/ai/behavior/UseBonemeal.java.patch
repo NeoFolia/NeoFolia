@@ -1,0 +1,122 @@
+--- a/net/minecraft/world/entity/ai/behavior/UseBonemeal.java
++++ b/net/minecraft/world/entity/ai/behavior/UseBonemeal.java
+@@ -17,6 +_,7 @@
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.CropBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class UseBonemeal extends Behavior<Villager> {
+     private static final int BONEMEALING_DURATION = 80;
+@@ -29,7 +_,7 @@
+         super(ImmutableMap.of(MemoryModuleType.LOOK_TARGET, MemoryStatus.VALUE_ABSENT, MemoryModuleType.WALK_TARGET, MemoryStatus.VALUE_ABSENT));
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Villager body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Villager body) {
+         if (body.tickCount % 10 == 0 && (this.lastBonemealingSession == 0L || this.lastBonemealingSession + 160L <= body.tickCount)) {
+             if (body.getInventory().countItem(Items.BONE_MEAL) <= 0) {
+                 return false;
+@@ -42,13 +_,13 @@
+         }
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Villager body, long timestamp) {
+         return this.timeWorkedSoFar < 80 && this.cropPos.isPresent();
+     }
+ 
+-    private Optional<BlockPos> pickNextTarget(ServerLevel level, Villager body) {
++    private synchronized Optional<BlockPos> pickNextTarget(ServerLevel level, Villager body) {
+         BlockPos.MutableBlockPos mutPos = new BlockPos.MutableBlockPos();
+-        RandomSource random = level.getRandom();
++        RandomSource random = body.getRandom();
+         Optional<BlockPos> result = Optional.empty();
+         int count = 0;
+ 
+@@ -68,20 +_,24 @@
+         return result;
+     }
+ 
+-    private boolean validPos(BlockPos blockPos, ServerLevel level) {
++    private synchronized boolean validPos(BlockPos blockPos, ServerLevel level) {
++        if (!canReadBlock(level, blockPos)) {
++            return false;
++        }
++
+         BlockState state = level.getBlockState(blockPos);
+         Block block = state.getBlock();
+         return block instanceof CropBlock && !((CropBlock)block).isMaxAge(state);
+     }
+ 
+-    protected void start(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Villager body, long timestamp) {
+         this.setCurrentCropAsTarget(body);
+         body.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BONE_MEAL));
+         this.nextWorkCycleTime = timestamp;
+         this.timeWorkedSoFar = 0;
+     }
+ 
+-    private void setCurrentCropAsTarget(Villager body) {
++    private synchronized void setCurrentCropAsTarget(Villager body) {
+         this.cropPos.ifPresent(pos -> {
+             BlockPosTracker cropPosWrapper = new BlockPosTracker(pos);
+             body.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, cropPosWrapper);
+@@ -89,23 +_,39 @@
+         });
+     }
+ 
+-    protected void stop(ServerLevel level, Villager body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Villager body, long timestamp) {
+         body.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+         this.lastBonemealingSession = body.tickCount;
++        this.cropPos = Optional.empty();
++        this.nextWorkCycleTime = 0L;
++        this.timeWorkedSoFar = 0;
+     }
+ 
+-    protected void tick(ServerLevel level, Villager body, long timestamp) {
+-        BlockPos targetPos = this.cropPos.get();
++    protected synchronized void tick(ServerLevel level, Villager body, long timestamp) {
++        Optional<BlockPos> cropPos = this.cropPos;
++        if (cropPos.isEmpty()) {
++            return;
++        }
++
++        BlockPos targetPos = cropPos.get();
++        if (!canReadBlock(level, targetPos)) {
++            this.cropPos = this.pickNextTarget(level, body);
++            this.setCurrentCropAsTarget(body);
++            return;
++        }
++
+         if (timestamp >= this.nextWorkCycleTime && targetPos.closerToCenterThan(body.position(), 1.0)) {
+             ItemStack bonemealStack = ItemStack.EMPTY;
+             SimpleContainer inventory = body.getInventory();
+             int containerSize = inventory.getContainerSize();
+ 
+-            for (int i = 0; i < containerSize; i++) {
+-                ItemStack item = inventory.getItem(i);
+-                if (item.is(Items.BONE_MEAL)) {
+-                    bonemealStack = item;
+-                    break;
++            synchronized (inventory) {
++                for (int i = 0; i < containerSize; i++) {
++                    ItemStack item = inventory.getItem(i);
++                    if (item.is(Items.BONE_MEAL)) {
++                        bonemealStack = item;
++                        break;
++                    }
+                 }
+             }
+ 
+@@ -118,5 +_,9 @@
+ 
+             this.timeWorkedSoFar++;
+         }
++    }
++
++    private static boolean canReadBlock(ServerLevel level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

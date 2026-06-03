@@ -1,0 +1,28 @@
+--- a/net/minecraft/world/level/block/CakeBlock.java
++++ b/net/minecraft/world/level/block/CakeBlock.java
+@@ -7,6 +_,7 @@
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
+ import net.minecraft.tags.ItemTags;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -61,7 +_,7 @@
+             level.playSound(null, pos, SoundEvents.CAKE_ADD_CANDLE, SoundSource.BLOCKS, 1.0F, 1.0F);
+             level.setBlockAndUpdate(pos, CandleCakeBlock.byCandle(candleBlock));
+             level.gameEvent(player, GameEvent.BLOCK_CHANGE, pos);
+-            player.awardStat(Stats.ITEM_USED.get(item));
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(item));
+             return InteractionResult.SUCCESS;
+         } else {
+             return InteractionResult.TRY_WITH_EMPTY_HAND;
+@@ -87,7 +_,7 @@
+         if (!player.canEat(false)) {
+             return InteractionResult.PASS;
+         } else {
+-            player.awardStat(Stats.EAT_CAKE_SLICE);
++            RegionizedWorldGuard.awardStat(player, Stats.EAT_CAKE_SLICE);
+             player.getFoodData().eat(2, 0.1F);
+             int bites = state.getValue(BITES);
+             level.gameEvent(player, GameEvent.EAT, pos);

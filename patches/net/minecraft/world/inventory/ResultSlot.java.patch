@@ -1,0 +1,77 @@
+--- a/net/minecraft/world/inventory/ResultSlot.java
++++ b/net/minecraft/world/inventory/ResultSlot.java
+@@ -22,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean mayPlace(ItemStack itemStack) {
++    public synchronized boolean mayPlace(ItemStack itemStack) {
+         return false;
+     }
+ 
+     @Override
+-    public ItemStack remove(int amount) {
++    public synchronized ItemStack remove(int amount) {
+         if (this.hasItem()) {
+             this.removeCount = this.removeCount + Math.min(amount, this.getItem().getCount());
+         }
+@@ -36,20 +_,21 @@
+     }
+ 
+     @Override
+-    protected void onQuickCraft(ItemStack picked, int count) {
++    protected synchronized void onQuickCraft(ItemStack picked, int count) {
+         this.removeCount += count;
+         this.checkTakeAchievements(picked);
+     }
+ 
+     @Override
+-    protected void onSwapCraft(int count) {
++    protected synchronized void onSwapCraft(int count) {
+         this.removeCount += count;
+     }
+ 
+     @Override
+-    protected void checkTakeAchievements(ItemStack carried) {
++    protected synchronized void checkTakeAchievements(ItemStack carried) {
+         if (this.removeCount > 0) {
+             carried.onCraftedBy(this.player, this.removeCount);
++            net.neoforged.neoforge.event.EventHooks.firePlayerCraftingEvent(this.player, carried, this.craftSlots);
+         }
+ 
+         if (this.container instanceof RecipeCraftingHolder recipeCraftingHolder) {
+@@ -69,7 +_,7 @@
+         return result;
+     }
+ 
+-    private NonNullList<ItemStack> getRemainingItems(CraftingInput input, Level level) {
++    private synchronized NonNullList<ItemStack> getRemainingItems(CraftingInput input, Level level) {
+         return level instanceof ServerLevel serverLevel
+             ? serverLevel.recipeAccess()
+                 .getRecipeFor(RecipeType.CRAFTING, input, serverLevel)
+@@ -79,13 +_,15 @@
+     }
+ 
+     @Override
+-    public void onTake(Player player, ItemStack carried) {
++    public synchronized void onTake(Player player, ItemStack carried) {
+         this.checkTakeAchievements(carried);
+         CraftingInput.Positioned positionedRecipe = this.craftSlots.asPositionedCraftInput();
+         CraftingInput input = positionedRecipe.input();
+         int recipeLeft = positionedRecipe.left();
+         int recipeTop = positionedRecipe.top();
++        net.neoforged.neoforge.common.CommonHooks.setCraftingPlayer(player);
+         NonNullList<ItemStack> remaining = this.getRemainingItems(input, player.level());
++        net.neoforged.neoforge.common.CommonHooks.setCraftingPlayer(null);
+ 
+         for (int y = 0; y < input.height(); y++) {
+             for (int x = 0; x < input.width(); x++) {
+@@ -112,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean isFake() {
++    public synchronized boolean isFake() {
+         return true;
+     }
+ }

@@ -1,0 +1,52 @@
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftAllowListServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftAllowListServiceImpl.java
+@@ -18,29 +_,48 @@
+ 
+     @Override
+     public Collection<UserWhiteListEntry> getEntries() {
+-        return this.server.getPlayerList().getWhiteList().getEntries();
++        return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.server.getPlayerList().getWhiteList().getEntries());
+     }
+ 
+     @Override
+     public boolean add(UserWhiteListEntry infos, ClientInfo clientInfo) {
++        if (!this.server.isSameThread() && !net.neoforged.neoforge.server.region.RegionizedTickContext.isRegionThread()) {
++            return RegionizedJsonRpcGuard.callOnServerThread(this.server, () -> this.add(infos, clientInfo));
++        }
++        if (RegionizedJsonRpcGuard.scheduleGlobalIfRegionized(this.server, () -> this.add(infos, clientInfo))) {
++            return true;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Add player '{}' to allowlist", infos.getUser());
+         return this.server.getPlayerList().getWhiteList().add(infos);
+     }
+ 
+     @Override
+     public void clear(ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.clear(clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Clear allowlist");
+         this.server.getPlayerList().getWhiteList().clear();
+     }
+ 
+     @Override
+     public void remove(NameAndId nameAndId, ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.remove(nameAndId, clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Remove player '{}' from allowlist", nameAndId);
+         this.server.getPlayerList().getWhiteList().remove(nameAndId);
+     }
+ 
+     @Override
+     public void kickUnlistedPlayers(ClientInfo clientInfo) {
++        if (RegionizedJsonRpcGuard.executeOnServerThreadIfNeeded(this.server, () -> this.kickUnlistedPlayers(clientInfo))) {
++            return;
++        }
++
+         this.jsonrpcLogger.log(clientInfo, "Kick unlisted players");
+         this.server.kickUnlistedPlayers();
+     }

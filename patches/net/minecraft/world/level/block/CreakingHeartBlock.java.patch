@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/block/CreakingHeartBlock.java
++++ b/net/minecraft/world/level/block/CreakingHeartBlock.java
+@@ -31,6 +_,7 @@
+ import net.minecraft.world.level.block.state.properties.BooleanProperty;
+ import net.minecraft.world.level.block.state.properties.CreakingHeartState;
+ import net.minecraft.world.level.block.state.properties.EnumProperty;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CreakingHeartBlock extends BaseEntityBlock {
+@@ -183,7 +_,7 @@
+ 
+     private void tryAwardExperience(Player player, BlockState state, Level level, BlockPos pos) {
+         if (!player.preventsBlockDrops() && !player.isSpectator() && state.getValue(NATURAL) && level instanceof ServerLevel serverLevel) {
+-            this.popExperience(serverLevel, pos, level.getRandom().nextIntBetweenInclusive(20, 24));
++            this.popExperience(serverLevel, pos, RegionizedTickContext.currentRandom().orElse(serverLevel.getRandom()).nextIntBetweenInclusive(20, 24));
+         }
+     }
+ 

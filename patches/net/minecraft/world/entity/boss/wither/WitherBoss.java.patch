@@ -1,0 +1,156 @@
+--- a/net/minecraft/world/entity/boss/wither/WitherBoss.java
++++ b/net/minecraft/world/entity/boss/wither/WitherBoss.java
+@@ -55,7 +_,9 @@
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class WitherBoss extends Monster implements RangedAttackMob {
+@@ -156,7 +_,7 @@
+     public void aiStep() {
+         Vec3 deltaMovement = this.getDeltaMovement().multiply(1.0, 0.6, 1.0);
+         if (!this.level().isClientSide() && this.getAlternativeTarget(0) > 0) {
+-            Entity entity = this.level().getEntity(this.getAlternativeTarget(0));
++            Entity entity = this.regionSafeEntity(this.level().getEntity(this.getAlternativeTarget(0)));
+             if (entity != null) {
+                 double yd = deltaMovement.y;
+                 if (this.getY() < entity.getY() || !this.isPowered() && this.getY() < entity.getY() + 5.0) {
+@@ -189,7 +_,7 @@
+             int entityId = this.getAlternativeTarget(i + 1);
+             Entity entity = null;
+             if (entityId > 0) {
+-                entity = this.level().getEntity(entityId);
++                entity = this.regionSafeEntity(this.level().getEntity(entityId));
+             }
+ 
+             if (entity != null) {
+@@ -226,7 +_,7 @@
+                     0.0,
+                     0.0
+                 );
+-            if (isPowered && this.level().getRandom().nextInt(4) == 0) {
++            if (isPowered && this.random.nextInt(4) == 0) {
+                 this.level()
+                     .addParticle(
+                         ColorParticleOption.create(ParticleTypes.ENTITY_EFFECT, 0.7F, 0.7F, 0.5F),
+@@ -292,7 +_,8 @@
+ 
+                     int headTarget = this.getAlternativeTarget(i);
+                     if (headTarget > 0) {
+-                        LivingEntity current = (LivingEntity)level.getEntity(headTarget);
++                        Entity entity = this.regionSafeEntity(level.getEntity(headTarget));
++                        LivingEntity current = entity instanceof LivingEntity living ? living : null;
+                         if (current != null && this.canAttack(current) && !(this.distanceToSqr(current) > 900.0) && this.hasLineOfSight(current)) {
+                             this.performRangedAttack(i + 1, current);
+                             this.nextHeadUpdate[i - 1] = this.tickCount + 40 + this.random.nextInt(20);
+@@ -301,9 +_,10 @@
+                             this.setAlternativeTarget(i, 0);
+                         }
+                     } else {
+-                        List<LivingEntity> entities = level.getNearbyEntities(
+-                            LivingEntity.class, TARGETING_CONDITIONS, this, this.getBoundingBox().inflate(20.0, 8.0, 20.0)
+-                        );
++                        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(level, this.getBoundingBox().inflate(20.0, 8.0, 20.0));
++                        List<LivingEntity> entities = searchBox == null
++                            ? List.of()
++                            : level.getNearbyEntities(LivingEntity.class, TARGETING_CONDITIONS, this, searchBox);
+                         if (!entities.isEmpty()) {
+                             LivingEntity selected = entities.get(this.random.nextInt(entities.size()));
+                             this.setAlternativeTarget(i, selected.getId());
+@@ -312,15 +_,16 @@
+                 }
+             }
+ 
+-            if (this.getTarget() != null) {
+-                this.setAlternativeTarget(0, this.getTarget().getId());
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
++            if (target != null) {
++                this.setAlternativeTarget(0, target.getId());
+             } else {
+                 this.setAlternativeTarget(0, 0);
+             }
+ 
+             if (this.destroyBlocksTick > 0) {
+                 this.destroyBlocksTick--;
+-                if (this.destroyBlocksTick == 0 && level.getGameRules().get(GameRules.MOB_GRIEFING)) {
++                if (this.destroyBlocksTick == 0 && net.neoforged.neoforge.event.EventHooks.canEntityGrief(level, this)) {
+                     boolean destroyed = false;
+                     int width = Mth.floor(this.getBbWidth() / 2.0F + 1.0F);
+                     int height = Mth.floor(this.getBbHeight());
+@@ -333,8 +_,12 @@
+                         this.getBlockY() + height,
+                         this.getBlockZ() + width
+                     )) {
++                        if (!RegionizedWorldGuard.shouldLoadChunk(level, blockPos.getX() >> 4, blockPos.getZ() >> 4)) {
++                            continue;
++                        }
++
+                         BlockState state = level.getBlockState(blockPos);
+-                        if (canDestroy(state)) {
++                        if (state.canEntityDestroy(this.level(), blockPos, this) && net.neoforged.neoforge.event.EventHooks.onEntityDestroyBlock(this, blockPos, state)) {
+                             destroyed = level.destroyBlock(blockPos, true, this) || destroyed;
+                         }
+                     }
+@@ -353,6 +_,10 @@
+         }
+     }
+ 
++    /**
++     * @deprecated Forge: Use {@link BlockState#canEntityDestroy(net.minecraft.world.level.BlockGetter, BlockPos, Entity)} instead.
++     */
++    @Deprecated
+     public static boolean canDestroy(BlockState state) {
+         return !state.isAir() && !state.is(BlockTags.WITHER_IMMUNE);
+     }
+@@ -450,21 +_,21 @@
+ 
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
++        Entity sourceEntity = this.regionSafeEntity(source.getEntity());
+         if (this.isInvulnerableTo(level, source)) {
+             return false;
+-        } else if (source.is(DamageTypeTags.WITHER_IMMUNE_TO) || source.getEntity() instanceof WitherBoss) {
++        } else if (source.is(DamageTypeTags.WITHER_IMMUNE_TO) || sourceEntity instanceof WitherBoss) {
+             return false;
+         } else if (this.getInvulnerableTicks() > 0 && !source.is(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
+             return false;
+         } else {
+             if (this.isPowered()) {
+-                Entity directEntity = source.getDirectEntity();
++                Entity directEntity = this.regionSafeEntity(source.getDirectEntity());
+                 if (directEntity instanceof AbstractArrow || directEntity instanceof WindCharge) {
+                     return false;
+                 }
+             }
+ 
+-            Entity sourceEntity = source.getEntity();
+             if (sourceEntity != null && sourceEntity.is(EntityTypeTags.WITHER_FRIENDS)) {
+                 return false;
+             } else {
+@@ -492,6 +_,7 @@
+ 
+     @Override
+     public void checkDespawn() {
++        if (net.neoforged.neoforge.event.EventHooks.checkMobDespawn(this)) return;
+         if (this.level().getDifficulty() == Difficulty.PEACEFUL && !this.getType().isAllowedInPeaceful()) {
+             this.discard();
+         } else {
+@@ -539,6 +_,14 @@
+ 
+     public boolean isPowered() {
+         return this.getHealth() <= this.getMaxHealth() / 2.0F;
++    }
++
++    private @Nullable Entity regionSafeEntity(@Nullable Entity entity) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), entity);
++    }
++
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
+     }
+ 
+     @Override

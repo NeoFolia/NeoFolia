@@ -1,0 +1,112 @@
+--- a/net/minecraft/server/commands/GameModeCommand.java
++++ b/net/minecraft/server/commands/GameModeCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import java.util.Collections;
+ import net.minecraft.commands.CommandSourceStack;
+@@ -14,6 +_,7 @@
+ import net.minecraft.server.permissions.Permissions;
+ import net.minecraft.world.level.GameType;
+ import net.minecraft.world.level.gamerules.GameRules;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class GameModeCommand {
+     public static final PermissionCheck PERMISSION_CHECK = new PermissionCheck.Require(Permissions.COMMANDS_GAMEMASTER);
+@@ -24,33 +_,58 @@
+                 .requires(Commands.hasPermission(PERMISSION_CHECK))
+                 .then(
+                     Commands.argument("gamemode", GameModeArgument.gameMode())
+-                        .executes(c -> setMode(c, Collections.singleton(c.getSource().getPlayerOrException()), GameModeArgument.getGameMode(c, "gamemode")))
++                        .executes(c -> setMode(c, false))
+                         .then(
+                             Commands.argument("target", EntityArgument.players())
+-                                .executes(c -> setMode(c, EntityArgument.getPlayers(c, "target"), GameModeArgument.getGameMode(c, "gamemode")))
++                                .executes(c -> setMode(c, true))
+                         )
+                 )
+         );
+     }
+ 
+-    private static void logGamemodeChange(CommandSourceStack source, ServerPlayer target, GameType newType) {
++    private static GameModeResult setGameModeOnPlayerRegion(CommandSourceStack source, ServerPlayer player, GameType type) {
++        if (!player.setGameMode(type)) {
++            return new GameModeResult(false, player.getDisplayName());
++        }
++
++        Component mode = Component.translatable("gameMode." + type.getName());
++        if (source.getEntity() != player && player.level().getGameRules().get(GameRules.SEND_COMMAND_FEEDBACK)) {
++            player.sendSystemMessage(Component.translatable("gameMode.changed", mode));
++        }
++
++        return new GameModeResult(true, player.getDisplayName());
++    }
++
++    private static void logGamemodeChange(CommandSourceStack source, Component targetName, ServerPlayer target, GameType newType) {
+         Component mode = Component.translatable("gameMode." + newType.getName());
+         if (source.getEntity() == target) {
+             source.sendSuccess(() -> Component.translatable("commands.gamemode.success.self", mode), true);
+         } else {
+-            if (source.getLevel().getGameRules().get(GameRules.SEND_COMMAND_FEEDBACK)) {
+-                target.sendSystemMessage(Component.translatable("gameMode.changed", mode));
+-            }
+-
+-            source.sendSuccess(() -> Component.translatable("commands.gamemode.success.other", target.getDisplayName(), mode), true);
+-        }
++            source.sendSuccess(() -> Component.translatable("commands.gamemode.success.other", targetName, mode), true);
++        }
++    }
++
++    private static int setMode(CommandContext<CommandSourceStack> context, boolean hasTargets) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setMode(context, hasTargets))) {
++            return 0;
++        }
++
++        return setMode(
++            context,
++            hasTargets ? EntityArgument.getPlayers(context, "target") : Collections.singleton(source.getPlayerOrException()),
++            GameModeArgument.getGameMode(context, "gamemode")
++        );
+     }
+ 
+     private static int setMode(CommandContext<CommandSourceStack> context, Collection<ServerPlayer> players, GameType type) {
++        CommandSourceStack source = context.getSource();
+         int count = 0;
+ 
+         for (ServerPlayer player : players) {
+-            if (setGameMode(context.getSource(), player, type)) {
++            GameModeResult result = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> setGameModeOnPlayerRegion(source, player, type));
++            if (result.changed()) {
++                logGamemodeChange(source, result.playerName(), player, type);
+                 count++;
+             }
+         }
+@@ -59,15 +_,18 @@
+     }
+ 
+     public static void setGameMode(ServerPlayer player, GameType type) {
+-        setGameMode(player.createCommandSourceStack(), player, type);
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> setGameMode(player.createCommandSourceStack(), player, type));
+     }
+ 
+     private static boolean setGameMode(CommandSourceStack source, ServerPlayer player, GameType type) {
+-        if (player.setGameMode(type)) {
+-            logGamemodeChange(source, player, type);
+-            return true;
+-        } else {
+-            return false;
++        GameModeResult result = setGameModeOnPlayerRegion(source, player, type);
++        if (result.changed()) {
++            logGamemodeChange(source, result.playerName(), player, type);
+         }
++
++        return result.changed();
++    }
++
++    private record GameModeResult(boolean changed, Component playerName) {
+     }
+ }

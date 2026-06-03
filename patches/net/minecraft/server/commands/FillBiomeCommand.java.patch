@@ -1,0 +1,74 @@
+--- a/net/minecraft/server/commands/FillBiomeCommand.java
++++ b/net/minecraft/server/commands/FillBiomeCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+@@ -48,28 +_,12 @@
+                             Commands.argument("to", BlockPosArgument.blockPos())
+                                 .then(
+                                     Commands.argument("biome", ResourceArgument.resource(context, Registries.BIOME))
+-                                        .executes(
+-                                            c -> fill(
+-                                                c.getSource(),
+-                                                BlockPosArgument.getLoadedBlockPos(c, "from"),
+-                                                BlockPosArgument.getLoadedBlockPos(c, "to"),
+-                                                ResourceArgument.getResource(c, "biome", Registries.BIOME),
+-                                                b -> true
+-                                            )
+-                                        )
++                                        .executes(c -> fill(c, false))
+                                         .then(
+                                             Commands.literal("replace")
+                                                 .then(
+                                                     Commands.argument("filter", ResourceOrTagArgument.resourceOrTag(context, Registries.BIOME))
+-                                                        .executes(
+-                                                            c -> fill(
+-                                                                c.getSource(),
+-                                                                BlockPosArgument.getLoadedBlockPos(c, "from"),
+-                                                                BlockPosArgument.getLoadedBlockPos(c, "to"),
+-                                                                ResourceArgument.getResource(c, "biome", Registries.BIOME),
+-                                                                ResourceOrTagArgument.getResourceOrTag(c, "filter", Registries.BIOME)
+-                                                            )
+-                                                        )
++                                                        .executes(c -> fill(c, true))
+                                                 )
+                                         )
+                                 )
+@@ -154,11 +_,30 @@
+                     region.maxZ()
+                 )
+             );
+-            return Either.left(changedCount.intValue());
+-        }
++        return Either.left(changedCount.intValue());
++        }
++    }
++
++    private static int fill(CommandContext<CommandSourceStack> context, boolean hasFilter) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> fill(context, hasFilter))) {
++            return 0;
++        }
++
++        return fill(
++            source,
++            BlockPosArgument.getLoadedBlockPos(context, "from"),
++            BlockPosArgument.getLoadedBlockPos(context, "to"),
++            ResourceArgument.getResource(context, "biome", Registries.BIOME),
++            hasFilter ? ResourceOrTagArgument.getResourceOrTag(context, "filter", Registries.BIOME) : b -> true
++        );
+     }
+ 
+     private static int fill(CommandSourceStack source, BlockPos rawFrom, BlockPos rawTo, Holder.Reference<Biome> biome, Predicate<Holder<Biome>> filter) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> fill(source, rawFrom, rawTo, biome, filter))) {
++            return 0;
++        }
++
+         Either<Integer, CommandSyntaxException> result = fill(source.getLevel(), rawFrom, rawTo, biome, filter, m -> source.sendSuccess(m, true));
+         Optional<CommandSyntaxException> exception = result.right();
+         if (exception.isPresent()) {

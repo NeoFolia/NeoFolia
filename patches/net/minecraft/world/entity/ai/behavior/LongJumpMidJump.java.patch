@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/entity/ai/behavior/LongJumpMidJump.java
++++ b/net/minecraft/world/entity/ai/behavior/LongJumpMidJump.java
+@@ -21,16 +_,16 @@
+         this.landingSound = landingSound;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Mob body, long timestamp) {
+         return !body.onGround();
+     }
+ 
+-    protected void start(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized void start(ServerLevel level, Mob body, long timestamp) {
+         body.setDiscardFriction(true);
+         body.setPose(Pose.LONG_JUMPING);
+     }
+ 
+-    protected void stop(ServerLevel level, Mob body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Mob body, long timestamp) {
+         if (body.onGround()) {
+             body.setDeltaMovement(body.getDeltaMovement().multiply(0.1F, 1.0, 0.1F));
+             level.playSound(null, body, this.landingSound, SoundSource.NEUTRAL, 2.0F, 1.0F);
+@@ -39,6 +_,6 @@
+         body.setDiscardFriction(false);
+         body.setPose(Pose.STANDING);
+         body.getBrain().eraseMemory(MemoryModuleType.LONG_JUMP_MID_JUMP);
+-        body.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, this.timeBetweenLongJumps.sample(level.getRandom()));
++        body.getBrain().setMemory(MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS, this.timeBetweenLongJumps.sample(body.getRandom()));
+     }
+ }

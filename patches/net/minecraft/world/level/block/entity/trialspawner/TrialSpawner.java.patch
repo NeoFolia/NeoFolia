@@ -1,0 +1,265 @@
+--- a/net/minecraft/world/level/block/entity/trialspawner/TrialSpawner.java
++++ b/net/minecraft/world/level/block/entity/trialspawner/TrialSpawner.java
+@@ -47,6 +_,8 @@
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.CollisionContext;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.slf4j.Logger;
+ 
+ public final class TrialSpawner implements net.neoforged.neoforge.common.extensions.IOwnedSpawner {
+@@ -74,77 +_,77 @@
+         this.entitySelector = entitySelector;
+     }
+ 
+-    public TrialSpawnerConfig activeConfig() {
++    public synchronized TrialSpawnerConfig activeConfig() {
+         return this.isOminous ? this.config.ominous().value() : this.config.normal.value();
+     }
+ 
+-    public TrialSpawnerConfig normalConfig() {
++    public synchronized TrialSpawnerConfig normalConfig() {
+         return this.config.normal.value();
+     }
+ 
+-    public TrialSpawnerConfig ominousConfig() {
++    public synchronized TrialSpawnerConfig ominousConfig() {
+         return this.config.ominous.value();
+     }
+ 
+-    public void load(ValueInput input) {
++    public synchronized void load(ValueInput input) {
+         input.read(TrialSpawnerStateData.Packed.MAP_CODEC).ifPresent(this.data::apply);
+         this.config = input.read(TrialSpawner.FullConfig.MAP_CODEC).orElse(TrialSpawner.FullConfig.DEFAULT);
+     }
+ 
+-    public void store(ValueOutput output) {
++    public synchronized void store(ValueOutput output) {
+         output.store(TrialSpawnerStateData.Packed.MAP_CODEC, this.data.pack());
+         output.store(TrialSpawner.FullConfig.MAP_CODEC, this.config);
+     }
+ 
+-    public void applyOminous(ServerLevel level, BlockPos spawnerPos) {
++    public synchronized void applyOminous(ServerLevel level, BlockPos spawnerPos) {
+         level.setBlock(spawnerPos, level.getBlockState(spawnerPos).setValue(TrialSpawnerBlock.OMINOUS, true), 3);
+         level.levelEvent(3020, spawnerPos, 1);
+         this.isOminous = true;
+-        this.data.resetAfterBecomingOminous(this, level);
++        this.data.resetAfterBecomingOminous(this, level, spawnerPos);
+     }
+ 
+-    public void removeOminous(ServerLevel level, BlockPos spawnerPos) {
++    public synchronized void removeOminous(ServerLevel level, BlockPos spawnerPos) {
+         level.setBlock(spawnerPos, level.getBlockState(spawnerPos).setValue(TrialSpawnerBlock.OMINOUS, false), 3);
+         this.isOminous = false;
+     }
+ 
+-    public boolean isOminous() {
++    public synchronized boolean isOminous() {
+         return this.isOminous;
+     }
+ 
+-    public int getTargetCooldownLength() {
++    public synchronized int getTargetCooldownLength() {
+         return this.config.targetCooldownLength;
+     }
+ 
+-    public int getRequiredPlayerRange() {
++    public synchronized int getRequiredPlayerRange() {
+         return this.config.requiredPlayerRange;
+     }
+ 
+-    public TrialSpawnerState getState() {
++    public synchronized TrialSpawnerState getState() {
+         return this.stateAccessor.getState();
+     }
+ 
+-    public TrialSpawnerStateData getStateData() {
++    public synchronized TrialSpawnerStateData getStateData() {
+         return this.data;
+     }
+ 
+-    public void setState(Level level, TrialSpawnerState state) {
++    public synchronized void setState(Level level, TrialSpawnerState state) {
+         this.stateAccessor.setState(level, state);
+     }
+ 
+-    public void markUpdated() {
++    public synchronized void markUpdated() {
+         this.stateAccessor.markUpdated();
+     }
+ 
+-    public PlayerDetector getPlayerDetector() {
++    public synchronized PlayerDetector getPlayerDetector() {
+         return this.playerDetector;
+     }
+ 
+-    public PlayerDetector.EntitySelector getEntitySelector() {
++    public synchronized PlayerDetector.EntitySelector getEntitySelector() {
+         return this.entitySelector;
+     }
+ 
+-    public boolean canSpawnInLevel(ServerLevel level) {
++    public synchronized boolean canSpawnInLevel(ServerLevel level) {
+         if (!level.getGameRules().get(GameRules.SPAWNER_BLOCKS_WORK)) {
+             return false;
+         } else if (this.overridePeacefulAndMobSpawnRule) {
+@@ -154,9 +_,9 @@
+         }
+     }
+ 
+-    public Optional<UUID> spawnMob(ServerLevel level, BlockPos spawnerPos) {
+-        RandomSource random = level.getRandom();
+-        SpawnData nextSpawnData = this.data.getOrCreateNextSpawnData(this, level.getRandom());
++    public synchronized Optional<UUID> spawnMob(ServerLevel level, BlockPos spawnerPos) {
++        RandomSource random = spawnerRandom(level);
++        SpawnData nextSpawnData = this.data.getOrCreateNextSpawnData(this, random);
+ 
+         Optional var24;
+         try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(() -> "spawner@" + spawnerPos, LOGGER)) {
+@@ -177,6 +_,14 @@
+                         );
+                     }
+                 );
++            BlockPos spawnBlockPos = BlockPos.containing(spawnPos);
++            if (
++                !RegionizedWorldGuard.shouldLoadChunk(level, spawnBlockPos.getX() >> 4, spawnBlockPos.getZ() >> 4)
++                    || RegionizedTickContext.isRegionThread() && !RegionizedWorldGuard.isRegionThreadFor(level, spawnBlockPos)
++            ) {
++                return Optional.empty();
++            }
++
+             if (!level.noCollision(entityType.get().getSpawnAABB(spawnPos.x, spawnPos.y, spawnPos.z))) {
+                 return Optional.empty();
+             }
+@@ -185,8 +_,7 @@
+                 return Optional.empty();
+             }
+ 
+-            BlockPos spawnBlockPos = BlockPos.containing(spawnPos);
+-            if (!SpawnPlacements.checkSpawnRules(entityType.get(), level, EntitySpawnReason.TRIAL_SPAWNER, spawnBlockPos, level.getRandom())) {
++            if (!SpawnPlacements.checkSpawnRules(entityType.get(), level, EntitySpawnReason.TRIAL_SPAWNER, spawnBlockPos, random)) {
+                 return Optional.empty();
+             }
+ 
+@@ -211,9 +_,9 @@
+                 }
+ 
+                 boolean hasNoConfiguration = nextSpawnData.getEntityToSpawn().size() == 1 && nextSpawnData.getEntityToSpawn().getString("id").isPresent();
+-                if (hasNoConfiguration) {
+-                    mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.TRIAL_SPAWNER, null);
+-                }
++                // Neo: Patch in FinalizeSpawn for spawners so it may be fired unconditionally, instead of only when vanilla would normally call it.
++                // The local flag is the conditions under which the spawner will normally call Mob#finalizeSpawn.
++                net.neoforged.neoforge.event.EventHooks.finalizeMobSpawnSpawner(mob, level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.TRIAL_SPAWNER, null, this, hasNoConfiguration);
+ 
+                 mob.setPersistenceRequired();
+                 nextSpawnData.getEquipment().ifPresent(mob::equip);
+@@ -233,10 +_,10 @@
+         return var24;
+     }
+ 
+-    public void ejectReward(ServerLevel level, BlockPos pos, ResourceKey<LootTable> ejectingLootTable) {
++    public synchronized void ejectReward(ServerLevel level, BlockPos pos, ResourceKey<LootTable> ejectingLootTable) {
+         LootTable lootTable = level.getServer().reloadableRegistries().getLootTable(ejectingLootTable);
+         LootParams params = new LootParams.Builder(level).create(LootContextParamSets.EMPTY);
+-        ObjectArrayList<ItemStack> lootDrops = lootTable.getRandomItems(params);
++        ObjectArrayList<ItemStack> lootDrops = lootTable.getRandomItems(params, spawnerRandom(level));
+         if (!lootDrops.isEmpty()) {
+             for (ItemStack item : lootDrops) {
+                 DefaultDispenseItemBehavior.spawnItem(level, item, 2, Direction.UP, Vec3.atBottomCenterOf(pos).relative(Direction.UP, 1.2));
+@@ -246,7 +_,7 @@
+         }
+     }
+ 
+-    public void tickClient(Level level, BlockPos spawnerPos, boolean isOminous) {
++    public synchronized void tickClient(Level level, BlockPos spawnerPos, boolean isOminous) {
+         TrialSpawnerState currentState = this.getState();
+         currentState.emitParticles(level, spawnerPos, isOminous);
+         if (currentState.hasSpinningMob()) {
+@@ -264,7 +_,7 @@
+         }
+     }
+ 
+-    public void tickServer(ServerLevel serverLevel, BlockPos spawnerPos, boolean isOminous) {
++    public synchronized void tickServer(ServerLevel serverLevel, BlockPos spawnerPos, boolean isOminous) {
+         this.isOminous = isOminous;
+         TrialSpawnerState currentState = this.getState();
+         if (this.data.currentMobs.removeIf(id -> shouldMobBeUntracked(serverLevel, spawnerPos, id))) {
+@@ -277,8 +_,16 @@
+         }
+     }
+ 
++    static RandomSource spawnerRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
++    }
++
+     private static boolean shouldMobBeUntracked(ServerLevel serverLevel, BlockPos spawnerPos, UUID id) {
+-        Entity entity = serverLevel.getEntity(id);
++        Entity entity = serverLevel.getEntities().get(id);
++        if (entity != null && RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, entity) == null) {
++            return false;
++        }
++
+         return entity == null
+             || !entity.isAlive()
+             || !entity.level().dimension().equals(serverLevel.dimension())
+@@ -286,10 +_,18 @@
+     }
+ 
+     private static boolean inLineOfSight(Level level, Vec3 origin, Vec3 dest) {
++        if (!canReadBlock(level, BlockPos.containing(origin)) || !canReadBlock(level, BlockPos.containing(dest))) {
++            return false;
++        }
++
+         BlockHitResult hitResult = level.clip(new ClipContext(dest, origin, ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, CollisionContext.empty()));
+         return hitResult.getBlockPos().equals(BlockPos.containing(origin)) || hitResult.getType() == HitResult.Type.MISS;
+     }
+ 
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     public static void addSpawnParticles(Level level, BlockPos pos, RandomSource random, SimpleParticleType particleType) {
+         for (int i = 0; i < 20; i++) {
+             double xP = pos.getX() + 0.5 + (random.nextDouble() - 0.5) * 2.0;
+@@ -337,7 +_,7 @@
+         }
+     }
+ 
+-    public void overrideEntityToSpawn(EntityType<?> type, Level level) {
++    public synchronized void overrideEntityToSpawn(EntityType<?> type, Level level) {
+         this.data.reset();
+         this.config = this.config.overrideEntity(type);
+         this.setState(level, TrialSpawnerState.INACTIVE);
+@@ -345,13 +_,13 @@
+ 
+     @Deprecated(forRemoval = true)
+     @VisibleForTesting
+-    public void setPlayerDetector(PlayerDetector playerDetector) {
++    public synchronized void setPlayerDetector(PlayerDetector playerDetector) {
+         this.playerDetector = playerDetector;
+     }
+ 
+     @Deprecated(forRemoval = true)
+     @VisibleForTesting
+-    public void overridePeacefulAndMobSpawnRule() {
++    public synchronized void overridePeacefulAndMobSpawnRule() {
+         this.overridePeacefulAndMobSpawnRule = true;
+     }
+ 
+@@ -409,5 +_,13 @@
+         TrialSpawnerState getState();
+ 
+         void markUpdated();
++    }
++
++    @Override
++    public com.mojang.datafixers.util.@org.jspecify.annotations.Nullable Either<net.minecraft.world.level.block.entity.BlockEntity, Entity> getOwner() {
++        if (this.stateAccessor instanceof net.minecraft.world.level.block.entity.TrialSpawnerBlockEntity be) {
++            return com.mojang.datafixers.util.Either.left(be);
++        }
++        return null;
+     }
+ }

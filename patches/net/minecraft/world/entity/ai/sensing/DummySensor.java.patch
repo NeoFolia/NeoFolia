@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/entity/ai/sensing/DummySensor.java
++++ b/net/minecraft/world/entity/ai/sensing/DummySensor.java
+@@ -8,11 +_,11 @@
+ 
+ public class DummySensor extends Sensor<LivingEntity> {
+     @Override
+-    protected void doTick(ServerLevel level, LivingEntity body) {
++    protected synchronized void doTick(ServerLevel level, LivingEntity body) {
+     }
+ 
+     @Override
+-    public Set<MemoryModuleType<?>> requires() {
++    public synchronized Set<MemoryModuleType<?>> requires() {
+         return ImmutableSet.of();
+     }
+ }

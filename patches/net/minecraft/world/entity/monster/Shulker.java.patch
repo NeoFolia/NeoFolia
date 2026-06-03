@@ -1,0 +1,157 @@
+--- a/net/minecraft/world/entity/monster/Shulker.java
++++ b/net/minecraft/world/entity/monster/Shulker.java
+@@ -57,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.joml.Vector3f;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -233,10 +_,17 @@
+         Direction direction = this.getAttachFace().getOpposite();
+         float push = (physicalPeek - physicalPeekOld) * this.getScale();
+         if (!(push <= 0.0F)) {
++            AABB pushBox = RegionizedWorldGuard.restrictToCurrentRegion(
++                this.level(), getProgressDeltaAabb(this.getScale(), direction, physicalPeekOld, physicalPeek, this.position())
++            );
++            if (pushBox == null) {
++                return;
++            }
++
+             for (Entity entity : this.level()
+                 .getEntities(
+                     this,
+-                    getProgressDeltaAabb(this.getScale(), direction, physicalPeekOld, physicalPeek, this.position()),
++                    pushBox,
+                     EntitySelector.NO_SPECTATORS.and(e -> !e.isPassengerOfSameVehicle(this))
+                 )) {
+                 if (!(entity instanceof Shulker) && !entity.noPhysics) {
+@@ -355,7 +_,9 @@
+             return false;
+         } else {
+             Direction oppositeFace = face.getOpposite();
+-            if (!this.level().loadedAndEntityCanStandOnFace(target.relative(face), this, oppositeFace)) {
++            BlockPos support = target.relative(face);
++            if (!RegionizedWorldGuard.shouldLoadChunk(this.level(), support.getX() >> 4, support.getZ() >> 4)
++                || !this.level().loadedAndEntityCanStandOnFace(support, this, oppositeFace)) {
+                 return false;
+             } else {
+                 AABB fullyOpened = getProgressAabb(this.getScale(), oppositeFace, 1.0F, target.getBottomCenter()).deflate(1.0E-6);
+@@ -365,6 +_,10 @@
+     }
+ 
+     private boolean isPositionBlocked(BlockPos target) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(this.level(), target.getX() >> 4, target.getZ() >> 4)) {
++            return true;
++        }
++
+         BlockState state = this.level().getBlockState(target);
+         if (state.isAir()) {
+             return false;
+@@ -384,12 +_,22 @@
+                     Mth.randomBetweenInclusive(this.random, -8, 8),
+                     Mth.randomBetweenInclusive(this.random, -8, 8)
+                 );
++                if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(this.level(), target, "Shulker teleport", this::teleportSomewhere)) {
++                    return false;
++                }
++
+                 if (target.getY() > this.level().getMinY()
+                     && this.level().isEmptyBlock(target)
+                     && this.level().getWorldBorder().isWithinBounds(target)
+                     && this.level().noCollision(this, new AABB(target).deflate(1.0E-6))) {
+                     Direction attachmentDirection = this.findAttachableSurface(target);
+                     if (attachmentDirection != null) {
++                        net.neoforged.neoforge.event.entity.EntityTeleportEvent.EnderEntity event = net.neoforged.neoforge.event.EventHooks.onEnderTeleport(this, target.getX(), target.getY(), target.getZ());
++                        if (event.isCanceled()) attachmentDirection = null;
++                        target = BlockPos.containing(event.getTargetX(), event.getTargetY(), event.getTargetZ());
++                    }
++
++                    if (attachmentDirection != null) {
+                         this.unRide();
+                         this.setAttachFace(attachmentDirection);
+                         this.playSound(SoundEvents.SHULKER_TELEPORT, 1.0F, 1.0F);
+@@ -416,7 +_,7 @@
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+         if (this.isClosed()) {
+-            Entity directEntity = source.getDirectEntity();
++            Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
+             if (directEntity instanceof AbstractArrow) {
+                 return false;
+             }
+@@ -428,7 +_,7 @@
+             if (this.getHealth() < this.getMaxHealth() * 0.5 && this.random.nextInt(4) == 0) {
+                 this.teleportSomewhere();
+             } else if (source.is(DamageTypeTags.IS_PROJECTILE)) {
+-                Entity directEntity = source.getDirectEntity();
++                Entity directEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getDirectEntity());
+                 if (directEntity != null && directEntity.is(EntityType.SHULKER_BULLET)) {
+                     this.hitByShulkerBullet();
+                 }
+@@ -442,13 +_,18 @@
+         return this.getRawPeekAmount() == 0;
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     private void hitByShulkerBullet() {
+         Vec3 oldPosition = this.position();
+         AABB oldAabb = this.getBoundingBox();
+         if (!this.isClosed() && this.teleportSomewhere()) {
+-            int shulkerCount = this.level().getEntities(EntityType.SHULKER, oldAabb.inflate(8.0), Entity::isAlive).size();
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), oldAabb.inflate(8.0));
++            int shulkerCount = searchBox == null ? 0 : this.level().getEntities(EntityType.SHULKER, searchBox, Entity::isAlive).size();
+             float failureChance = (shulkerCount - 1) / 5.0F;
+-            if (!(this.level().getRandom().nextFloat() < failureChance)) {
++            if (!(this.random.nextFloat() < failureChance)) {
+                 Shulker baby = EntityType.SHULKER.create(this.level(), EntitySpawnReason.BREEDING);
+                 if (baby != null) {
+                     baby.setVariant(this.getVariant());
+@@ -591,7 +_,7 @@
+ 
+         @Override
+         public boolean canUse() {
+-            LivingEntity target = Shulker.this.getTarget();
++            LivingEntity target = Shulker.this.regionSafeTarget(Shulker.this.getTarget());
+             return target != null && target.isAlive() ? Shulker.this.level().getDifficulty() != Difficulty.PEACEFUL : false;
+         }
+ 
+@@ -615,7 +_,7 @@
+         public void tick() {
+             if (Shulker.this.level().getDifficulty() != Difficulty.PEACEFUL) {
+                 this.attackTime--;
+-                LivingEntity target = Shulker.this.getTarget();
++                LivingEntity target = Shulker.this.regionSafeTarget(Shulker.this.getTarget());
+                 if (target != null) {
+                     Shulker.this.getLookControl().setLookAt(target, 180.0F, 180.0F);
+                     double distance = Shulker.this.distanceToSqr(target);
+@@ -739,14 +_,14 @@
+ 
+         @Override
+         public boolean canUse() {
+-            return Shulker.this.getTarget() == null
++            return Shulker.this.regionSafeTarget(Shulker.this.getTarget()) == null
+                 && Shulker.this.random.nextInt(reducedTickDelay(40)) == 0
+                 && Shulker.this.canStayAt(Shulker.this.blockPosition(), Shulker.this.getAttachFace());
+         }
+ 
+         @Override
+         public boolean canContinueToUse() {
+-            return Shulker.this.getTarget() == null && this.peekTime > 0;
++            return Shulker.this.regionSafeTarget(Shulker.this.getTarget()) == null && this.peekTime > 0;
+         }
+ 
+         @Override
+@@ -757,7 +_,7 @@
+ 
+         @Override
+         public void stop() {
+-            if (Shulker.this.getTarget() == null) {
++            if (Shulker.this.regionSafeTarget(Shulker.this.getTarget()) == null) {
+                 Shulker.this.setRawPeekAmount(0);
+             }
+         }

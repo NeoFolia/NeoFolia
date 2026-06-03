@@ -1,0 +1,76 @@
+--- a/net/minecraft/server/commands/DebugConfigCommand.java
++++ b/net/minecraft/server/commands/DebugConfigCommand.java
+@@ -2,6 +_,8 @@
+ 
+ import com.mojang.authlib.GameProfile;
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.HashSet;
+ import java.util.Set;
+ import java.util.UUID;
+@@ -29,7 +_,7 @@
+                 .requires(Commands.hasPermission(Commands.LEVEL_ADMINS))
+                 .then(
+                     Commands.literal("config")
+-                        .then(Commands.argument("target", EntityArgument.player()).executes(c -> config(c.getSource(), EntityArgument.getPlayer(c, "target"))))
++                        .then(Commands.argument("target", EntityArgument.player()).executes(DebugConfigCommand::config))
+                 )
+                 .then(
+                     Commands.literal("unconfig")
+@@ -59,6 +_,15 @@
+         );
+     }
+ 
++    private static int config(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> config(context))) {
++            return 0;
++        }
++
++        return config(source, EntityArgument.getPlayer(context, "target"));
++    }
++
+     private static Iterable<String> getUuidsInConfig(MinecraftServer server) {
+         Set<String> result = new HashSet<>();
+ 
+@@ -72,8 +_,15 @@
+     }
+ 
+     private static int config(CommandSourceStack source, ServerPlayer target) {
+-        GameProfile gameProfile = target.getGameProfile();
+-        target.connection.switchToConfig();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> config(source, target))) {
++            return 0;
++        }
++
++        GameProfile gameProfile = RegionizedCommandHelper.callOnPlayerRegion(source, target, () -> {
++            GameProfile profile = target.getGameProfile();
++            target.connection.switchToConfig();
++            return profile;
++        });
+         source.sendSuccess(() -> Component.literal("Switched player " + gameProfile.name() + "(" + gameProfile.id() + ") to config mode"), false);
+         return 1;
+     }
+@@ -91,6 +_,10 @@
+     }
+ 
+     private static int unconfig(CommandSourceStack source, UUID target) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> unconfig(source, target))) {
++            return 0;
++        }
++
+         ServerConfigurationPacketListenerImpl listener = findConfigPlayer(source.getServer(), target);
+         if (listener != null) {
+             listener.returnToWorld();
+@@ -102,6 +_,10 @@
+     }
+ 
+     private static int showDialog(CommandSourceStack source, UUID target, Holder<Dialog> dialog) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> showDialog(source, target, dialog))) {
++            return 0;
++        }
++
+         ServerConfigurationPacketListenerImpl listener = findConfigPlayer(source.getServer(), target);
+         if (listener != null) {
+             listener.send(new ClientboundShowDialogPacket(dialog));

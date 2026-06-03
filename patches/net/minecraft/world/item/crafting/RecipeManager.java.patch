@@ -1,0 +1,91 @@
+--- a/net/minecraft/world/item/crafting/RecipeManager.java
++++ b/net/minecraft/world/item/crafting/RecipeManager.java
+@@ -9,6 +_,7 @@
+ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+ import java.util.ArrayList;
+ import java.util.Collection;
++import java.util.Collections;
+ import java.util.IdentityHashMap;
+ import java.util.List;
+ import java.util.Map;
+@@ -56,11 +_,12 @@
+     );
+     private static final FileToIdConverter RECIPE_LISTER = FileToIdConverter.registry(Registries.RECIPE);
+     private final HolderLookup.Provider registries;
+-    private RecipeMap recipes = RecipeMap.EMPTY;
+-    private Map<ResourceKey<RecipePropertySet>, RecipePropertySet> propertySets = Map.of();
+-    private SelectableRecipe.SingleInputSet<StonecutterRecipe> stonecutterRecipes = SelectableRecipe.SingleInputSet.empty();
+-    private List<RecipeManager.ServerDisplayInfo> allDisplays = List.of();
+-    private Map<ResourceKey<Recipe<?>>, List<RecipeManager.ServerDisplayInfo>> recipeToDisplay = Map.of();
++    private volatile RecipeMap recipes = RecipeMap.EMPTY;
++    private volatile Map<ResourceKey<RecipePropertySet>, RecipePropertySet> propertySets = Map.of();
++    private volatile SelectableRecipe.SingleInputSet<StonecutterRecipe> stonecutterRecipes = SelectableRecipe.SingleInputSet.empty();
++    private volatile List<RecipeManager.ServerDisplayInfo> allDisplays = List.of();
++    private volatile Map<ResourceKey<Recipe<?>>, List<RecipeManager.ServerDisplayInfo>> recipeToDisplay = Map.of();
++    private volatile Object2IntMap<ResourceKey<net.minecraft.world.item.crafting.Recipe<?>>> recipePriorities = it.unimi.dsi.fastutil.objects.Object2IntMaps.emptyMap(); // Neo: recipe priorities set from RecipePriorityManager.
+ 
+     public RecipeManager(HolderLookup.Provider registries) {
+         this.registries = registries;
+@@ -68,8 +_,13 @@
+ 
+     protected RecipeMap prepare(ResourceManager manager, ProfilerFiller profiler) {
+         SortedMap<Identifier, Recipe<?>> recipes = new TreeMap<>();
+-        SimpleJsonResourceReloadListener.scanDirectory(
+-            manager, RECIPE_LISTER, this.registries.createSerializationContext(JsonOps.INSTANCE), Recipe.CODEC, recipes
++        // Neo: add condition context and post recipe JSON modification event
++        var conditionalOps = new net.neoforged.neoforge.common.conditions.ConditionalOps<>(this.registries.createSerializationContext(JsonOps.INSTANCE), getContext());
++        SimpleJsonResourceReloadListener.scanDirectoryWithModifier(
++            manager, RECIPE_LISTER, conditionalOps, Recipe.CODEC, recipes, recipeJsons -> {
++                var event = new net.neoforged.neoforge.event.ModifyRecipeJsonsEvent(conditionalOps, recipeJsons);
++                net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event);
++            }
+         );
+         List<RecipeHolder<?>> recipeHolders = new ArrayList<>(recipes.size());
+         recipes.forEach((id, recipe) -> {
+@@ -86,12 +_,14 @@
+     }
+ 
+     public void finalizeRecipeLoading(FeatureFlagSet enabledFlags) {
++        RecipeMap recipes = this.recipes;
++        recipes.order(this.recipePriorities); // Neo: order recipes by priority.
+         List<SelectableRecipe.SingleInputEntry<StonecutterRecipe>> stonecutterRecipes = new ArrayList<>();
+         List<RecipeManager.IngredientCollector> propertySetCollectors = RECIPE_PROPERTY_SETS.entrySet()
+             .stream()
+             .map(e -> new RecipeManager.IngredientCollector(e.getKey(), e.getValue()))
+             .toList();
+-        this.recipes
++        recipes
+             .values()
+             .forEach(
+                 recipeHolder -> {
+@@ -115,8 +_,11 @@
+             );
+         this.propertySets = propertySetCollectors.stream().collect(Collectors.toUnmodifiableMap(c -> c.key, c -> c.asPropertySet(enabledFlags)));
+         this.stonecutterRecipes = new SelectableRecipe.SingleInputSet<>(stonecutterRecipes);
+-        this.allDisplays = unpackRecipeInfo(this.recipes.values(), enabledFlags);
+-        this.recipeToDisplay = this.allDisplays.stream().collect(Collectors.groupingBy(r -> r.parent.id(), IdentityHashMap::new, Collectors.toList()));
++        this.allDisplays = List.copyOf(unpackRecipeInfo(recipes.values(), enabledFlags));
++        Map<ResourceKey<Recipe<?>>, List<RecipeManager.ServerDisplayInfo>> displayMap = this.allDisplays
++            .stream()
++            .collect(Collectors.groupingBy(r -> r.parent.id(), IdentityHashMap::new, Collectors.collectingAndThen(Collectors.toList(), List::copyOf)));
++        this.recipeToDisplay = Collections.unmodifiableMap(displayMap);
+     }
+ 
+     private static List<Ingredient> filterDisabled(FeatureFlagSet enabledFlags, List<Ingredient> ingredients) {
+@@ -250,6 +_,16 @@
+         return recipe -> recipe.getType() == type && recipe instanceof SingleItemRecipe singleItemRecipe
+             ? Optional.of(singleItemRecipe.input())
+             : Optional.empty();
++    }
++
++    // Neo: expose recipe map
++    public RecipeMap recipeMap() {
++        return this.recipes;
++    }
++
++    // Neo: set recipe priority map
++    public void setPriorityMap(Object2IntMap<ResourceKey<net.minecraft.world.item.crafting.Recipe<?>>> recipePriorities) {
++        this.recipePriorities = it.unimi.dsi.fastutil.objects.Object2IntMaps.unmodifiable(new Object2IntOpenHashMap<>(recipePriorities));
+     }
+ 
+     public interface CachedCheck<I extends RecipeInput, T extends Recipe<I>> {

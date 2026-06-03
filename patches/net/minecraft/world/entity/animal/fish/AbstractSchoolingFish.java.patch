@@ -1,0 +1,26 @@
+--- a/net/minecraft/world/entity/animal/fish/AbstractSchoolingFish.java
++++ b/net/minecraft/world/entity/animal/fish/AbstractSchoolingFish.java
+@@ -9,6 +_,8 @@
+ import net.minecraft.world.entity.ai.goal.FollowFlockLeaderGoal;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.ServerLevelAccessor;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class AbstractSchoolingFish extends AbstractFish {
+@@ -69,9 +_,11 @@
+     @Override
+     public void tick() {
+         super.tick();
+-        if (this.hasFollowers() && this.level().getRandom().nextInt(200) == 1) {
+-            List<? extends AbstractFish> neighbors = this.level()
+-                .getEntitiesOfClass((Class<? extends AbstractFish>)this.getClass(), this.getBoundingBox().inflate(8.0, 8.0, 8.0));
++        if (this.hasFollowers() && this.getRandom().nextInt(200) == 1) {
++            AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(8.0, 8.0, 8.0));
++            List<? extends AbstractFish> neighbors = regionBox == null
++                ? List.of()
++                : this.level().getEntitiesOfClass((Class<? extends AbstractFish>)this.getClass(), regionBox);
+             if (neighbors.size() <= 1) {
+                 this.schoolSize = 1;
+             }

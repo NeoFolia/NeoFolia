@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/ai/behavior/ReactToBell.java
++++ b/net/minecraft/world/entity/ai/behavior/ReactToBell.java
+@@ -7,7 +_,7 @@
+ import net.minecraft.world.entity.schedule.Activity;
+ 
+ public class ReactToBell {
+-    public static BehaviorControl<LivingEntity> create() {
++    public static synchronized BehaviorControl<LivingEntity> create() {
+         return BehaviorBuilder.create(i -> i.group(i.present(MemoryModuleType.HEARD_BELL_TIME)).apply(i, heartTime -> (level, body, timestamp) -> {
+             Raid nearbyRaid = level.getRaidAt(body.blockPosition());
+             if (nearbyRaid == null) {

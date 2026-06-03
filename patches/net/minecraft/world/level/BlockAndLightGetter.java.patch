@@ -1,0 +1,27 @@
+--- a/net/minecraft/world/level/BlockAndLightGetter.java
++++ b/net/minecraft/world/level/BlockAndLightGetter.java
+@@ -2,15 +_,24 @@
+ 
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.world.level.lighting.LevelLightEngine;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public interface BlockAndLightGetter extends BlockGetter {
+     LevelLightEngine getLightEngine();
+ 
+     default int getBrightness(LightLayer layer, BlockPos pos) {
++        if (this instanceof Level level && !RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4)) {
++            return 0;
++        }
++
+         return this.getLightEngine().getLayerListener(layer).getLightValue(pos);
+     }
+ 
+     default int getRawBrightness(BlockPos pos, int darkening) {
++        if (this instanceof Level level && !RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4)) {
++            return 0;
++        }
++
+         return this.getLightEngine().getRawBrightness(pos, darkening);
+     }
+ 

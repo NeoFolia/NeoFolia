@@ -1,0 +1,35 @@
+--- a/net/minecraft/world/level/gameevent/EuclideanGameEventListenerRegistry.java
++++ b/net/minecraft/world/level/gameevent/EuclideanGameEventListenerRegistry.java
+@@ -30,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean isEmpty() {
++    public synchronized boolean isEmpty() {
+         return this.listeners.isEmpty();
+     }
+ 
+     @Override
+-    public void register(GameEventListener listener) {
++    public synchronized void register(GameEventListener listener) {
+         if (this.processing) {
+             this.listenersToAdd.add(listener);
+         } else {
+@@ -61,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void unregister(GameEventListener listener) {
++    public synchronized void unregister(GameEventListener listener) {
+         if (this.processing) {
+             this.listenersToRemove.add(listener);
+         } else {
+@@ -74,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean visitInRangeListeners(
++    public synchronized boolean visitInRangeListeners(
+         Holder<GameEvent> event, Vec3 sourcePosition, GameEvent.Context context, GameEventListenerRegistry.ListenerVisitor action
+     ) {
+         this.processing = true;

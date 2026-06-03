@@ -1,0 +1,77 @@
+--- a/net/minecraft/world/entity/ai/behavior/RandomStroll.java
++++ b/net/minecraft/world/entity/ai/behavior/RandomStroll.java
+@@ -13,6 +_,7 @@
+ import net.minecraft.world.entity.ai.util.GoalUtils;
+ import net.minecraft.world.entity.ai.util.LandRandomPos;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class RandomStroll {
+@@ -20,27 +_,29 @@
+     private static final int MAX_Y_DIST = 7;
+     private static final int[][] SWIM_XY_DISTANCE_TIERS = new int[][]{{1, 1}, {3, 3}, {5, 5}, {6, 5}, {7, 7}, {10, 7}};
+ 
+-    public static OneShot<PathfinderMob> stroll(float speedModifier) {
++    public static synchronized OneShot<PathfinderMob> stroll(float speedModifier) {
+         return stroll(speedModifier, true);
+     }
+ 
+-    public static OneShot<PathfinderMob> stroll(float speedModifier, boolean mayStrollFromWater) {
++    public static synchronized OneShot<PathfinderMob> stroll(float speedModifier, boolean mayStrollFromWater) {
+         return strollFlyOrSwim(speedModifier, body -> LandRandomPos.getPos(body, 10, 7), mayStrollFromWater ? b -> true : b -> !b.isInWater());
+     }
+ 
+-    public static BehaviorControl<PathfinderMob> stroll(float speedModifier, int maxHorizontalDistance, int maxVerticalDistance) {
++    public static synchronized BehaviorControl<PathfinderMob> stroll(float speedModifier, int maxHorizontalDistance, int maxVerticalDistance) {
+         return strollFlyOrSwim(speedModifier, body -> LandRandomPos.getPos(body, maxHorizontalDistance, maxVerticalDistance), b -> true);
+     }
+ 
+-    public static BehaviorControl<PathfinderMob> fly(float speedModifier) {
++    public static synchronized BehaviorControl<PathfinderMob> fly(float speedModifier) {
+         return strollFlyOrSwim(speedModifier, body -> getTargetFlyPos(body, 10, 7), b -> true);
+     }
+ 
+-    public static BehaviorControl<PathfinderMob> swim(float speedModifier) {
++    public static synchronized BehaviorControl<PathfinderMob> swim(float speedModifier) {
+         return strollFlyOrSwim(speedModifier, RandomStroll::getTargetSwimPos, Entity::isInWater);
+     }
+ 
+-    private static OneShot<PathfinderMob> strollFlyOrSwim(float speedModifier, Function<PathfinderMob, Vec3> fetchTargetPos, Predicate<PathfinderMob> canRun) {
++    private static synchronized OneShot<PathfinderMob> strollFlyOrSwim(
++        float speedModifier, Function<PathfinderMob, Vec3> fetchTargetPos, Predicate<PathfinderMob> canRun
++    ) {
+         return BehaviorBuilder.create(i -> i.group(i.absent(MemoryModuleType.WALK_TARGET)).apply(i, walkTarget -> (level, body, timestamp) -> {
+             if (!canRun.test(body)) {
+                 return false;
+@@ -52,7 +_,7 @@
+         }));
+     }
+ 
+-    private static @Nullable Vec3 getTargetSwimPos(PathfinderMob body) {
++    private static synchronized @Nullable Vec3 getTargetSwimPos(PathfinderMob body) {
+         Vec3 fallback = null;
+         Vec3 targetPos = null;
+ 
+@@ -64,7 +_,11 @@
+             }
+ 
+             boolean restrict = GoalUtils.mobRestricted(body, distance[0]);
+-            if (targetPos == null || body.level().getFluidState(BlockPos.containing(targetPos)).isEmpty() || GoalUtils.isRestricted(restrict, body, targetPos)) {
++            BlockPos targetBlockPos = targetPos == null ? null : BlockPos.containing(targetPos);
++            if (targetBlockPos == null
++                || !RegionizedWorldGuard.shouldLoadChunk(body.level(), targetBlockPos.getX() >> 4, targetBlockPos.getZ() >> 4)
++                || body.level().getFluidState(targetBlockPos).isEmpty()
++                || GoalUtils.isRestricted(restrict, body, targetPos)) {
+                 return fallback;
+             }
+ 
+@@ -74,7 +_,7 @@
+         return targetPos;
+     }
+ 
+-    private static @Nullable Vec3 getTargetFlyPos(PathfinderMob body, int maxHorizontalDistance, int maxVerticalDistance) {
++    private static synchronized @Nullable Vec3 getTargetFlyPos(PathfinderMob body, int maxHorizontalDistance, int maxVerticalDistance) {
+         Vec3 wanderDirection = body.getViewVector(0.0F);
+         return AirAndWaterRandomPos.getPos(body, maxHorizontalDistance, maxVerticalDistance, -2, wanderDirection.x, wanderDirection.z, (float) (Math.PI / 2));
+     }

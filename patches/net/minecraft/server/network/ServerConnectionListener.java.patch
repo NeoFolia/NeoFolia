@@ -1,0 +1,172 @@
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -23,6 +_,8 @@
+ import java.util.Iterator;
+ import java.util.List;
+ import java.util.Objects;
++import java.util.Queue;
++import java.util.concurrent.ConcurrentLinkedQueue;
+ import java.util.concurrent.TimeUnit;
+ import net.minecraft.CrashReport;
+ import net.minecraft.ReportedException;
+@@ -39,6 +_,7 @@
+ 
+ public class ServerConnectionListener {
+     private static final Logger LOGGER = LogUtils.getLogger();
++    private static final int READ_TIMEOUT = Integer.parseInt(System.getProperty("neoforge.readTimeout", "30"));
+     private final MinecraftServer server;
+     public volatile boolean running;
+     private final List<ChannelFuture> channels = Collections.synchronizedList(Lists.newArrayList());
+@@ -49,7 +_,9 @@
+         this.running = true;
+     }
+ 
+-    public void startTcpServerListener(@Nullable InetAddress address, int port) throws IOException {
++    public synchronized void startTcpServerListener(@Nullable InetAddress address, int port) throws IOException {
++        if (address == null) address = new java.net.InetSocketAddress(port).getAddress();
++        net.neoforged.neoforge.network.DualStackUtils.checkIPv6(address);
+         synchronized (this.channels) {
+             EventLoopGroupHolder eventLoopGroupHolder = EventLoopGroupHolder.remote(this.server.useNativeTransport());
+             this.channels
+@@ -69,7 +_,7 @@
+                                     } catch (ChannelException var5) {
+                                     }
+ 
+-                                    ChannelPipeline pipeline = channel.pipeline().addLast("timeout", new ReadTimeoutHandler(30));
++                                    ChannelPipeline pipeline = channel.pipeline().addLast("timeout", new ReadTimeoutHandler(READ_TIMEOUT));
+                                     if (ServerConnectionListener.this.server.repliesToStatus()) {
+                                         pipeline.addLast("legacy_query", new LegacyQueryHandler(ServerConnectionListener.this.getServer()));
+                                     }
+@@ -87,7 +_,7 @@
+                                 }
+                             }
+                         )
+-                        .group(eventLoopGroupHolder.eventLoopGroup())
++                        .group(eventLoopGroupHolder.serverEventLoopGroup())
+                         .localAddress(address, port)
+                         .bind()
+                         .syncUninterruptibly()
+@@ -95,7 +_,7 @@
+         }
+     }
+ 
+-    public SocketAddress startMemoryChannel() {
++    public synchronized SocketAddress startMemoryChannel() {
+         ChannelFuture newChannel;
+         synchronized (this.channels) {
+             newChannel = new ServerBootstrap()
+@@ -126,7 +_,7 @@
+                         }
+                     }
+                 )
+-                .group(EventLoopGroupHolder.local().eventLoopGroup())
++                .group(EventLoopGroupHolder.local().serverEventLoopGroup())
+                 .localAddress(LocalAddress.ANY)
+                 .bind()
+                 .syncUninterruptibly();
+@@ -136,42 +_,46 @@
+         return newChannel.channel().localAddress();
+     }
+ 
+-    public void stop() {
++    public synchronized void stop() {
+         this.running = false;
+ 
+-        for (ChannelFuture channel : this.channels) {
+-            try {
+-                channel.channel().close().sync();
+-            } catch (InterruptedException var4) {
+-                LOGGER.error("Interrupted whilst closing channel");
++        synchronized (this.channels) {
++            for (ChannelFuture channel : this.channels) {
++                try {
++                    channel.channel().close().sync();
++                } catch (InterruptedException var4) {
++                    LOGGER.error("Interrupted whilst closing channel");
++                }
+             }
+         }
+     }
+ 
+     public void tick() {
++        List<Connection> connectionSnapshot;
+         synchronized (this.connections) {
+-            Iterator<Connection> iterator = this.connections.iterator();
+-
+-            while (iterator.hasNext()) {
+-                Connection connection = iterator.next();
+-                if (!connection.isConnecting()) {
+-                    if (connection.isConnected()) {
+-                        try {
+-                            connection.tick();
+-                        } catch (Exception var7) {
+-                            if (connection.isMemoryConnection()) {
+-                                throw new ReportedException(CrashReport.forThrowable(var7, "Ticking memory connection"));
+-                            }
+-
+-                            LOGGER.warn("Failed to handle packet for {}", connection.getLoggableAddress(this.server.logIPs()), var7);
+-                            Component component = Component.literal("Internal server error");
+-                            connection.send(new ClientboundDisconnectPacket(component), PacketSendListener.thenRun(() -> connection.disconnect(component)));
+-                            connection.setReadOnly();
++            connectionSnapshot = List.copyOf(this.connections);
++        }
++
++        for (Connection connection : connectionSnapshot) {
++            if (!connection.isConnecting()) {
++                if (connection.isConnected()) {
++                    try {
++                        connection.tick();
++                    } catch (Exception var7) {
++                        if (connection.isMemoryConnection()) {
++                            throw new ReportedException(CrashReport.forThrowable(var7, "Ticking memory connection"));
+                         }
+-                    } else {
+-                        iterator.remove();
+-                        connection.handleDisconnection();
+-                    }
++
++                        LOGGER.warn("Failed to handle packet for {}", connection.getLoggableAddress(this.server.logIPs()), var7);
++                        Component component = Component.literal("Internal server error");
++                        connection.send(new ClientboundDisconnectPacket(component), PacketSendListener.thenRun(() -> connection.disconnect(component)));
++                        connection.setReadOnly();
++                    }
++                } else {
++                    synchronized (this.connections) {
++                        this.connections.remove(connection);
++                    }
++                    connection.handleDisconnection();
+                 }
+             }
+         }
+@@ -182,14 +_,16 @@
+     }
+ 
+     public List<Connection> getConnections() {
+-        return this.connections;
++        synchronized (this.connections) {
++            return List.copyOf(this.connections);
++        }
+     }
+ 
+     private static class LatencySimulator extends ChannelInboundHandlerAdapter {
+         private static final Timer TIMER = new HashedWheelTimer();
+         private final int delay;
+         private final int jitter;
+-        private final List<ServerConnectionListener.LatencySimulator.DelayedMessage> queuedMessages = Lists.newArrayList();
++        private final Queue<ServerConnectionListener.LatencySimulator.DelayedMessage> queuedMessages = new ConcurrentLinkedQueue<>();
+ 
+         public LatencySimulator(int delay, int jitter) {
+             this.delay = delay;
+@@ -208,8 +_,10 @@
+         }
+ 
+         private void onTimeout(Timeout timeout) {
+-            ServerConnectionListener.LatencySimulator.DelayedMessage next = this.queuedMessages.remove(0);
+-            next.ctx.fireChannelRead(next.msg);
++            ServerConnectionListener.LatencySimulator.DelayedMessage next = this.queuedMessages.poll();
++            if (next != null) {
++                next.ctx.fireChannelRead(next.msg);
++            }
+         }
+ 
+         private static class DelayedMessage {

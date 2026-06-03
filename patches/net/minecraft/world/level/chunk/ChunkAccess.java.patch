@@ -1,0 +1,239 @@
+--- a/net/minecraft/world/level/chunk/ChunkAccess.java
++++ b/net/minecraft/world/level/chunk/ChunkAccess.java
+@@ -5,11 +_,11 @@
+ import com.mojang.logging.LogUtils;
+ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+ import it.unimi.dsi.fastutil.longs.LongSet;
++import it.unimi.dsi.fastutil.longs.LongSets;
+ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.shorts.ShortArrayList;
+ import it.unimi.dsi.fastutil.shorts.ShortList;
+ import java.util.Collection;
+-import java.util.Collections;
+ import java.util.EnumSet;
+ import java.util.List;
+ import java.util.Map;
+@@ -149,7 +_,7 @@
+         return sectionIndex == -1 ? this.getMinY() : SectionPos.sectionToBlockCoord(this.getSectionYFromSectionIndex(sectionIndex));
+     }
+ 
+-    public Set<BlockPos> getBlockEntitiesPos() {
++    public synchronized Set<BlockPos> getBlockEntitiesPos() {
+         Set<BlockPos> result = Sets.newHashSet(this.pendingBlockEntities.keySet());
+         result.addAll(this.blockEntities.keySet());
+         return result;
+@@ -163,19 +_,19 @@
+         return this.getSections()[sectionIndex];
+     }
+ 
+-    public Collection<Entry<Heightmap.Types, Heightmap>> getHeightmaps() {
+-        return Collections.unmodifiableSet(this.heightmaps.entrySet());
++    public synchronized Collection<Entry<Heightmap.Types, Heightmap>> getHeightmaps() {
++        return Map.copyOf(this.heightmaps).entrySet();
+     }
+ 
+-    public void setHeightmap(Heightmap.Types key, long[] data) {
++    public synchronized void setHeightmap(Heightmap.Types key, long[] data) {
+         this.getOrCreateHeightmapUnprimed(key).setRawData(this, key, data);
+     }
+ 
+-    public Heightmap getOrCreateHeightmapUnprimed(Heightmap.Types type) {
++    public synchronized Heightmap getOrCreateHeightmapUnprimed(Heightmap.Types type) {
+         return this.heightmaps.computeIfAbsent(type, k -> new Heightmap(this, k));
+     }
+ 
+-    public boolean hasPrimedHeightmap(Heightmap.Types type) {
++    public synchronized boolean hasPrimedHeightmap(Heightmap.Types type) {
+         return this.heightmaps.get(type) != null;
+     }
+ 
+@@ -198,46 +_,48 @@
+     }
+ 
+     @Override
+-    public @Nullable StructureStart getStartForStructure(Structure structure) {
++    public synchronized @Nullable StructureStart getStartForStructure(Structure structure) {
+         return this.structureStarts.get(structure);
+     }
+ 
+     @Override
+-    public void setStartForStructure(Structure structure, StructureStart structureStart) {
++    public synchronized void setStartForStructure(Structure structure, StructureStart structureStart) {
+         this.structureStarts.put(structure, structureStart);
+         this.markUnsaved();
+     }
+ 
+-    public Map<Structure, StructureStart> getAllStarts() {
+-        return Collections.unmodifiableMap(this.structureStarts);
++    public synchronized Map<Structure, StructureStart> getAllStarts() {
++        return Map.copyOf(this.structureStarts);
+     }
+ 
+-    public void setAllStarts(Map<Structure, StructureStart> starts) {
++    public synchronized void setAllStarts(Map<Structure, StructureStart> starts) {
+         this.structureStarts.clear();
+         this.structureStarts.putAll(starts);
+         this.markUnsaved();
+     }
+ 
+     @Override
+-    public LongSet getReferencesForStructure(Structure structure) {
+-        return this.structuresRefences.getOrDefault(structure, EMPTY_REFERENCE_SET);
++    public synchronized LongSet getReferencesForStructure(Structure structure) {
++        return LongSets.unmodifiable(new LongOpenHashSet(this.structuresRefences.getOrDefault(structure, EMPTY_REFERENCE_SET)));
+     }
+ 
+     @Override
+-    public void addReferenceForStructure(Structure structure, long reference) {
++    public synchronized void addReferenceForStructure(Structure structure, long reference) {
+         this.structuresRefences.computeIfAbsent(structure, k -> new LongOpenHashSet()).add(reference);
+         this.markUnsaved();
+     }
+ 
+     @Override
+-    public Map<Structure, LongSet> getAllReferences() {
+-        return Collections.unmodifiableMap(this.structuresRefences);
++    public synchronized Map<Structure, LongSet> getAllReferences() {
++        Map<Structure, LongSet> snapshot = Maps.newHashMapWithExpectedSize(this.structuresRefences.size());
++        this.structuresRefences.forEach((structure, references) -> snapshot.put(structure, LongSets.unmodifiable(new LongOpenHashSet(references))));
++        return Map.copyOf(snapshot);
+     }
+ 
+     @Override
+-    public void setAllReferences(Map<Structure, LongSet> data) {
++    public synchronized void setAllReferences(Map<Structure, LongSet> data) {
+         this.structuresRefences.clear();
+-        this.structuresRefences.putAll(data);
++        data.forEach((structure, references) -> this.structuresRefences.put(structure, new LongOpenHashSet(references)));
+         this.markUnsaved();
+     }
+ 
+@@ -303,14 +_,14 @@
+         getOrCreateOffsetList(this.getPostProcessing(), sectionIndex).addAll(packedOffsets);
+     }
+ 
+-    public void setBlockEntityNbt(CompoundTag entityTag) {
++    public synchronized void setBlockEntityNbt(CompoundTag entityTag) {
+         BlockPos posFromTag = BlockEntity.getPosFromTag(this.chunkPos, entityTag);
+         if (!this.blockEntities.containsKey(posFromTag)) {
+             this.pendingBlockEntities.put(posFromTag, entityTag);
+         }
+     }
+ 
+-    public @Nullable CompoundTag getBlockEntityNbt(BlockPos blockPos) {
++    public synchronized @Nullable CompoundTag getBlockEntityNbt(BlockPos blockPos) {
+         return this.pendingBlockEntities.get(blockPos);
+     }
+ 
+@@ -318,10 +_,14 @@
+ 
+     @Override
+     public final void findBlockLightSources(BiConsumer<BlockPos, BlockState> consumer) {
+-        this.findBlocks(state -> state.getLightEmission() != 0, consumer);
++        this.findBlocks(p_284897_ -> p_284897_.hasDynamicLightEmission() || p_284897_.getLightEmission(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO) != 0, (p_284897_, pos) -> p_284897_.getLightEmission(this, pos) != 0, consumer);
+     }
+ 
+     public void findBlocks(Predicate<BlockState> predicate, BiConsumer<BlockPos, BlockState> consumer) {
++        findBlocks(predicate, (state, pos) -> predicate.test(state), consumer);
++    }
++
++    public void findBlocks(Predicate<BlockState> predicate, java.util.function.BiPredicate<BlockState, BlockPos> fineFilter, BiConsumer<BlockPos, BlockState> consumer) {
+         BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
+ 
+         for (int sectionY = this.getMinSectionY(); sectionY <= this.getMaxSectionY(); sectionY++) {
+@@ -333,8 +_,9 @@
+                     for (int z = 0; z < 16; z++) {
+                         for (int x = 0; x < 16; x++) {
+                             BlockState state = section.getBlockState(x, y, z);
+-                            if (predicate.test(state)) {
+-                                consumer.accept(mutablePos.setWithOffset(origin, x, y, z), state);
++                            mutablePos.setWithOffset(origin, x, y, z);
++                            if (fineFilter.test(state, mutablePos)) {
++                                consumer.accept(mutablePos, state);
+                             }
+                         }
+                     }
+@@ -476,6 +_,83 @@
+     public ChunkSkyLightSources getSkyLightSources() {
+         return this.skyLightSources;
+     }
++
++    // Neo: Hook in AttachmentHolder to chunks for data storage and retrieval
++    private final net.neoforged.neoforge.attachment.AttachmentHolder.AsField attachmentHolder = new net.neoforged.neoforge.attachment.AttachmentHolder.AsField(this);
++
++    @Override
++    public boolean hasAttachments() {
++        return getAttachmentHolder().hasAttachments();
++    }
++
++    @Override
++    public boolean hasData(net.neoforged.neoforge.attachment.AttachmentType<?> type) {
++        return getAttachmentHolder().hasData(type);
++    }
++
++    @Override
++    public <T> T getData(net.neoforged.neoforge.attachment.AttachmentType<T> type) {
++        return getAttachmentHolder().getData(type);
++    }
++
++    @Override
++    @Nullable
++    public <T> T getExistingDataOrNull(net.neoforged.neoforge.attachment.AttachmentType<T> type) {
++        return getAttachmentHolder().getExistingDataOrNull(type);
++    }
++
++    @Override
++    @Nullable
++    public <T> T setData(net.neoforged.neoforge.attachment.AttachmentType<T> type, T data) {
++        markUnsaved();
++        return getAttachmentHolder().setData(type, data);
++    }
++
++    @Override
++    @Nullable
++    public <T> T removeData(net.neoforged.neoforge.attachment.AttachmentType<T> type) {
++        markUnsaved();
++        return getAttachmentHolder().removeData(type);
++    }
++
++    /**
++     * <strong>FOR INTERNAL USE ONLY</strong>
++     * <p>
++     * Only public for use in {@link net.minecraft.world.level.chunk.storage.SerializableChunkData}.
++     */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    @Nullable
++    public final CompoundTag writeAttachmentsToNBT(HolderLookup.Provider provider) {
++        ProblemReporter.Collector reporter = new ProblemReporter.Collector();
++        var tag = net.minecraft.world.level.storage.TagValueOutput.createWithContext(reporter, provider);
++        getAttachmentHolder().serializeAttachments(tag);
++        if (!reporter.isEmpty()) throw new IllegalArgumentException("Attachments failed to serialise: " + reporter.getReport());
++        return tag.isEmpty() ? null : tag.buildResult();
++    }
++
++    /**
++     * <strong>FOR INTERNAL USE ONLY</strong>
++     * <p>
++     * Only public for use in {@link net.minecraft.world.level.chunk.storage.SerializableChunkData}.
++     *
++     */
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public final void readAttachmentsFromNBT(HolderLookup.Provider provider, CompoundTag tag) {
++        ProblemReporter.Collector reporter = new ProblemReporter.Collector();
++        var input = net.minecraft.world.level.storage.TagValueInput.create(reporter, provider, tag);
++        getAttachmentHolder().deserializeInternal(provider, input);
++        if (!reporter.isEmpty()) {
++            throw new IllegalArgumentException("Attachments failed to deserialise: " + reporter.getReport());
++        }
++    }
++
++    @org.jetbrains.annotations.ApiStatus.Internal
++    public net.neoforged.neoforge.attachment.AttachmentHolder.AsField getAttachmentHolder() {
++        return attachmentHolder;
++    }
++
++    // Neo: Allow for exposing the Level a chunk is tied to if available
++    public net.minecraft.world.level.@Nullable Level getLevel() { return null; }
+ 
+     public static ProblemReporter.PathElement problemPath(ChunkPos pos) {
+         return new ChunkAccess.ChunkPathElement(pos);

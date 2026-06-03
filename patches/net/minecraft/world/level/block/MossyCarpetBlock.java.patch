@@ -1,0 +1,30 @@
+--- a/net/minecraft/world/level/block/MossyCarpetBlock.java
++++ b/net/minecraft/world/level/block/MossyCarpetBlock.java
+@@ -29,6 +_,7 @@
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MossyCarpetBlock extends Block implements BonemealableBlock {
+@@ -178,7 +_,7 @@
+     @Override
+     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity by, ItemStack itemStack) {
+         if (!level.isClientSide()) {
+-            RandomSource random = level.getRandom();
++            RandomSource random = mossyCarpetRandom(level);
+             BlockState topper = createTopperWithSideChance(level, pos, random::nextBoolean);
+             if (!topper.isAir()) {
+                 level.setBlock(pos.above(), topper, 3);
+@@ -205,6 +_,10 @@
+         } else {
+             return Blocks.AIR.defaultBlockState();
+         }
++    }
++
++    private static RandomSource mossyCarpetRandom(Level level) {
++        return level instanceof ServerLevel ? RegionizedTickContext.currentRandom().orElse(level.getRandom()) : level.getRandom();
+     }
+ 
+     @Override

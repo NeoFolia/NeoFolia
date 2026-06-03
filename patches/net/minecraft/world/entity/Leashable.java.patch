@@ -1,0 +1,145 @@
+--- a/net/minecraft/world/entity/Leashable.java
++++ b/net/minecraft/world/entity/Leashable.java
+@@ -23,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public interface Leashable {
+@@ -91,7 +_,11 @@
+             Optional<UUID> leashUuid = leashData.delayedLeashInfo.left();
+             Optional<BlockPos> pos = leashData.delayedLeashInfo.right();
+             if (leashUuid.isPresent()) {
+-                Entity leasher = serverLevel.getEntity(leashUuid.get());
++                Entity leasher = serverLevel.getEntities().get(leashUuid.get());
++                if (leasher != null && RegionizedWorldGuard.restrictEntityToCurrentRegion(serverLevel, leasher) == null) {
++                    return;
++                }
++
+                 if (leasher != null) {
+                     setLeashedTo(entity, leasher, true);
+                     return;
+@@ -122,6 +_,11 @@
+     private static <E extends Entity & Leashable> void dropLeash(E entity, boolean sendPacket, boolean dropLead) {
+         Leashable.LeashData leashData = entity.getLeashData();
+         if (leashData != null && leashData.leashHolder != null) {
++            Entity existingHolder = leashData.leashHolder;
++            if (scheduleLeashMutationIfRegionized(entity, existingHolder, "Leash drop", () -> dropLeash(entity, sendPacket, dropLead))) {
++                return;
++            }
++
+             entity.setLeashData(null);
+             entity.onLeashRemoved();
+             if (entity.level() instanceof ServerLevel level) {
+@@ -133,7 +_,10 @@
+                     level.getChunkSource().sendToTrackingPlayers(entity, new ClientboundSetEntityLinkPacket(entity, null));
+                 }
+ 
+-                leashData.leashHolder.notifyLeasheeRemoved(entity);
++                Entity leashHolder = getLeashHolder(entity);
++                if (leashHolder != null) {
++                    leashHolder.notifyLeasheeRemoved(entity);
++                }
+             }
+         }
+     }
+@@ -144,8 +_,9 @@
+             restoreLeashFromSave(entity, leashData);
+         }
+ 
+-        if (leashData != null && leashData.leashHolder != null) {
+-            if (!entity.canInteractWithLevel() || !leashData.leashHolder.canInteractWithLevel()) {
++        Entity leashHolder = getLeashHolder(entity);
++        if (leashHolder != null) {
++            if (!entity.canInteractWithLevel() || !leashHolder.canInteractWithLevel()) {
+                 if (level.getGameRules().get(GameRules.ENTITY_DROPS)) {
+                     entity.dropLeash();
+                 } else {
+@@ -153,7 +_,6 @@
+                 }
+             }
+ 
+-            Entity leashHolder = entity.getLeashHolder();
+             if (leashHolder != null && leashHolder.level() == entity.level()) {
+                 double distanceTo = entity.leashDistanceTo(leashHolder);
+                 entity.whenLeashedTo(leashHolder);
+@@ -188,7 +_,10 @@
+ 
+     static <E extends Entity & Leashable> float angularFriction(E entity) {
+         if (entity.onGround()) {
+-            return entity.level().getBlockState(entity.getBlockPosBelowThatAffectsMyMovement()).getBlock().getFriction() * 0.91F;
++            var groundPos = entity.getBlockPosBelowThatAffectsMyMovement();
++            return RegionizedWorldGuard.shouldLoadChunk(entity.level(), groundPos.getX() >> 4, groundPos.getZ() >> 4)
++                ? entity.level().getBlockState(groundPos).getFriction(entity.level(), groundPos, entity) * 0.91F
++                : 0.91F;
+         } else {
+             return entity.isInLiquid() ? 0.8F : 0.91F;
+         }
+@@ -306,6 +_,14 @@
+     }
+ 
+     private static <E extends Entity & Leashable> void setLeashedTo(E entity, Entity holder, boolean synch) {
++        if (entity.level() != holder.level()) {
++            return;
++        }
++
++        if (scheduleLeashMutationIfRegionized(entity, holder, "Leash attach", () -> setLeashedTo(entity, holder, synch))) {
++            return;
++        }
++
+         Leashable.LeashData leashData = entity.getLeashData();
+         if (leashData == null) {
+             leashData = new Leashable.LeashData(holder);
+@@ -314,7 +_,10 @@
+             Entity oldHolder = leashData.leashHolder;
+             leashData.setLeashHolder(holder);
+             if (oldHolder != null && oldHolder != holder) {
+-                oldHolder.notifyLeasheeRemoved(entity);
++                oldHolder = RegionizedWorldGuard.restrictEntityToCurrentRegion(entity.level(), oldHolder);
++                if (oldHolder != null) {
++                    oldHolder.notifyLeasheeRemoved(entity);
++                }
+             }
+         }
+ 
+@@ -327,6 +_,14 @@
+         }
+     }
+ 
++    private static <E extends Entity & Leashable> boolean scheduleLeashMutationIfRegionized(E entity, Entity holder, String reason, Runnable task) {
++        if (RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(entity.level(), entity, reason, task)) {
++            return true;
++        }
++
++        return RegionizedWorldGuard.scheduleGlobalIfRegionizedOutsideRegion(entity.level(), holder.blockPosition(), reason, task);
++    }
++
+     default @Nullable Entity getLeashHolder() {
+         return getLeashHolder((Entity & Leashable)this);
+     }
+@@ -343,7 +_,8 @@
+                 }
+             }
+ 
+-            return leashData.leashHolder;
++            Entity leashHolder = leashData.leashHolder;
++            return leashHolder == null ? null : RegionizedWorldGuard.restrictEntityToCurrentRegion(entity.level(), leashHolder);
+         }
+     }
+ 
+@@ -358,7 +_,12 @@
+     static List<Leashable> leashableInArea(Level level, Vec3 pos, Predicate<Leashable> test) {
+         double size = 32.0;
+         AABB scanArea = AABB.ofSize(pos, 32.0, 32.0, 32.0);
+-        return level.getEntitiesOfClass(Entity.class, scanArea, e -> e instanceof Leashable leashable && test.test(leashable))
++        AABB regionBox = RegionizedWorldGuard.restrictToCurrentRegion(level, scanArea);
++        if (regionBox == null) {
++            return List.of();
++        }
++
++        return level.getEntitiesOfClass(Entity.class, regionBox, e -> e instanceof Leashable leashable && test.test(leashable))
+             .stream()
+             .map(Leashable.class::cast)
+             .toList();

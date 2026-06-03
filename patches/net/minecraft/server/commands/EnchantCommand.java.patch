@@ -1,0 +1,114 @@
+--- a/net/minecraft/server/commands/EnchantCommand.java
++++ b/net/minecraft/server/commands/EnchantCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
+@@ -44,48 +_,66 @@
+                     Commands.argument("targets", EntityArgument.entities())
+                         .then(
+                             Commands.argument("enchantment", ResourceArgument.resource(context, Registries.ENCHANTMENT))
+-                                .executes(
+-                                    c -> enchant(c.getSource(), EntityArgument.getEntities(c, "targets"), ResourceArgument.getEnchantment(c, "enchantment"), 1)
+-                                )
++                                .executes(c -> enchant(c, false))
+                                 .then(
+                                     Commands.argument("level", IntegerArgumentType.integer(0))
+-                                        .executes(
+-                                            c -> enchant(
+-                                                c.getSource(),
+-                                                EntityArgument.getEntities(c, "targets"),
+-                                                ResourceArgument.getEnchantment(c, "enchantment"),
+-                                                IntegerArgumentType.getInteger(c, "level")
+-                                            )
+-                                        )
++                                        .executes(c -> enchant(c, true))
+                                 )
+                         )
+                 )
+         );
+     }
+ 
++    private static int enchant(CommandContext<CommandSourceStack> context, boolean hasLevel) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> enchant(context, hasLevel))) {
++            return 0;
++        }
++
++        return enchant(
++            source,
++            EntityArgument.getEntities(context, "targets"),
++            ResourceArgument.getEnchantment(context, "enchantment"),
++            hasLevel ? IntegerArgumentType.getInteger(context, "level") : 1
++        );
++    }
++
+     private static int enchant(CommandSourceStack source, Collection<? extends Entity> targets, Holder<Enchantment> enchantmentHolder, int level) throws CommandSyntaxException {
+         Enchantment enchantment = enchantmentHolder.value();
+         if (level > enchantment.getMaxLevel()) {
+             throw ERROR_LEVEL_TOO_HIGH.create(level, enchantment.getMaxLevel());
+         } else {
+             int success = 0;
++            Component singleTargetName = null;
+ 
+             for (Entity entity : targets) {
+-                if (entity instanceof LivingEntity target) {
++                EnchantResult result = RegionizedCommandHelper.callOnEntityRegionThrowing(source, entity, () -> {
++                    if (!(entity instanceof LivingEntity target)) {
++                        if (targets.size() == 1) {
++                            throw ERROR_NOT_LIVING_ENTITY.create(entity.getName().getString());
++                        }
++                        return new EnchantResult(false, entity.getDisplayName());
++                    }
++
+                     ItemStack item = target.getMainHandItem();
+                     if (!item.isEmpty()) {
+-                        if (enchantment.canEnchant(item)
++                        if (item.supportsEnchantment(enchantmentHolder) // Neo: Respect IItemExtension#supportsEnchantment
+                             && EnchantmentHelper.isEnchantmentCompatible(EnchantmentHelper.getEnchantmentsForCrafting(item).keySet(), enchantmentHolder)) {
+                             item.enchant(enchantmentHolder, level);
+-                            success++;
++                            return new EnchantResult(true, entity.getDisplayName());
+                         } else if (targets.size() == 1) {
+                             throw ERROR_INCOMPATIBLE.create(item.getHoverName().getString());
+                         }
+                     } else if (targets.size() == 1) {
+                         throw ERROR_NO_ITEM.create(target.getName().getString());
+                     }
+-                } else if (targets.size() == 1) {
+-                    throw ERROR_NOT_LIVING_ENTITY.create(entity.getName().getString());
++                    return new EnchantResult(false, entity.getDisplayName());
++                });
++                if (result.success()) {
++                    success++;
++                }
++                if (targets.size() == 1) {
++                    singleTargetName = result.targetName();
+                 }
+             }
+ 
+@@ -93,9 +_,10 @@
+                 throw ERROR_NOTHING_HAPPENED.create();
+             } else {
+                 if (targets.size() == 1) {
++                    Component targetName = singleTargetName;
+                     source.sendSuccess(
+                         () -> Component.translatable(
+-                            "commands.enchant.success.single", Enchantment.getFullname(enchantmentHolder, level), targets.iterator().next().getDisplayName()
++                            "commands.enchant.success.single", Enchantment.getFullname(enchantmentHolder, level), targetName
+                         ),
+                         true
+                     );
+@@ -109,5 +_,8 @@
+                 return success;
+             }
+         }
++    }
++
++    private record EnchantResult(boolean success, Component targetName) {
+     }
+ }

@@ -1,0 +1,138 @@
+--- a/net/minecraft/world/entity/animal/dolphin/Dolphin.java
++++ b/net/minecraft/world/entity/animal/dolphin/Dolphin.java
+@@ -63,7 +_,9 @@
+ import net.minecraft.world.level.pathfinder.PathComputationType;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Dolphin extends AgeableWaterCreature {
+@@ -356,11 +_,19 @@
+         this.moveRelative(this.getSpeed(), input);
+         this.move(MoverType.SELF, this.getDeltaMovement());
+         this.setDeltaMovement(this.getDeltaMovement().scale(0.9));
+-        if (this.getTarget() == null) {
++        if (this.regionSafeTarget(this.getTarget()) == null) {
+             this.setDeltaMovement(this.getDeltaMovement().add(0.0, -0.005, 0.0));
+         }
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
+     @Override
+     public boolean canBeLeashed() {
+         return true;
+@@ -435,7 +_,9 @@
+ 
+                     if (nextPos != null) {
+                         BlockPos next = BlockPos.containing(nextPos);
+-                        if (!level.getFluidState(next).is(FluidTags.WATER) || !level.getBlockState(next).isPathfindable(PathComputationType.WATER)) {
++                        if (!Dolphin.canReadBlock(level, next)
++                            || !level.getFluidState(next).is(FluidTags.WATER)
++                            || !level.getBlockState(next).isPathfindable(PathComputationType.WATER)) {
+                             nextPos = DefaultRandomPos.getPosTowards(this.dolphin, 8, 5, treasurePos, (float) (Math.PI / 2));
+                         }
+                     }
+@@ -447,7 +_,7 @@
+ 
+                     this.dolphin.getLookControl().setLookAt(nextPos.x, nextPos.y, nextPos.z, this.dolphin.getMaxHeadYRot() + 20, this.dolphin.getMaxHeadXRot());
+                     this.dolphin.getNavigation().moveTo(nextPos.x, nextPos.y, nextPos.z, 1.3);
+-                    if (level.getRandom().nextInt(this.adjustedTickDelay(80)) == 0) {
++                    if (this.dolphin.getRandom().nextInt(this.adjustedTickDelay(80)) == 0) {
+                         level.broadcastEntityEvent(this.dolphin, (byte)38);
+                     }
+                 }
+@@ -468,17 +_,21 @@
+ 
+         @Override
+         public boolean canUse() {
+-            this.player = getServerLevel(this.dolphin).getNearestPlayer(Dolphin.SWIM_WITH_PLAYER_TARGETING, this.dolphin);
+-            return this.player == null ? false : this.player.isSwimming() && this.dolphin.getTarget() != this.player;
++            this.player = (Player)this.dolphin.regionSafeTarget(getServerLevel(this.dolphin).getNearestPlayer(Dolphin.SWIM_WITH_PLAYER_TARGETING, this.dolphin));
++            return this.player == null ? false : this.player.isSwimming() && this.dolphin.regionSafeTarget(this.dolphin.getTarget()) != this.player;
+         }
+ 
+         @Override
+         public boolean canContinueToUse() {
++            this.player = (Player)this.dolphin.regionSafeTarget(this.player);
+             return this.player != null && this.player.isSwimming() && this.dolphin.distanceToSqr(this.player) < 256.0;
+         }
+ 
+         @Override
+         public void start() {
++            if (this.player == null) {
++                return;
++            }
+             this.player.addEffect(new MobEffectInstance(MobEffects.DOLPHINS_GRACE, 100), this.dolphin);
+         }
+ 
+@@ -490,6 +_,10 @@
+ 
+         @Override
+         public void tick() {
++            this.player = (Player)this.dolphin.regionSafeTarget(this.player);
++            if (this.player == null) {
++                return;
++            }
+             this.dolphin.getLookControl().setLookAt(this.player, this.dolphin.getMaxHeadYRot() + 20, this.dolphin.getMaxHeadXRot());
+             if (this.dolphin.distanceToSqr(this.player) < 6.25) {
+                 this.dolphin.getNavigation().stop();
+@@ -497,7 +_,7 @@
+                 this.dolphin.getNavigation().moveTo(this.player, this.speedModifier);
+             }
+ 
+-            if (this.player.isSwimming() && this.player.level().getRandom().nextInt(6) == 0) {
++            if (this.player.isSwimming() && this.dolphin.getRandom().nextInt(6) == 0) {
+                 this.player.addEffect(new MobEffectInstance(MobEffects.DOLPHINS_GRACE, 100), this.dolphin);
+             }
+         }
+@@ -517,16 +_,14 @@
+             if (this.cooldown > Dolphin.this.tickCount) {
+                 return false;
+             } else {
+-                List<ItemEntity> items = Dolphin.this.level()
+-                    .getEntitiesOfClass(ItemEntity.class, Dolphin.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Dolphin.ALLOWED_ITEMS);
++                List<ItemEntity> items = this.nearbyAllowedItems();
+                 return !items.isEmpty() || !Dolphin.this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty();
+             }
+         }
+ 
+         @Override
+         public void start() {
+-            List<ItemEntity> items = Dolphin.this.level()
+-                .getEntitiesOfClass(ItemEntity.class, Dolphin.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Dolphin.ALLOWED_ITEMS);
++            List<ItemEntity> items = this.nearbyAllowedItems();
+             if (!items.isEmpty()) {
+                 Dolphin.this.getNavigation().moveTo(items.get(0), 1.2F);
+                 Dolphin.this.playSound(SoundEvents.DOLPHIN_PLAY, 1.0F, 1.0F);
+@@ -547,8 +_,7 @@
+ 
+         @Override
+         public void tick() {
+-            List<ItemEntity> items = Dolphin.this.level()
+-                .getEntitiesOfClass(ItemEntity.class, Dolphin.this.getBoundingBox().inflate(8.0, 8.0, 8.0), Dolphin.ALLOWED_ITEMS);
++            List<ItemEntity> items = this.nearbyAllowedItems();
+             ItemStack itemStack = Dolphin.this.getItemBySlot(EquipmentSlot.MAINHAND);
+             if (!itemStack.isEmpty()) {
+                 this.drop(itemStack);
+@@ -576,6 +_,11 @@
+                 );
+                 Dolphin.this.level().addFreshEntity(thrownItem);
+             }
++        }
++
++        private List<ItemEntity> nearbyAllowedItems() {
++            AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(Dolphin.this.level(), Dolphin.this.getBoundingBox().inflate(8.0, 8.0, 8.0));
++            return searchBox == null ? List.of() : Dolphin.this.level().getEntitiesOfClass(ItemEntity.class, searchBox, Dolphin.ALLOWED_ITEMS);
+         }
+     }
+ }

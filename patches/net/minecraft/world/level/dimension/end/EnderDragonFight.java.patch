@@ -1,0 +1,381 @@
+--- a/net/minecraft/world/level/dimension/end/EnderDragonFight.java
++++ b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+@@ -62,6 +_,8 @@
+ import net.minecraft.world.level.saveddata.SavedData;
+ import net.minecraft.world.level.saveddata.SavedDataType;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -104,15 +_,15 @@
+     private List<EntityReference<EndCrystal>> respawnCrystals;
+     public static final Codec<EnderDragonFight> CODEC = RecordCodecBuilder.create(
+         i -> i.group(
+-                Codec.BOOL.fieldOf("needs_state_scanning").orElse(true).forGetter(fight -> fight.needsStateScanning),
+-                Codec.BOOL.fieldOf("dragon_killed").orElse(false).forGetter(fight -> fight.dragonKilled),
+-                Codec.BOOL.fieldOf("previously_killed").orElse(false).forGetter(fight -> fight.hasPreviouslyKilledDragon),
+-                DragonRespawnStage.CODEC.optionalFieldOf("respawn_stage").forGetter(fight -> Optional.ofNullable(fight.respawnStage)),
+-                Codec.INT.fieldOf("respawn_time").orElse(0).forGetter(fight -> fight.respawnTime),
+-                UUIDUtil.CODEC.lenientOptionalFieldOf("dragon_uuid").forGetter(fight -> Optional.ofNullable(fight.dragonUUID)),
+-                BlockPos.CODEC.lenientOptionalFieldOf("exit_portal_location").forGetter(fight -> Optional.ofNullable(fight.exitPortalLocation)),
+-                Codec.list(Codec.INT).lenientOptionalFieldOf("gateways", new ArrayList<>()).forGetter(fight -> fight.gateways),
+-                Codec.list(EntityReference.<EndCrystal>codec()).optionalFieldOf("respawn_crystals", List.of()).forGetter(fight -> fight.respawnCrystals)
++                Codec.BOOL.fieldOf("needs_state_scanning").orElse(true).forGetter(EnderDragonFight::needsStateScanning),
++                Codec.BOOL.fieldOf("dragon_killed").orElse(false).forGetter(EnderDragonFight::dragonKilled),
++                Codec.BOOL.fieldOf("previously_killed").orElse(false).forGetter(EnderDragonFight::hasPreviouslyKilledDragon),
++                DragonRespawnStage.CODEC.optionalFieldOf("respawn_stage").forGetter(EnderDragonFight::respawnStage),
++                Codec.INT.fieldOf("respawn_time").orElse(0).forGetter(EnderDragonFight::respawnTime),
++                UUIDUtil.CODEC.lenientOptionalFieldOf("dragon_uuid").forGetter(EnderDragonFight::dragonUUIDOptional),
++                BlockPos.CODEC.lenientOptionalFieldOf("exit_portal_location").forGetter(EnderDragonFight::exitPortalLocation),
++                Codec.list(Codec.INT).lenientOptionalFieldOf("gateways", new ArrayList<>()).forGetter(EnderDragonFight::gateways),
++                Codec.list(EntityReference.<EndCrystal>codec()).optionalFieldOf("respawn_crystals", List.of()).forGetter(EnderDragonFight::respawnCrystals)
+             )
+             .apply(i, EnderDragonFight::new)
+     );
+@@ -146,11 +_,43 @@
+         this.respawnCrystals = respawnCrystals;
+     }
+ 
+-    public void init(ServerLevel level, long seed, BlockPos origin) {
++    private synchronized boolean needsStateScanning() {
++        return this.needsStateScanning;
++    }
++
++    private synchronized boolean dragonKilled() {
++        return this.dragonKilled;
++    }
++
++    private synchronized Optional<DragonRespawnStage> respawnStage() {
++        return Optional.ofNullable(this.respawnStage);
++    }
++
++    private synchronized int respawnTime() {
++        return this.respawnTime;
++    }
++
++    private synchronized Optional<UUID> dragonUUIDOptional() {
++        return Optional.ofNullable(this.dragonUUID);
++    }
++
++    private synchronized Optional<BlockPos> exitPortalLocation() {
++        return Optional.ofNullable(this.exitPortalLocation);
++    }
++
++    private synchronized List<Integer> gateways() {
++        return List.copyOf(this.gateways);
++    }
++
++    private synchronized List<EntityReference<EndCrystal>> respawnCrystals() {
++        return List.copyOf(this.respawnCrystals);
++    }
++
++    public synchronized void init(ServerLevel level, long seed, BlockPos origin) {
+         this.level = level;
+         this.origin = origin;
+         this.dragonEvent = new ServerBossEvent(
+-            Mth.createInsecureUUID(level.getRandom()), EVENT_DISPLAY_NAME, BossEvent.BossBarColor.PINK, BossEvent.BossBarOverlay.PROGRESS
++            Mth.createInsecureUUID(dragonFightRandom(level)), EVENT_DISPLAY_NAME, BossEvent.BossBarColor.PINK, BossEvent.BossBarOverlay.PROGRESS
+         );
+         this.dragonEvent.setPlayBossMusic(true).setCreateWorldFog(true);
+         this.validPlayer = EntitySelector.ENTITY_STILL_ALIVE.and(EntitySelector.withinDistance(origin.getX(), 128 + origin.getY(), origin.getZ(), 192.0));
+@@ -164,11 +_,11 @@
+ 
+     @Deprecated
+     @VisibleForTesting
+-    public void skipArenaLoadedCheck() {
++    public synchronized void skipArenaLoadedCheck() {
+         this.skipArenaLoadedCheck = true;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         this.dragonEvent.setVisible(!this.dragonKilled);
+         if (++this.ticksSinceLastPlayerScan >= 20) {
+             this.updatePlayers();
+@@ -218,7 +_,7 @@
+         }
+     }
+ 
+-    private void scanState() {
++    private synchronized void scanState() {
+         LOGGER.info("Scanning for legacy world dragon fight...");
+         boolean activePortalExists = this.hasActiveExitPortal();
+         if (activePortalExists) {
+@@ -254,7 +_,7 @@
+         this.setDirty();
+     }
+ 
+-    private void findOrCreateDragon() {
++    private synchronized void findOrCreateDragon() {
+         List<? extends EnderDragon> entities = this.level.getDragons();
+         if (entities.isEmpty()) {
+             LOGGER.debug("Haven't seen the dragon, respawning it");
+@@ -266,7 +_,7 @@
+         }
+     }
+ 
+-    protected void setRespawnStage(DragonRespawnStage stage) {
++    protected synchronized void setRespawnStage(DragonRespawnStage stage) {
+         if (this.respawnStage == null) {
+             throw new IllegalStateException("Dragon respawn isn't in progress, can't skip ahead in the animation.");
+         } else {
+@@ -277,7 +_,7 @@
+                 EnderDragon dragon = this.createNewDragon();
+                 if (dragon != null) {
+                     for (ServerPlayer player : this.dragonEvent.getPlayers()) {
+-                        CriteriaTriggers.SUMMONED_ENTITY.trigger(player, dragon);
++                        triggerSummonedEntity(player, dragon);
+                     }
+                 }
+             } else {
+@@ -288,10 +_,20 @@
+         }
+     }
+ 
+-    private boolean hasActiveExitPortal() {
++    private static void triggerSummonedEntity(ServerPlayer player, EnderDragon dragon) {
++        Runnable trigger = () -> RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.SUMMONED_ENTITY.trigger(player, dragon));
++        if (!RegionizedWorldGuard.scheduleGlobalIfRegionized(dragon.level(), "Summoned dragon advancement", trigger)) {
++            trigger.run();
++        }
++    }
++
++    private synchronized boolean hasActiveExitPortal() {
+         for (int x = -8; x <= 8; x++) {
+             for (int z = -8; z <= 8; z++) {
+-                LevelChunk chunk = this.level.getChunk(x, z);
++                LevelChunk chunk = this.getChunkIfRegionSafe(x, z);
++                if (chunk == null) {
++                    continue;
++                }
+ 
+                 for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+                     if (blockEntity instanceof TheEndPortalBlockEntity) {
+@@ -304,12 +_,15 @@
+         return false;
+     }
+ 
+-    private BlockPattern.@Nullable BlockPatternMatch findExitPortal() {
++    private synchronized BlockPattern.@Nullable BlockPatternMatch findExitPortal() {
+         ChunkPos chunkOrigin = ChunkPos.containing(this.origin);
+ 
+         for (int x = -8 + chunkOrigin.x(); x <= 8 + chunkOrigin.x(); x++) {
+             for (int z = -8 + chunkOrigin.z(); z <= 8 + chunkOrigin.z(); z++) {
+-                LevelChunk chunk = this.level.getChunk(x, z);
++                LevelChunk chunk = this.getChunkIfRegionSafe(x, z);
++                if (chunk == null) {
++                    continue;
++                }
+ 
+                 for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+                     if (blockEntity instanceof TheEndPortalBlockEntity) {
+@@ -346,7 +_,7 @@
+         return null;
+     }
+ 
+-    private boolean isArenaLoaded() {
++    private synchronized boolean isArenaLoaded() {
+         if (this.skipArenaLoadedCheck) {
+             return true;
+         } else {
+@@ -370,10 +_,10 @@
+         }
+     }
+ 
+-    private void updatePlayers() {
++    private synchronized void updatePlayers() {
+         Set<ServerPlayer> newPlayers = Sets.newHashSet();
+ 
+-        for (ServerPlayer player : this.level.getPlayers(this.validPlayer)) {
++        for (ServerPlayer player : this.level.getPlayers(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, player) != null && this.validPlayer.test(player))) {
+             this.dragonEvent.addPlayer(player);
+             newPlayers.add(player);
+         }
+@@ -382,11 +_,15 @@
+         toRemove.removeAll(newPlayers);
+ 
+         for (ServerPlayer player : toRemove) {
++            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, player) == null) {
++                continue;
++            }
++
+             this.dragonEvent.removePlayer(player);
+         }
+     }
+ 
+-    private void updateCrystalCount() {
++    private synchronized void updateCrystalCount() {
+         this.ticksSinceCrystalsScanned = 0;
+         this.aliveCrystals = 0;
+ 
+@@ -397,7 +_,7 @@
+         LOGGER.debug("Found {} end crystals still alive", this.aliveCrystals);
+     }
+ 
+-    public void setDragonKilled(EnderDragon dragon) {
++    public synchronized void setDragonKilled(EnderDragon dragon) {
+         if (dragon.getUUID().equals(this.dragonUUID)) {
+             this.dragonEvent.setProgress(0.0F);
+             this.dragonEvent.setVisible(false);
+@@ -419,12 +_,12 @@
+ 
+     @Deprecated
+     @VisibleForTesting
+-    public void removeAllGateways() {
++    public synchronized void removeAllGateways() {
+         this.gateways.clear();
+         this.setDirty();
+     }
+ 
+-    private void spawnNewGateway() {
++    private synchronized void spawnNewGateway() {
+         if (!this.gateways.isEmpty()) {
+             int gateway = this.gateways.remove(this.gateways.size() - 1);
+             int x = Mth.floor(96.0 * Math.cos(2.0 * (-Math.PI + (Math.PI / 20) * gateway)));
+@@ -434,7 +_,7 @@
+         }
+     }
+ 
+-    private void spawnNewGateway(BlockPos pos) {
++    private synchronized void spawnNewGateway(BlockPos pos) {
+         this.level.levelEvent(3000, pos, 0);
+         this.level
+             .registryAccess()
+@@ -443,7 +_,7 @@
+             .ifPresent(endGateway -> endGateway.value().place(this.level, this.level.getChunkSource().getGenerator(), RandomSource.create(), pos));
+     }
+ 
+-    private void spawnExitPortal(boolean activated) {
++    private synchronized void spawnExitPortal(boolean activated) {
+         EndPodiumFeature feature = new EndPodiumFeature(activated);
+         if (this.exitPortalLocation == null) {
+             this.exitPortalLocation = this.level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, EndPodiumFeature.getLocation(this.origin)).below();
+@@ -462,14 +_,20 @@
+         }
+     }
+ 
+-    private @Nullable EnderDragon createNewDragon() {
+-        this.level.getChunkAt(new BlockPos(this.origin.getX(), 128 + this.origin.getY(), this.origin.getZ()));
++    private synchronized @Nullable EnderDragon createNewDragon() {
++        int chunkX = this.origin.getX() >> 4;
++        int chunkZ = this.origin.getZ() >> 4;
++        if (!RegionizedWorldGuard.shouldLoadChunk(this.level, chunkX, chunkZ)) {
++            return null;
++        }
++
++        this.level.getChunk(chunkX, chunkZ);
+         EnderDragon dragon = EntityType.ENDER_DRAGON.create(this.level, EntitySpawnReason.EVENT);
+         if (dragon != null) {
+             dragon.setDragonFight(this);
+             dragon.setFightOrigin(this.origin);
+             dragon.getPhaseManager().setPhase(EnderDragonPhase.HOLDING_PATTERN);
+-            dragon.snapTo(this.origin.getX(), 128 + this.origin.getY(), this.origin.getZ(), this.level.getRandom().nextFloat() * 360.0F, 0.0F);
++            dragon.snapTo(this.origin.getX(), 128 + this.origin.getY(), this.origin.getZ(), dragonFightRandom(this.level).nextFloat() * 360.0F, 0.0F);
+             this.level.addFreshEntity(dragon);
+             this.dragonUUID = dragon.getUUID();
+             this.setDirty();
+@@ -478,7 +_,19 @@
+         return dragon;
+     }
+ 
+-    public void updateDragon(EnderDragon dragon) {
++    private synchronized @Nullable LevelChunk getChunkIfRegionSafe(int chunkX, int chunkZ) {
++        if (!RegionizedWorldGuard.shouldLoadChunk(this.level, chunkX, chunkZ)) {
++            return this.level.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false) instanceof LevelChunk chunk ? chunk : null;
++        }
++
++        return this.level.getChunk(chunkX, chunkZ);
++    }
++
++    private static RandomSource dragonFightRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
++    }
++
++    public synchronized void updateDragon(EnderDragon dragon) {
+         if (dragon.getUUID().equals(this.dragonUUID)) {
+             this.dragonEvent.setProgress(dragon.getHealth() / dragon.getMaxHealth());
+             this.ticksSinceDragonSeen = 0;
+@@ -488,22 +_,28 @@
+         }
+     }
+ 
+-    public int aliveCrystals() {
++    public synchronized int aliveCrystals() {
+         return this.aliveCrystals;
+     }
+ 
+-    public void onCrystalDestroyed(EndCrystal crystal, DamageSource source) {
++    public synchronized void onCrystalDestroyed(EndCrystal crystal, DamageSource source) {
+         if (this.respawnStage != null && this.respawnCrystals.contains(crystal)) {
+             this.abortRespawnSequence();
+         } else {
+             this.updateCrystalCount();
+-            if (this.level.getEntity(this.dragonUUID) instanceof EnderDragon actuallyDragon) {
++            if (this.level.getEntities().get(this.dragonUUID) instanceof EnderDragon actuallyDragon) {
++                if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, actuallyDragon) == null) {
++                    if (RegionizedWorldGuard.scheduleGlobalIfRegionized(this.level, "End crystal destroyed", () -> this.onCrystalDestroyed(crystal, source))) {
++                        return;
++                    }
++                }
++
+                 actuallyDragon.onCrystalDestroyed(this.level, crystal, crystal.blockPosition(), source);
+             }
+         }
+     }
+ 
+-    private void abortRespawnSequence() {
++    private synchronized void abortRespawnSequence() {
+         LOGGER.debug("Aborting respawn sequence");
+         this.respawnStage = null;
+         this.respawnTime = 0;
+@@ -512,11 +_,11 @@
+         this.setDirty();
+     }
+ 
+-    public boolean hasPreviouslyKilledDragon() {
++    public synchronized boolean hasPreviouslyKilledDragon() {
+         return this.hasPreviouslyKilledDragon;
+     }
+ 
+-    public void tryRespawn() {
++    public synchronized void tryRespawn() {
+         if (this.dragonKilled && this.respawnStage == null) {
+             BlockPos location = this.exitPortalLocation;
+             if (location == null) {
+@@ -549,7 +_,7 @@
+         }
+     }
+ 
+-    private void respawnDragon(List<EndCrystal> crystals) {
++    private synchronized void respawnDragon(List<EndCrystal> crystals) {
+         if (this.dragonKilled && this.respawnStage == null) {
+             for (BlockPattern.BlockPatternMatch portal = this.findExitPortal(); portal != null; portal = this.findExitPortal()) {
+                 for (int x = 0; x < this.exitPortalPattern.getWidth(); x++) {
+@@ -572,7 +_,7 @@
+         }
+     }
+ 
+-    public void resetSpikeCrystals() {
++    public synchronized void resetSpikeCrystals() {
+         for (EndSpikeFeature.EndSpike spike : EndSpikeFeature.getSpikesForLevel(this.level)) {
+             for (EndCrystal crystal : this.level.getEntitiesOfClass(EndCrystal.class, spike.getTopBoundingBox())) {
+                 crystal.setInvulnerable(false);
+@@ -581,7 +_,15 @@
+         }
+     }
+ 
+-    public @Nullable UUID dragonUUID() {
++    public synchronized void addPlayer(ServerPlayer player) {
++        this.dragonEvent.addPlayer(player);
++    }
++
++    public synchronized void removePlayer(ServerPlayer player) {
++        this.dragonEvent.removePlayer(player);
++    }
++
++    public synchronized @Nullable UUID dragonUUID() {
+         return this.dragonUUID;
+     }
+ }

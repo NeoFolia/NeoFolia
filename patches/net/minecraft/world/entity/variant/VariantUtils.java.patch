@@ -1,0 +1,18 @@
+--- a/net/minecraft/world/entity/variant/VariantUtils.java
++++ b/net/minecraft/world/entity/variant/VariantUtils.java
+@@ -10,6 +_,7 @@
+ import net.minecraft.world.level.ServerLevelAccessor;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ 
+ public class VariantUtils {
+     public static final String TAG_VARIANT = "variant";
+@@ -36,6 +_,6 @@
+     ) {
+         ServerLevelAccessor level = context.level();
+         Stream<Holder.Reference<T>> entries = level.registryAccess().lookupOrThrow(variantRegistry).listElements();
+-        return PriorityProvider.pick(entries, Holder::value, level.getRandom(), context);
++        return PriorityProvider.pick(entries, Holder::value, RegionizedTickContext.currentRandom().orElse(level.getRandom()), context);
+     }
+ }

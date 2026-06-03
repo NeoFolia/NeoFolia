@@ -1,0 +1,190 @@
+--- a/net/minecraft/world/scores/PlayerTeam.java
++++ b/net/minecraft/world/scores/PlayerTeam.java
+@@ -41,7 +_,7 @@
+         this.displayNameStyle = Style.EMPTY.withInsertion(name).withHoverEvent(new HoverEvent.ShowText(Component.literal(name)));
+     }
+ 
+-    public PlayerTeam.Packed pack() {
++    public synchronized PlayerTeam.Packed pack() {
+         return new PlayerTeam.Packed(
+             this.name,
+             Optional.of(this.displayName),
+@@ -57,20 +_,20 @@
+         );
+     }
+ 
+-    public Scoreboard getScoreboard() {
++    public synchronized Scoreboard getScoreboard() {
+         return this.scoreboard;
+     }
+ 
+     @Override
+-    public String getName() {
++    public synchronized String getName() {
+         return this.name;
+     }
+ 
+-    public Component getDisplayName() {
++    public synchronized Component getDisplayName() {
+         return this.displayName;
+     }
+ 
+-    public MutableComponent getFormattedDisplayName() {
++    public synchronized MutableComponent getFormattedDisplayName() {
+         MutableComponent result = ComponentUtils.wrapInSquareBrackets(this.displayName.copy().withStyle(this.displayNameStyle));
+         ChatFormatting color = this.getColor();
+         if (color != ChatFormatting.RESET) {
+@@ -84,36 +_,50 @@
+         if (displayName == null) {
+             throw new IllegalArgumentException("Name cannot be null");
+         } else {
+-            this.displayName = displayName;
++            synchronized (this) {
++                this.displayName = displayName;
++            }
+             this.scoreboard.onTeamChanged(this);
+         }
+     }
+ 
+     public void setPlayerPrefix(@Nullable Component playerPrefix) {
+-        this.playerPrefix = playerPrefix == null ? CommonComponents.EMPTY : playerPrefix;
++        synchronized (this) {
++            this.playerPrefix = playerPrefix == null ? CommonComponents.EMPTY : playerPrefix;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+-    public Component getPlayerPrefix() {
++    public synchronized Component getPlayerPrefix() {
+         return this.playerPrefix;
+     }
+ 
+     public void setPlayerSuffix(@Nullable Component playerSuffix) {
+-        this.playerSuffix = playerSuffix == null ? CommonComponents.EMPTY : playerSuffix;
++        synchronized (this) {
++            this.playerSuffix = playerSuffix == null ? CommonComponents.EMPTY : playerSuffix;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+-    public Component getPlayerSuffix() {
++    public synchronized Component getPlayerSuffix() {
+         return this.playerSuffix;
+     }
+ 
+     @Override
+-    public Collection<String> getPlayers() {
+-        return this.players;
++    public synchronized Collection<String> getPlayers() {
++        return Set.copyOf(this.players);
++    }
++
++    synchronized boolean addPlayer(String player) {
++        return this.players.add(player);
++    }
++
++    synchronized boolean removePlayer(String player) {
++        return this.players.remove(player);
+     }
+ 
+     @Override
+-    public MutableComponent getFormattedName(Component teamMemberName) {
++    public synchronized MutableComponent getFormattedName(Component teamMemberName) {
+         MutableComponent result = Component.empty().append(this.playerPrefix).append(teamMemberName).append(this.playerSuffix);
+         ChatFormatting color = this.getColor();
+         if (color != ChatFormatting.RESET) {
+@@ -128,56 +_,66 @@
+     }
+ 
+     @Override
+-    public boolean isAllowFriendlyFire() {
++    public synchronized boolean isAllowFriendlyFire() {
+         return this.allowFriendlyFire;
+     }
+ 
+     public void setAllowFriendlyFire(boolean allowFriendlyFire) {
+-        this.allowFriendlyFire = allowFriendlyFire;
++        synchronized (this) {
++            this.allowFriendlyFire = allowFriendlyFire;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+-    public boolean canSeeFriendlyInvisibles() {
++    public synchronized boolean canSeeFriendlyInvisibles() {
+         return this.seeFriendlyInvisibles;
+     }
+ 
+     public void setSeeFriendlyInvisibles(boolean seeFriendlyInvisibles) {
+-        this.seeFriendlyInvisibles = seeFriendlyInvisibles;
++        synchronized (this) {
++            this.seeFriendlyInvisibles = seeFriendlyInvisibles;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+-    public Team.Visibility getNameTagVisibility() {
++    public synchronized Team.Visibility getNameTagVisibility() {
+         return this.nameTagVisibility;
+     }
+ 
+     @Override
+-    public Team.Visibility getDeathMessageVisibility() {
++    public synchronized Team.Visibility getDeathMessageVisibility() {
+         return this.deathMessageVisibility;
+     }
+ 
+     public void setNameTagVisibility(Team.Visibility visibility) {
+-        this.nameTagVisibility = visibility;
++        synchronized (this) {
++            this.nameTagVisibility = visibility;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     public void setDeathMessageVisibility(Team.Visibility visibility) {
+-        this.deathMessageVisibility = visibility;
++        synchronized (this) {
++            this.deathMessageVisibility = visibility;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+-    public Team.CollisionRule getCollisionRule() {
++    public synchronized Team.CollisionRule getCollisionRule() {
+         return this.collisionRule;
+     }
+ 
+     public void setCollisionRule(Team.CollisionRule collisionRule) {
+-        this.collisionRule = collisionRule;
++        synchronized (this) {
++            this.collisionRule = collisionRule;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+-    public int packOptions() {
++    public synchronized int packOptions() {
+         int result = 0;
+         if (this.isAllowFriendlyFire()) {
+             result |= 1;
+@@ -196,12 +_,14 @@
+     }
+ 
+     public void setColor(ChatFormatting color) {
+-        this.color = color;
++        synchronized (this) {
++            this.color = color;
++        }
+         this.scoreboard.onTeamChanged(this);
+     }
+ 
+     @Override
+-    public ChatFormatting getColor() {
++    public synchronized ChatFormatting getColor() {
+         return this.color;
+     }
+ 

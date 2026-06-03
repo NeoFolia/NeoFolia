@@ -1,0 +1,323 @@
+--- a/net/minecraft/util/debug/LevelDebugSynchronizers.java
++++ b/net/minecraft/util/debug/LevelDebugSynchronizers.java
+@@ -21,6 +_,8 @@
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.block.entity.BlockEntity;
+ import net.minecraft.world.level.chunk.LevelChunk;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class LevelDebugSynchronizers {
+     private final ServerLevel level;
+@@ -28,8 +_,8 @@
+     private final Map<DebugSubscription<?>, TrackingDebugSynchronizer.SourceSynchronizer<?>> sourceSynchronizers = new HashMap<>();
+     private final TrackingDebugSynchronizer.PoiSynchronizer poiSynchronizer = new TrackingDebugSynchronizer.PoiSynchronizer();
+     private final TrackingDebugSynchronizer.VillageSectionSynchronizer villageSectionSynchronizer = new TrackingDebugSynchronizer.VillageSectionSynchronizer();
+-    private boolean sleeping = true;
+-    private Set<DebugSubscription<?>> enabledSubscriptions = Set.of();
++    private volatile boolean sleeping = true;
++    private volatile Set<DebugSubscription<?>> enabledSubscriptions = Set.of();
+ 
+     public LevelDebugSynchronizers(ServerLevel level) {
+         this.level = level;
+@@ -46,20 +_,33 @@
+     }
+ 
+     public void tick(ServerDebugSubscribers serverSubscribers) {
+-        this.enabledSubscriptions = serverSubscribers.enabledSubscriptions();
+-        boolean shouldSleep = this.enabledSubscriptions.isEmpty();
+-        if (this.sleeping != shouldSleep) {
+-            this.sleeping = shouldSleep;
+-            if (shouldSleep) {
+-                for (TrackingDebugSynchronizer<?> synchronizer : this.allSynchronizers) {
+-                    synchronizer.clear();
++        if (this.scheduleGlobalIfRegionized(() -> this.tick(serverSubscribers))) {
++            return;
++        }
++
++        boolean shouldWake;
++        boolean active;
++        synchronized (this) {
++            this.enabledSubscriptions = Set.copyOf(serverSubscribers.enabledSubscriptions());
++            boolean shouldSleep = this.enabledSubscriptions.isEmpty();
++            shouldWake = this.sleeping && !shouldSleep;
++            if (this.sleeping != shouldSleep) {
++                this.sleeping = shouldSleep;
++                if (shouldSleep) {
++                    for (TrackingDebugSynchronizer<?> synchronizer : this.allSynchronizers) {
++                        synchronizer.clear();
++                    }
+                 }
+-            } else {
+-                this.wakeUp();
+             }
+-        }
+-
+-        if (!this.sleeping) {
++
++            active = !this.sleeping;
++        }
++
++        if (shouldWake) {
++            this.wakeUp();
++        }
++
++        if (active) {
+             for (TrackingDebugSynchronizer<?> synchronizer : this.allSynchronizers) {
+                 synchronizer.tick(this.level);
+             }
+@@ -81,7 +_,11 @@
+         return (TrackingDebugSynchronizer.SourceSynchronizer<T>)this.sourceSynchronizers.get(subscription);
+     }
+ 
+-    public void registerChunk(LevelChunk chunk) {
++    public synchronized void registerChunk(LevelChunk chunk) {
++        if (this.scheduleGlobalIfRegionized(() -> this.registerChunk(chunk))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             chunk.registerDebugValues(this.level, new DebugValueSource.Registration() {
+                 {
+@@ -90,14 +_,19 @@
+ 
+                 @Override
+                 public <T> void register(DebugSubscription<T> subscription, DebugValueSource.ValueGetter<T> getter) {
+-                    LevelDebugSynchronizers.this.getSourceSynchronizer(subscription).registerChunk(chunk.getPos(), getter);
++                    LevelDebugSynchronizers.this.getSourceSynchronizer(subscription)
++                        .registerChunk(chunk.getPos(), LevelDebugSynchronizers.this.regionBoundGetter(chunk.getPos(), getter));
+                 }
+             });
+             chunk.getBlockEntities().values().forEach(this::registerBlockEntity);
+         }
+     }
+ 
+-    public void dropChunk(ChunkPos chunkPos) {
++    public synchronized void dropChunk(ChunkPos chunkPos) {
++        if (this.scheduleGlobalIfRegionized(() -> this.dropChunk(chunkPos))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             for (TrackingDebugSynchronizer.SourceSynchronizer<?> synchronizer : this.sourceSynchronizers.values()) {
+                 synchronizer.dropChunk(chunkPos);
+@@ -105,7 +_,11 @@
+         }
+     }
+ 
+-    public void registerBlockEntity(BlockEntity blockEntity) {
++    public synchronized void registerBlockEntity(BlockEntity blockEntity) {
++        if (this.scheduleGlobalIfRegionized(() -> this.registerBlockEntity(blockEntity))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             blockEntity.registerDebugValues(this.level, new DebugValueSource.Registration() {
+                 {
+@@ -114,13 +_,19 @@
+ 
+                 @Override
+                 public <T> void register(DebugSubscription<T> subscription, DebugValueSource.ValueGetter<T> getter) {
+-                    LevelDebugSynchronizers.this.getSourceSynchronizer(subscription).registerBlockEntity(blockEntity.getBlockPos(), getter);
++                    BlockPos pos = blockEntity.getBlockPos().immutable();
++                    LevelDebugSynchronizers.this.getSourceSynchronizer(subscription)
++                        .registerBlockEntity(pos, LevelDebugSynchronizers.this.regionBoundGetter(pos, getter));
+                 }
+             });
+         }
+     }
+ 
+-    public void dropBlockEntity(BlockPos blockPos) {
++    public synchronized void dropBlockEntity(BlockPos blockPos) {
++        if (this.scheduleGlobalIfRegionized(() -> this.dropBlockEntity(blockPos))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             for (TrackingDebugSynchronizer.SourceSynchronizer<?> synchronizer : this.sourceSynchronizers.values()) {
+                 synchronizer.dropBlockEntity(this.level, blockPos);
+@@ -128,7 +_,11 @@
+         }
+     }
+ 
+-    public void registerEntity(Entity entity) {
++    public synchronized void registerEntity(Entity entity) {
++        if (this.scheduleGlobalIfRegionized(() -> this.registerEntity(entity))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             entity.registerDebugValues(this.level, new DebugValueSource.Registration() {
+                 {
+@@ -137,13 +_,18 @@
+ 
+                 @Override
+                 public <T> void register(DebugSubscription<T> subscription, DebugValueSource.ValueGetter<T> getter) {
+-                    LevelDebugSynchronizers.this.getSourceSynchronizer(subscription).registerEntity(entity.getUUID(), getter);
++                    LevelDebugSynchronizers.this.getSourceSynchronizer(subscription)
++                        .registerEntity(entity.getUUID(), LevelDebugSynchronizers.this.entityRegionBoundGetter(entity, getter));
+                 }
+             });
+         }
+     }
+ 
+-    public void dropEntity(Entity entity) {
++    public synchronized void dropEntity(Entity entity) {
++        if (this.scheduleGlobalIfRegionized(() -> this.dropEntity(entity))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             for (TrackingDebugSynchronizer.SourceSynchronizer<?> synchronizer : this.sourceSynchronizers.values()) {
+                 synchronizer.dropEntity(entity);
+@@ -152,6 +_,10 @@
+     }
+ 
+     public void startTrackingChunk(ServerPlayer player, ChunkPos chunkPos) {
++        if (this.scheduleGlobalIfRegionized(() -> this.startTrackingChunk(player, chunkPos))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             for (TrackingDebugSynchronizer<?> synchronizer : this.allSynchronizers) {
+                 synchronizer.startTrackingChunk(player, chunkPos);
+@@ -160,6 +_,10 @@
+     }
+ 
+     public void startTrackingEntity(ServerPlayer player, Entity entity) {
++        if (this.scheduleGlobalIfRegionized(() -> this.startTrackingEntity(player, entity))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             for (TrackingDebugSynchronizer<?> synchronizer : this.allSynchronizers) {
+                 synchronizer.startTrackingEntity(player, entity);
+@@ -167,20 +_,32 @@
+         }
+     }
+ 
+-    public void registerPoi(PoiRecord poi) {
++    public synchronized void registerPoi(PoiRecord poi) {
++        if (this.scheduleGlobalIfRegionized(() -> this.registerPoi(poi))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             this.poiSynchronizer.onPoiAdded(this.level, poi);
+             this.villageSectionSynchronizer.onPoiAdded(this.level, poi);
+         }
+     }
+ 
+-    public void updatePoi(BlockPos pos) {
++    public synchronized void updatePoi(BlockPos pos) {
++        if (this.scheduleGlobalIfRegionized(() -> this.updatePoi(pos))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             this.poiSynchronizer.onPoiTicketCountChanged(this.level, pos);
+         }
+     }
+ 
+-    public void dropPoi(BlockPos pos) {
++    public synchronized void dropPoi(BlockPos pos) {
++        if (this.scheduleGlobalIfRegionized(() -> this.dropPoi(pos))) {
++            return;
++        }
++
+         if (!this.sleeping) {
+             this.poiSynchronizer.onPoiRemoved(this.level, pos);
+             this.villageSectionSynchronizer.onPoiRemoved(this.level, pos);
+@@ -192,6 +_,10 @@
+     }
+ 
+     public <T> void sendBlockValue(BlockPos blockPos, DebugSubscription<T> subscription, T value) {
++        if (this.scheduleGlobalIfRegionized(() -> this.sendBlockValue(blockPos, subscription, value))) {
++            return;
++        }
++
+         if (this.hasAnySubscriberFor(subscription)) {
+             this.broadcastToTracking(
+                 ChunkPos.containing(blockPos), subscription, new ClientboundDebugBlockValuePacket(blockPos, subscription.packUpdate(value))
+@@ -200,24 +_,40 @@
+     }
+ 
+     public <T> void clearBlockValue(BlockPos blockPos, DebugSubscription<T> subscription) {
++        if (this.scheduleGlobalIfRegionized(() -> this.clearBlockValue(blockPos, subscription))) {
++            return;
++        }
++
+         if (this.hasAnySubscriberFor(subscription)) {
+             this.broadcastToTracking(ChunkPos.containing(blockPos), subscription, new ClientboundDebugBlockValuePacket(blockPos, subscription.emptyUpdate()));
+         }
+     }
+ 
+     public <T> void sendEntityValue(Entity entity, DebugSubscription<T> subscription, T value) {
++        if (this.scheduleGlobalIfRegionized(() -> this.sendEntityValue(entity, subscription, value))) {
++            return;
++        }
++
+         if (this.hasAnySubscriberFor(subscription)) {
+             this.broadcastToTracking(entity, subscription, new ClientboundDebugEntityValuePacket(entity.getId(), subscription.packUpdate(value)));
+         }
+     }
+ 
+     public <T> void clearEntityValue(Entity entity, DebugSubscription<T> subscription) {
++        if (this.scheduleGlobalIfRegionized(() -> this.clearEntityValue(entity, subscription))) {
++            return;
++        }
++
+         if (this.hasAnySubscriberFor(subscription)) {
+             this.broadcastToTracking(entity, subscription, new ClientboundDebugEntityValuePacket(entity.getId(), subscription.emptyUpdate()));
+         }
+     }
+ 
+     public <T> void broadcastEventToTracking(BlockPos blockPos, DebugSubscription<T> subscription, T value) {
++        if (this.scheduleGlobalIfRegionized(() -> this.broadcastEventToTracking(blockPos, subscription, value))) {
++            return;
++        }
++
+         if (this.hasAnySubscriberFor(subscription)) {
+             this.broadcastToTracking(ChunkPos.containing(blockPos), subscription, new ClientboundDebugEventPacket(subscription.packEvent(value)));
+         }
+@@ -228,7 +_,7 @@
+ 
+         for (ServerPlayer player : chunkMap.getPlayers(trackedChunk, false)) {
+             if (player.debugSubscriptions().contains(subscription)) {
+-                player.connection.send(packet);
++                RegionizedWorldGuard.sendToPlayer(player, packet);
+             }
+         }
+     }
+@@ -236,5 +_,31 @@
+     private void broadcastToTracking(Entity trackedEntity, DebugSubscription<?> subscription, Packet<? super ClientGamePacketListener> packet) {
+         ChunkMap chunkMap = this.level.getChunkSource().chunkMap;
+         chunkMap.sendToTrackingPlayersFiltered(trackedEntity, packet, player -> player.debugSubscriptions().contains(subscription));
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate level debug synchronizer state from region worker while region dispatcher is not running");
++    }
++
++    private <T> DebugValueSource.ValueGetter<T> regionBoundGetter(ChunkPos chunkPos, DebugValueSource.ValueGetter<T> getter) {
++        BlockPos pos = new BlockPos(chunkPos.getMinBlockX(), this.level.getMinY(), chunkPos.getMinBlockZ());
++        return this.regionBoundGetter(pos, getter);
++    }
++
++    private <T> DebugValueSource.ValueGetter<T> regionBoundGetter(BlockPos pos, DebugValueSource.ValueGetter<T> getter) {
++        BlockPos immutablePos = pos.immutable();
++        return () -> RegionizedWorldGuard.callOnRegionAndWait(this.level, immutablePos, "debug value read", getter::get);
++    }
++
++    private <T> DebugValueSource.ValueGetter<T> entityRegionBoundGetter(Entity entity, DebugValueSource.ValueGetter<T> getter) {
++        return () -> RegionizedWorldGuard.callOnEntityRegionAndWait(entity, "debug entity value read", getter::get);
+     }
+ }

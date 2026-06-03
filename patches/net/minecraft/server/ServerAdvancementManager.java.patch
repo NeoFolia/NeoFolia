@@ -1,0 +1,39 @@
+--- a/net/minecraft/server/ServerAdvancementManager.java
++++ b/net/minecraft/server/ServerAdvancementManager.java
+@@ -4,6 +_,7 @@
+ import com.google.common.collect.ImmutableMap.Builder;
+ import com.mojang.logging.LogUtils;
+ import java.util.Collection;
++import java.util.List;
+ import java.util.Map;
+ import net.minecraft.advancements.Advancement;
+ import net.minecraft.advancements.AdvancementHolder;
+@@ -31,7 +_,7 @@
+         this.registries = registries;
+     }
+ 
+-    protected void apply(Map<Identifier, Advancement> preparations, ResourceManager manager, ProfilerFiller profiler) {
++    protected synchronized void apply(Map<Identifier, Advancement> preparations, ResourceManager manager, ProfilerFiller profiler) {
+         Builder<Identifier, AdvancementHolder> builder = ImmutableMap.builder();
+         preparations.forEach((id, advancement) -> {
+             this.validate(id, advancement);
+@@ -58,15 +_,15 @@
+         }
+     }
+ 
+-    public @Nullable AdvancementHolder get(Identifier id) {
++    public synchronized @Nullable AdvancementHolder get(Identifier id) {
+         return this.advancements.get(id);
+     }
+ 
+-    public AdvancementTree tree() {
++    public synchronized AdvancementTree tree() {
+         return this.tree;
+     }
+ 
+-    public Collection<AdvancementHolder> getAllAdvancements() {
+-        return this.advancements.values();
++    public synchronized Collection<AdvancementHolder> getAllAdvancements() {
++        return List.copyOf(this.advancements.values());
+     }
+ }

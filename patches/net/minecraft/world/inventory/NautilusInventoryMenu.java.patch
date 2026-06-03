@@ -1,0 +1,20 @@
+--- a/net/minecraft/world/inventory/NautilusInventoryMenu.java
++++ b/net/minecraft/world/inventory/NautilusInventoryMenu.java
+@@ -20,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean isActive() {
++            public synchronized boolean isActive() {
+                 return nautilus.canUseSlot(EquipmentSlot.SADDLE);
+             }
+         });
+@@ -31,7 +_,7 @@
+             }
+ 
+             @Override
+-            public boolean isActive() {
++            public synchronized boolean isActive() {
+                 return nautilus.canUseSlot(EquipmentSlot.BODY);
+             }
+         });

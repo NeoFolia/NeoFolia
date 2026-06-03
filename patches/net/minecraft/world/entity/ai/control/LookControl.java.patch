@@ -1,0 +1,90 @@
+--- a/net/minecraft/world/entity/ai/control/LookControl.java
++++ b/net/minecraft/world/entity/ai/control/LookControl.java
+@@ -19,23 +_,23 @@
+         this.mob = mob;
+     }
+ 
+-    public void setLookAt(Vec3 vec) {
++    public synchronized void setLookAt(Vec3 vec) {
+         this.setLookAt(vec.x, vec.y, vec.z);
+     }
+ 
+-    public void setLookAt(Entity target) {
++    public synchronized void setLookAt(Entity target) {
+         this.setLookAt(target.getX(), target.getEyeY(), target.getZ());
+     }
+ 
+-    public void setLookAt(Entity target, float yMaxRotSpeed, float xMaxRotAngle) {
++    public synchronized void setLookAt(Entity target, float yMaxRotSpeed, float xMaxRotAngle) {
+         this.setLookAt(target.getX(), target.getEyeY(), target.getZ(), yMaxRotSpeed, xMaxRotAngle);
+     }
+ 
+-    public void setLookAt(double x, double y, double z) {
++    public synchronized void setLookAt(double x, double y, double z) {
+         this.setLookAt(x, y, z, this.mob.getHeadRotSpeed(), this.mob.getMaxHeadXRot());
+     }
+ 
+-    public void setLookAt(double x, double y, double z, float yMaxRotSpeed, float xMaxRotAngle) {
++    public synchronized void setLookAt(double x, double y, double z, float yMaxRotSpeed, float xMaxRotAngle) {
+         this.wantedX = x;
+         this.wantedY = y;
+         this.wantedZ = z;
+@@ -44,7 +_,7 @@
+         this.lookAtCooldown = 2;
+     }
+ 
+-    public void tick() {
++    public synchronized void tick() {
+         if (this.resetXRotOnTick()) {
+             this.mob.setXRot(0.0F);
+         }
+@@ -60,33 +_,33 @@
+         this.clampHeadRotationToBody();
+     }
+ 
+-    protected void clampHeadRotationToBody() {
++    protected synchronized void clampHeadRotationToBody() {
+         if (!this.mob.getNavigation().isDone()) {
+             this.mob.yHeadRot = Mth.rotateIfNecessary(this.mob.yHeadRot, this.mob.yBodyRot, this.mob.getMaxHeadYRot());
+         }
+     }
+ 
+-    protected boolean resetXRotOnTick() {
++    protected synchronized boolean resetXRotOnTick() {
+         return true;
+     }
+ 
+-    public boolean isLookingAtTarget() {
++    public synchronized boolean isLookingAtTarget() {
+         return this.lookAtCooldown > 0;
+     }
+ 
+-    public double getWantedX() {
++    public synchronized double getWantedX() {
+         return this.wantedX;
+     }
+ 
+-    public double getWantedY() {
++    public synchronized double getWantedY() {
+         return this.wantedY;
+     }
+ 
+-    public double getWantedZ() {
++    public synchronized double getWantedZ() {
+         return this.wantedZ;
+     }
+ 
+-    protected Optional<Float> getXRotD() {
++    protected synchronized Optional<Float> getXRotD() {
+         double xd = this.wantedX - this.mob.getX();
+         double yd = this.wantedY - this.mob.getEyeY();
+         double zd = this.wantedZ - this.mob.getZ();
+@@ -94,7 +_,7 @@
+         return !(Math.abs(yd) > 1.0E-5F) && !(Math.abs(sd) > 1.0E-5F) ? Optional.empty() : Optional.of((float)(-(Mth.atan2(yd, sd) * 180.0F / (float)Math.PI)));
+     }
+ 
+-    protected Optional<Float> getYRotD() {
++    protected synchronized Optional<Float> getYRotD() {
+         double xd = this.wantedX - this.mob.getX();
+         double zd = this.wantedZ - this.mob.getZ();
+         return !(Math.abs(zd) > 1.0E-5F) && !(Math.abs(xd) > 1.0E-5F)

@@ -1,0 +1,224 @@
+--- a/net/minecraft/server/commands/TitleCommand.java
++++ b/net/minecraft/server/commands/TitleCommand.java
+@@ -2,6 +_,7 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import java.util.Collection;
+ import java.util.function.Function;
+@@ -21,6 +_,7 @@
+ import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
+ import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
+ import net.minecraft.server.level.ServerPlayer;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TitleCommand {
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context) {
+@@ -29,51 +_,27 @@
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                 .then(
+                     Commands.argument("targets", EntityArgument.players())
+-                        .then(Commands.literal("clear").executes(c -> clearTitle(c.getSource(), EntityArgument.getPlayers(c, "targets"))))
+-                        .then(Commands.literal("reset").executes(c -> resetTitle(c.getSource(), EntityArgument.getPlayers(c, "targets"))))
++                        .then(Commands.literal("clear").executes(TitleCommand::clearTitle))
++                        .then(Commands.literal("reset").executes(TitleCommand::resetTitle))
+                         .then(
+                             Commands.literal("title")
+                                 .then(
+                                     Commands.argument("title", ComponentArgument.textComponent(context))
+-                                        .executes(
+-                                            c -> showTitle(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                ComponentArgument.getRawComponent(c, "title"),
+-                                                "title",
+-                                                ClientboundSetTitleTextPacket::new
+-                                            )
+-                                        )
++                                        .executes(c -> showTitle(c, "title", ClientboundSetTitleTextPacket::new))
+                                 )
+                         )
+                         .then(
+                             Commands.literal("subtitle")
+                                 .then(
+                                     Commands.argument("title", ComponentArgument.textComponent(context))
+-                                        .executes(
+-                                            c -> showTitle(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                ComponentArgument.getRawComponent(c, "title"),
+-                                                "subtitle",
+-                                                ClientboundSetSubtitleTextPacket::new
+-                                            )
+-                                        )
++                                        .executes(c -> showTitle(c, "subtitle", ClientboundSetSubtitleTextPacket::new))
+                                 )
+                         )
+                         .then(
+                             Commands.literal("actionbar")
+                                 .then(
+                                     Commands.argument("title", ComponentArgument.textComponent(context))
+-                                        .executes(
+-                                            c -> showTitle(
+-                                                c.getSource(),
+-                                                EntityArgument.getPlayers(c, "targets"),
+-                                                ComponentArgument.getRawComponent(c, "title"),
+-                                                "actionbar",
+-                                                ClientboundSetActionBarTextPacket::new
+-                                            )
+-                                        )
++                                        .executes(c -> showTitle(c, "actionbar", ClientboundSetActionBarTextPacket::new))
+                                 )
+                         )
+                         .then(
+@@ -84,15 +_,7 @@
+                                             Commands.argument("stay", TimeArgument.time())
+                                                 .then(
+                                                     Commands.argument("fadeOut", TimeArgument.time())
+-                                                        .executes(
+-                                                            c -> setTimes(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getPlayers(c, "targets"),
+-                                                                IntegerArgumentType.getInteger(c, "fadeIn"),
+-                                                                IntegerArgumentType.getInteger(c, "stay"),
+-                                                                IntegerArgumentType.getInteger(c, "fadeOut")
+-                                                            )
+-                                                        )
++                                                        .executes(TitleCommand::setTimes)
+                                                 )
+                                         )
+                                 )
+@@ -101,15 +_,63 @@
+         );
+     }
+ 
++    private static int clearTitle(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> clearTitle(context))) {
++            return 0;
++        }
++
++        return clearTitle(source, EntityArgument.getPlayers(context, "targets"));
++    }
++
++    private static int resetTitle(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetTitle(context))) {
++            return 0;
++        }
++
++        return resetTitle(source, EntityArgument.getPlayers(context, "targets"));
++    }
++
++    private static int showTitle(CommandContext<CommandSourceStack> context, String type, Function<Component, Packet<?>> factory)
++        throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> showTitle(context, type, factory))) {
++            return 0;
++        }
++
++        return showTitle(source, EntityArgument.getPlayers(context, "targets"), ComponentArgument.getRawComponent(context, "title"), type, factory);
++    }
++
++    private static int setTimes(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setTimes(context))) {
++            return 0;
++        }
++
++        return setTimes(
++            source,
++            EntityArgument.getPlayers(context, "targets"),
++            IntegerArgumentType.getInteger(context, "fadeIn"),
++            IntegerArgumentType.getInteger(context, "stay"),
++            IntegerArgumentType.getInteger(context, "fadeOut")
++        );
++    }
++
+     private static int clearTitle(CommandSourceStack source, Collection<ServerPlayer> targets) {
+         ClientboundClearTitlesPacket packet = new ClientboundClearTitlesPacket(false);
++        Component singleTargetName = null;
+ 
+         for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                RegionizedWorldGuard.sendToPlayer(player, packet);
++                return player.getDisplayName();
++            });
+         }
+ 
+         if (targets.size() == 1) {
+-            source.sendSuccess(() -> Component.translatable("commands.title.cleared.single", targets.iterator().next().getDisplayName()), true);
++            Component finalSingleTargetName = singleTargetName;
++            source.sendSuccess(() -> Component.translatable("commands.title.cleared.single", finalSingleTargetName), true);
+         } else {
+             source.sendSuccess(() -> Component.translatable("commands.title.cleared.multiple", targets.size()), true);
+         }
+@@ -119,13 +_,18 @@
+ 
+     private static int resetTitle(CommandSourceStack source, Collection<ServerPlayer> targets) {
+         ClientboundClearTitlesPacket packet = new ClientboundClearTitlesPacket(true);
++        Component singleTargetName = null;
+ 
+         for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                RegionizedWorldGuard.sendToPlayer(player, packet);
++                return player.getDisplayName();
++            });
+         }
+ 
+         if (targets.size() == 1) {
+-            source.sendSuccess(() -> Component.translatable("commands.title.reset.single", targets.iterator().next().getDisplayName()), true);
++            Component finalSingleTargetName = singleTargetName;
++            source.sendSuccess(() -> Component.translatable("commands.title.reset.single", finalSingleTargetName), true);
+         } else {
+             source.sendSuccess(() -> Component.translatable("commands.title.reset.multiple", targets.size()), true);
+         }
+@@ -136,13 +_,20 @@
+     private static int showTitle(
+         CommandSourceStack source, Collection<ServerPlayer> targets, Component title, String type, Function<Component, Packet<?>> factory
+     ) throws CommandSyntaxException {
++        Component singleTargetName = null;
+         for (ServerPlayer player : targets) {
+-            player.connection
+-                .send(factory.apply(ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(player).build(), title)));
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegionThrowing(source, player, () -> {
++                RegionizedWorldGuard.sendToPlayer(
++                    player,
++                    factory.apply(ComponentUtils.resolve(ResolutionContext.builder().withSource(source).withEntityOverride(player).build(), title))
++                );
++                return player.getDisplayName();
++            });
+         }
+ 
+         if (targets.size() == 1) {
+-            source.sendSuccess(() -> Component.translatable("commands.title.show." + type + ".single", targets.iterator().next().getDisplayName()), true);
++            Component finalSingleTargetName = singleTargetName;
++            source.sendSuccess(() -> Component.translatable("commands.title.show." + type + ".single", finalSingleTargetName), true);
+         } else {
+             source.sendSuccess(() -> Component.translatable("commands.title.show." + type + ".multiple", targets.size()), true);
+         }
+@@ -152,13 +_,18 @@
+ 
+     private static int setTimes(CommandSourceStack source, Collection<ServerPlayer> targets, int fadeIn, int stay, int fadeOut) {
+         ClientboundSetTitlesAnimationPacket packet = new ClientboundSetTitlesAnimationPacket(fadeIn, stay, fadeOut);
++        Component singleTargetName = null;
+ 
+         for (ServerPlayer player : targets) {
+-            player.connection.send(packet);
++            singleTargetName = RegionizedCommandHelper.callOnPlayerRegion(source, player, () -> {
++                RegionizedWorldGuard.sendToPlayer(player, packet);
++                return player.getDisplayName();
++            });
+         }
+ 
+         if (targets.size() == 1) {
+-            source.sendSuccess(() -> Component.translatable("commands.title.times.single", targets.iterator().next().getDisplayName()), true);
++            Component finalSingleTargetName = singleTargetName;
++            source.sendSuccess(() -> Component.translatable("commands.title.times.single", finalSingleTargetName), true);
+         } else {
+             source.sendSuccess(() -> Component.translatable("commands.title.times.multiple", targets.size()), true);
+         }

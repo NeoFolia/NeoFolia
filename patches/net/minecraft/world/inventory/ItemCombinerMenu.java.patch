@@ -1,0 +1,84 @@
+--- a/net/minecraft/world/inventory/ItemCombinerMenu.java
++++ b/net/minecraft/world/inventory/ItemCombinerMenu.java
+@@ -22,13 +_,13 @@
+         }
+ 
+         @Override
+-        public void setChanged() {
++        public synchronized void setChanged() {
+             ItemCombinerMenu.this.slotsChanged(this);
+         }
+     };
+     private final int resultSlotIndex;
+ 
+-    protected boolean mayPickup(Player player, boolean hasItem) {
++    protected synchronized boolean mayPickup(Player player, boolean hasItem) {
+         return true;
+     }
+ 
+@@ -57,7 +_,7 @@
+                 }
+ 
+                 @Override
+-                public boolean mayPlace(ItemStack itemStack) {
++                public synchronized boolean mayPlace(ItemStack itemStack) {
+                     return slot.mayPlace().test(itemStack);
+                 }
+             });
+@@ -72,17 +_,17 @@
+                 }
+ 
+                 @Override
+-                public boolean mayPlace(ItemStack itemStack) {
++                public synchronized boolean mayPlace(ItemStack itemStack) {
+                     return false;
+                 }
+ 
+                 @Override
+-                public boolean mayPickup(Player player) {
++                public synchronized boolean mayPickup(Player player) {
+                     return ItemCombinerMenu.this.mayPickup(player, this.hasItem());
+                 }
+ 
+                 @Override
+-                public void onTake(Player player, ItemStack carried) {
++                public synchronized void onTake(Player player, ItemStack carried) {
+                     ItemCombinerMenu.this.onTake(player, carried);
+                 }
+             }
+@@ -98,7 +_,7 @@
+             }
+ 
+             @Override
+-            public void setChanged() {
++            public synchronized void setChanged() {
+                 super.setChanged();
+                 ItemCombinerMenu.this.slotsChanged(this);
+             }
+@@ -106,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void slotsChanged(Container container) {
++    public synchronized void slotsChanged(Container container) {
+         super.slotsChanged(container);
+         if (container == this.inputSlots) {
+             this.createResult();
+@@ -114,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.access.execute((level, pos) -> this.clearContainer(player, this.inputSlots));
+     }
+@@ -126,7 +_,7 @@
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {

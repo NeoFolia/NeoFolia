@@ -1,0 +1,361 @@
+--- a/net/minecraft/world/entity/ai/Brain.java
++++ b/net/minecraft/world/entity/ai/Brain.java
+@@ -101,7 +_,7 @@
+         this.useDefaultActivity();
+     }
+ 
+-    private void registerMemory(MemoryModuleType<?> memoryType) {
++    private synchronized void registerMemory(MemoryModuleType<?> memoryType) {
+         this.memories.putIfAbsent(memoryType, MemorySlot.create());
+     }
+ 
+@@ -110,7 +_,7 @@
+         this.useDefaultActivity();
+     }
+ 
+-    public Brain.Packed pack() {
++    public synchronized Brain.Packed pack() {
+         final MemoryMap.Builder builder = new MemoryMap.Builder();
+         this.forEach(new Brain.Visitor() {
+             {
+@@ -138,11 +_,11 @@
+         return new Brain.Packed(builder.build());
+     }
+ 
+-    private <T> @Nullable MemorySlot<T> getMemorySlotIfPresent(MemoryModuleType<T> memoryType) {
++    private synchronized <T> @Nullable MemorySlot<T> getMemorySlotIfPresent(MemoryModuleType<T> memoryType) {
+         return (MemorySlot<T>)this.memories.get(memoryType);
+     }
+ 
+-    private <T> MemorySlot<T> getMemorySlot(MemoryModuleType<T> memoryType) {
++    private synchronized <T> MemorySlot<T> getMemorySlot(MemoryModuleType<T> memoryType) {
+         MemorySlot<T> result = this.getMemorySlotIfPresent(memoryType);
+         if (result == null) {
+             throw new IllegalStateException("Unregistered memory fetched: " + memoryType);
+@@ -151,43 +_,43 @@
+         }
+     }
+ 
+-    public boolean hasMemoryValue(MemoryModuleType<?> type) {
++    public synchronized boolean hasMemoryValue(MemoryModuleType<?> type) {
+         return this.checkMemory(type, MemoryStatus.VALUE_PRESENT);
+     }
+ 
+-    public void clearMemories() {
++    public synchronized void clearMemories() {
+         this.memories.values().forEach(MemorySlot::clear);
+     }
+ 
+-    public <U> void eraseMemory(MemoryModuleType<U> type) {
++    public synchronized <U> void eraseMemory(MemoryModuleType<U> type) {
+         MemorySlot<U> slot = this.getMemorySlotIfPresent(type);
+         if (slot != null) {
+             slot.clear();
+         }
+     }
+ 
+-    public <U> void setMemory(MemoryModuleType<U> type, @Nullable U value) {
++    public synchronized <U> void setMemory(MemoryModuleType<U> type, @Nullable U value) {
+         this.setMemoryInternal(type, value);
+     }
+ 
+-    public <U> void setMemoryWithExpiry(MemoryModuleType<U> type, U value, long timeToLive) {
++    public synchronized <U> void setMemoryWithExpiry(MemoryModuleType<U> type, U value, long timeToLive) {
+         this.setMemoryInternal(type, value, timeToLive);
+     }
+ 
+-    public <U> void setMemory(MemoryModuleType<U> type, Optional<? extends U> optionalValue) {
++    public synchronized <U> void setMemory(MemoryModuleType<U> type, Optional<? extends U> optionalValue) {
+         this.setMemoryInternal(type, (U)optionalValue.orElse(null));
+     }
+ 
+-    private <U> void setMemoryInternal(MemoryMap.Value<U> value) {
++    private synchronized <U> void setMemoryInternal(MemoryMap.Value<U> value) {
+         ExpirableValue<U> expirableValue = value.value();
+-        if (expirableValue.timeToLive().isPresent()) {
+-            this.setMemoryInternal(value.type(), expirableValue.value(), expirableValue.timeToLive().get());
+-        } else {
+-            this.setMemoryInternal(value.type(), expirableValue.value());
+-        }
++        expirableValue.timeToLive()
++            .ifPresentOrElse(
++                timeToLive -> this.setMemoryInternal(value.type(), expirableValue.value(), timeToLive),
++                () -> this.setMemoryInternal(value.type(), expirableValue.value())
++            );
+     }
+ 
+-    private <U> void setMemoryInternal(MemoryModuleType<U> type, U value, long tileToLive) {
++    private synchronized <U> void setMemoryInternal(MemoryModuleType<U> type, U value, long tileToLive) {
+         MemorySlot<U> slot = this.getMemorySlotIfPresent(type);
+         if (slot != null) {
+             if (isEmptyCollection(value)) {
+@@ -202,7 +_,7 @@
+         }
+     }
+ 
+-    private <U> void setMemoryInternal(MemoryModuleType<U> type, @Nullable U value) {
++    private synchronized <U> void setMemoryInternal(MemoryModuleType<U> type, @Nullable U value) {
+         MemorySlot<U> slot = this.getMemorySlotIfPresent(type);
+         if (slot != null) {
+             if (value != null && isEmptyCollection(value)) {
+@@ -217,20 +_,20 @@
+         }
+     }
+ 
+-    public <U> Optional<U> getMemory(MemoryModuleType<U> type) {
++    public synchronized <U> Optional<U> getMemory(MemoryModuleType<U> type) {
+         return Optional.ofNullable(this.getMemorySlot(type).value());
+     }
+ 
+-    public <U> @Nullable Optional<U> getMemoryInternal(MemoryModuleType<U> type) {
++    public synchronized <U> @Nullable Optional<U> getMemoryInternal(MemoryModuleType<U> type) {
+         MemorySlot<U> slot = this.getMemorySlotIfPresent(type);
+         return slot == null ? null : Optional.ofNullable(slot.value());
+     }
+ 
+-    public <U> long getTimeUntilExpiry(MemoryModuleType<U> type) {
++    public synchronized <U> long getTimeUntilExpiry(MemoryModuleType<U> type) {
+         return this.getMemorySlot(type).timeToLive();
+     }
+ 
+-    public void forEach(Brain.Visitor visitor) {
++    public synchronized void forEach(Brain.Visitor visitor) {
+         this.memories.forEach((memoryModuleType, slot) -> callVisitor(visitor, (MemoryModuleType<?>)memoryModuleType, (MemorySlot<?>)slot));
+     }
+ 
+@@ -238,12 +_,12 @@
+         ((MemorySlot<U>)slot).visit(memoryModuleType, visitor);
+     }
+ 
+-    public <U> boolean isMemoryValue(MemoryModuleType<U> memoryType, U value) {
++    public synchronized <U> boolean isMemoryValue(MemoryModuleType<U> memoryType, U value) {
+         MemorySlot<U> slot = this.getMemorySlotIfPresent(memoryType);
+         return slot != null && Objects.equals(value, slot.value());
+     }
+ 
+-    public boolean checkMemory(MemoryModuleType<?> type, MemoryStatus status) {
++    public synchronized boolean checkMemory(MemoryModuleType<?> type, MemoryStatus status) {
+         MemorySlot<?> slot = this.getMemorySlotIfPresent(type);
+         return slot == null
+             ? false
+@@ -252,18 +_,18 @@
+                 || status == MemoryStatus.VALUE_ABSENT && !slot.hasValue();
+     }
+ 
+-    public void setSchedule(EnvironmentAttribute<Activity> schedule) {
++    public synchronized void setSchedule(EnvironmentAttribute<Activity> schedule) {
+         this.schedule = schedule;
+     }
+ 
+-    public void setCoreActivities(Set<Activity> activities) {
+-        this.coreActivities = activities;
++    public synchronized void setCoreActivities(Set<Activity> activities) {
++        this.coreActivities = Set.copyOf(activities);
+     }
+ 
+     @Deprecated
+     @VisibleForDebug
+-    public Set<Activity> getActiveActivities() {
+-        return this.activeActivities;
++    public synchronized Set<Activity> getActiveActivities() {
++        return Set.copyOf(this.activeActivities);
+     }
+ 
+     @Deprecated
+@@ -271,24 +_,20 @@
+     public List<BehaviorControl<? super E>> getRunningBehaviors() {
+         List<BehaviorControl<? super E>> runningBehaviours = new ObjectArrayList<>();
+ 
+-        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
+-            for (Set<BehaviorControl<? super E>> behaviors : behavioursByActivities.values()) {
+-                for (BehaviorControl<? super E> behavior : behaviors) {
+-                    if (behavior.getStatus() == Behavior.Status.RUNNING) {
+-                        runningBehaviours.add(behavior);
+-                    }
+-                }
++        for (BehaviorControl<? super E> behavior : this.getBehaviorSnapshot()) {
++            if (behavior.getStatus() == Behavior.Status.RUNNING) {
++                runningBehaviours.add(behavior);
+             }
+         }
+ 
+         return runningBehaviours;
+     }
+ 
+-    public void useDefaultActivity() {
++    public synchronized void useDefaultActivity() {
+         this.setActiveActivity(this.defaultActivity);
+     }
+ 
+-    public Optional<Activity> getActiveNonCoreActivity() {
++    public synchronized Optional<Activity> getActiveNonCoreActivity() {
+         for (Activity activity : this.activeActivities) {
+             if (!this.coreActivities.contains(activity)) {
+                 return Optional.of(activity);
+@@ -298,7 +_,7 @@
+         return Optional.empty();
+     }
+ 
+-    public void setActiveActivityIfPossible(Activity activity) {
++    public synchronized void setActiveActivityIfPossible(Activity activity) {
+         if (this.activityRequirementsAreMet(activity)) {
+             this.setActiveActivity(activity);
+         } else {
+@@ -306,7 +_,7 @@
+         }
+     }
+ 
+-    private void setActiveActivity(Activity activity) {
++    private synchronized void setActiveActivity(Activity activity) {
+         if (!this.isActive(activity)) {
+             this.eraseMemoriesForOtherActivitesThan(activity);
+             this.activeActivities.clear();
+@@ -315,7 +_,7 @@
+         }
+     }
+ 
+-    private void eraseMemoriesForOtherActivitesThan(Activity activity) {
++    private synchronized void eraseMemoriesForOtherActivitesThan(Activity activity) {
+         for (Activity oldActivity : this.activeActivities) {
+             if (oldActivity != activity) {
+                 Set<MemoryModuleType<?>> memoryModuleTypes = this.activityMemoriesToEraseWhenStopped.get(oldActivity);
+@@ -328,7 +_,7 @@
+         }
+     }
+ 
+-    public void updateActivityFromSchedule(EnvironmentAttributeSystem environmentAttributes, long gameTime, Vec3 pos) {
++    public synchronized void updateActivityFromSchedule(EnvironmentAttributeSystem environmentAttributes, long gameTime, Vec3 pos) {
+         if (gameTime - this.lastScheduleUpdate > 20L) {
+             this.lastScheduleUpdate = gameTime;
+             Activity scheduledActivity = this.schedule != null ? environmentAttributes.getValue(this.schedule, pos) : Activity.IDLE;
+@@ -338,7 +_,7 @@
+         }
+     }
+ 
+-    public void setActiveActivityToFirstValid(List<Activity> activities) {
++    public synchronized void setActiveActivityToFirstValid(List<Activity> activities) {
+         for (Activity activity : activities) {
+             if (this.activityRequirementsAreMet(activity)) {
+                 this.setActiveActivity(activity);
+@@ -347,19 +_,19 @@
+         }
+     }
+ 
+-    public void setDefaultActivity(Activity activity) {
++    public synchronized void setDefaultActivity(Activity activity) {
+         this.defaultActivity = activity;
+     }
+ 
+-    public void addActivity(
++    public synchronized void addActivity(
+         Activity activity,
+         ImmutableList<? extends Pair<Integer, ? extends BehaviorControl<? super E>>> behaviorPriorityPairs,
+         Set<Pair<MemoryModuleType<?>, MemoryStatus>> conditions,
+         Set<MemoryModuleType<?>> memoriesToEraseWhenStopped
+     ) {
+-        this.activityRequirements.put(activity, conditions);
++        this.activityRequirements.put(activity, Set.copyOf(conditions));
+         if (!memoriesToEraseWhenStopped.isEmpty()) {
+-            this.activityMemoriesToEraseWhenStopped.put(activity, memoriesToEraseWhenStopped);
++            this.activityMemoriesToEraseWhenStopped.put(activity, Set.copyOf(memoriesToEraseWhenStopped));
+         }
+ 
+         for (Pair<Integer, ? extends BehaviorControl<? super E>> pair : behaviorPriorityPairs) {
+@@ -377,11 +_,11 @@
+     }
+ 
+     @VisibleForTesting
+-    public void removeAllBehaviors() {
++    public synchronized void removeAllBehaviors() {
+         this.availableBehaviorsByPriority.clear();
+     }
+ 
+-    public boolean isActive(Activity activity) {
++    public synchronized boolean isActive(Activity activity) {
+         return this.activeActivities.contains(activity);
+     }
+ 
+@@ -393,12 +_,12 @@
+     }
+ 
+     private void tickSensors(ServerLevel level, E body) {
+-        for (Sensor<? super E> sensor : this.sensors.values()) {
++        for (Sensor<? super E> sensor : this.getSensorSnapshot()) {
+             sensor.tick(level, body);
+         }
+     }
+ 
+-    private void forgetOutdatedMemories() {
++    private synchronized void forgetOutdatedMemories() {
+         this.memories.values().forEach(MemorySlot::tick);
+     }
+ 
+@@ -413,16 +_,9 @@
+     private void startEachNonRunningBehavior(ServerLevel level, E body) {
+         long time = level.getGameTime();
+ 
+-        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
+-            for (Entry<Activity, Set<BehaviorControl<? super E>>> behavioursForActivity : behavioursByActivities.entrySet()) {
+-                Activity activity = behavioursForActivity.getKey();
+-                if (this.activeActivities.contains(activity)) {
+-                    for (BehaviorControl<? super E> behavior : behavioursForActivity.getValue()) {
+-                        if (behavior.getStatus() == Behavior.Status.STOPPED) {
+-                            behavior.tryStart(level, body, time);
+-                        }
+-                    }
+-                }
++        for (BehaviorControl<? super E> behavior : this.getActiveBehaviorSnapshot()) {
++            if (behavior.getStatus() == Behavior.Status.STOPPED) {
++                behavior.tryStart(level, body, time);
+             }
+         }
+     }
+@@ -435,7 +_,38 @@
+         }
+     }
+ 
+-    private boolean activityRequirementsAreMet(Activity activity) {
++    private synchronized List<Sensor<? super E>> getSensorSnapshot() {
++        return List.copyOf(this.sensors.values());
++    }
++
++    private synchronized List<BehaviorControl<? super E>> getBehaviorSnapshot() {
++        List<BehaviorControl<? super E>> behaviors = new ObjectArrayList<>();
++
++        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
++            for (Set<BehaviorControl<? super E>> behaviorsForActivity : behavioursByActivities.values()) {
++                behaviors.addAll(behaviorsForActivity);
++            }
++        }
++
++        return behaviors;
++    }
++
++    private synchronized List<BehaviorControl<? super E>> getActiveBehaviorSnapshot() {
++        List<BehaviorControl<? super E>> behaviors = new ObjectArrayList<>();
++        Set<Activity> activeActivities = Set.copyOf(this.activeActivities);
++
++        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
++            for (Entry<Activity, Set<BehaviorControl<? super E>>> behavioursForActivity : behavioursByActivities.entrySet()) {
++                if (activeActivities.contains(behavioursForActivity.getKey())) {
++                    behaviors.addAll(behavioursForActivity.getValue());
++                }
++            }
++        }
++
++        return behaviors;
++    }
++
++    private synchronized boolean activityRequirementsAreMet(Activity activity) {
+         if (!this.activityRequirements.containsKey(activity)) {
+             return false;
+         } else {
+@@ -455,7 +_,7 @@
+         return object instanceof Collection<?> collection && collection.isEmpty();
+     }
+ 
+-    public boolean isBrainDead() {
++    public synchronized boolean isBrainDead() {
+         return this.memories.isEmpty() && this.sensors.isEmpty() && this.availableBehaviorsByPriority.isEmpty();
+     }
+ 

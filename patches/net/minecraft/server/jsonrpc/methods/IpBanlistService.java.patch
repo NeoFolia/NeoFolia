@@ -1,0 +1,40 @@
+--- a/net/minecraft/server/jsonrpc/methods/IpBanlistService.java
++++ b/net/minecraft/server/jsonrpc/methods/IpBanlistService.java
+@@ -31,7 +_,7 @@
+         bans.stream()
+             .map(ban -> banIp(minecraftApi, ban, clientInfo))
+             .flatMap(Collection::stream)
+-            .forEach(player -> player.connection.disconnect(Component.translatable("multiplayer.disconnect.ip_banned")));
++            .forEach(player -> minecraftApi.playerListService().disconnect(player, Component.translatable("multiplayer.disconnect.ip_banned"), clientInfo));
+         return get(minecraftApi);
+     }
+ 
+@@ -43,7 +_,7 @@
+             if (ban.player().isPresent()) {
+                 Optional<ServerPlayer> player = minecraftApi.playerListService().getPlayer(ban.player().get().id(), ban.player().get().name());
+                 if (player.isPresent()) {
+-                    return banIp(minecraftApi, ban.toIpBan(player.get()), clientInfo);
++                    return banIp(minecraftApi, ban.toIpBan(minecraftApi.playerListService().getIpAddress(player.get())), clientInfo);
+                 }
+             }
+ 
+@@ -81,7 +_,7 @@
+         finalBanlist.stream()
+             .filter(ban -> !currentBans.contains(ban))
+             .flatMap(ban -> minecraftApi.playerListService().getPlayersWithAddress(ban.ip()).stream())
+-            .forEach(player -> player.connection.disconnect(Component.translatable("multiplayer.disconnect.ip_banned")));
++            .forEach(player -> minecraftApi.playerListService().disconnect(player, Component.translatable("multiplayer.disconnect.ip_banned"), clientInfo));
+         return get(minecraftApi);
+     }
+ 
+@@ -97,8 +_,8 @@
+                 .apply(i, IpBanlistService.IncomingIpBanDto::new)
+         );
+ 
+-        private IpBanlistService.IpBan toIpBan(ServerPlayer player) {
+-            return new IpBanlistService.IpBan(player.getIpAddress(), this.reason().orElse(null), this.source().orElse("Management server"), this.expires());
++        private IpBanlistService.IpBan toIpBan(String ip) {
++            return new IpBanlistService.IpBan(ip, this.reason().orElse(null), this.source().orElse("Management server"), this.expires());
+         }
+ 
+         private IpBanlistService.@Nullable IpBan toIpBan() {

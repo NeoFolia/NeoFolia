@@ -1,0 +1,223 @@
+--- a/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
+@@ -51,21 +_,25 @@
+ 
+         @Override
+         public int get(int dataId) {
+-            return switch (dataId) {
+-                case 0 -> BrewingStandBlockEntity.this.brewTime;
+-                case 1 -> BrewingStandBlockEntity.this.fuel;
+-                default -> 0;
+-            };
++            synchronized (BrewingStandBlockEntity.this) {
++                return switch (dataId) {
++                    case 0 -> BrewingStandBlockEntity.this.brewTime;
++                    case 1 -> BrewingStandBlockEntity.this.fuel;
++                    default -> 0;
++                };
++            }
+         }
+ 
+         @Override
+         public void set(int dataId, int value) {
+-            switch (dataId) {
+-                case 0:
+-                    BrewingStandBlockEntity.this.brewTime = value;
+-                    break;
+-                case 1:
+-                    BrewingStandBlockEntity.this.fuel = value;
++            synchronized (BrewingStandBlockEntity.this) {
++                switch (dataId) {
++                    case 0:
++                        BrewingStandBlockEntity.this.brewTime = value;
++                        break;
++                    case 1:
++                        BrewingStandBlockEntity.this.fuel = value;
++                }
+             }
+         }
+ 
+@@ -85,65 +_,75 @@
+     }
+ 
+     @Override
+-    public int getContainerSize() {
++    public synchronized int getContainerSize() {
+         return this.items.size();
+     }
+ 
+     @Override
+-    protected NonNullList<ItemStack> getItems() {
++    protected synchronized NonNullList<ItemStack> getItems() {
+         return this.items;
+     }
+ 
+     @Override
+-    protected void setItems(NonNullList<ItemStack> items) {
++    protected synchronized void setItems(NonNullList<ItemStack> items) {
+         this.items = items;
+     }
+ 
+     public static void serverTick(Level level, BlockPos pos, BlockState selfState, BrewingStandBlockEntity entity) {
+-        ItemStack fuel = entity.items.get(4);
+-        if (entity.fuel <= 0 && fuel.is(ItemTags.BREWING_FUEL)) {
+-            entity.fuel = 20;
+-            fuel.shrink(1);
+-            setChanged(level, pos, selfState);
+-        }
+-
+-        boolean brewable = isBrewable(level.potionBrewing(), entity.items);
+-        boolean isBrewing = entity.brewTime > 0;
+-        ItemStack ingredient = entity.items.get(3);
+-        if (isBrewing) {
+-            entity.brewTime--;
+-            boolean isDoneBrewing = entity.brewTime == 0;
+-            if (isDoneBrewing && brewable) {
+-                doBrew(level, pos, entity.items);
+-            } else if (!brewable || !ingredient.is(entity.ingredient)) {
+-                entity.brewTime = 0;
+-            }
+-
+-            setChanged(level, pos, selfState);
+-        } else if (brewable && entity.fuel > 0) {
+-            entity.fuel--;
+-            entity.brewTime = 400;
+-            entity.ingredient = ingredient.getItem();
+-            setChanged(level, pos, selfState);
+-        }
+-
+-        boolean[] newCount = entity.getPotionBits();
+-        if (!Arrays.equals(newCount, entity.lastPotionCount)) {
+-            entity.lastPotionCount = newCount;
+-            BlockState state = selfState;
++        boolean changed = false;
++        boolean updateBottleState = false;
++        boolean[] newCount = null;
++        synchronized (entity) {
++            ItemStack fuel = entity.items.get(4);
++            if (entity.fuel <= 0 && fuel.is(ItemTags.BREWING_FUEL)) {
++                entity.fuel = 20;
++                fuel.shrink(1);
++                changed = true;
++            }
++
++            boolean brewable = isBrewable(level.potionBrewing(), entity.items);
++            boolean isBrewing = entity.brewTime > 0;
++            ItemStack ingredient = entity.items.get(3);
++            if (isBrewing) {
++                entity.brewTime--;
++                boolean isDoneBrewing = entity.brewTime == 0;
++                if (isDoneBrewing && brewable) {
++                    doBrew(level, pos, entity.items);
++                } else if (!brewable || !ingredient.is(entity.ingredient)) {
++                    entity.brewTime = 0;
++                }
++
++                changed = true;
++            } else if (brewable && entity.fuel > 0) {
++                entity.fuel--;
++                entity.brewTime = 400;
++                entity.ingredient = ingredient.getItem();
++                changed = true;
++            }
++
++            newCount = entity.getPotionBits();
++            if (!Arrays.equals(newCount, entity.lastPotionCount)) {
++                entity.lastPotionCount = newCount;
++                updateBottleState = true;
++            }
++        }
++
++        if (changed) {
++            setChanged(level, pos, selfState);
++        }
++        if (updateBottleState) {
+             if (!(selfState.getBlock() instanceof BrewingStandBlock)) {
+                 return;
+             }
+-
++            BlockState state = selfState;
+             for (int i = 0; i < BrewingStandBlock.HAS_BOTTLE.length; i++) {
+                 state = state.setValue(BrewingStandBlock.HAS_BOTTLE[i], newCount[i]);
+             }
+-
+             level.setBlock(pos, state, 2);
+         }
+     }
+ 
+-    private boolean[] getPotionBits() {
++    private synchronized boolean[] getPotionBits() {
+         boolean[] result = new boolean[3];
+ 
+         for (int potion = 0; potion < 3; potion++) {
+@@ -174,6 +_,7 @@
+     }
+ 
+     private static void doBrew(Level level, BlockPos pos, NonNullList<ItemStack> items) {
++        if (net.neoforged.neoforge.event.EventHooks.onPotionAttemptBrew(items)) return;
+         ItemStack ingredient = items.get(3);
+         PotionBrewing potionBrewing = level.potionBrewing();
+ 
+@@ -181,8 +_,10 @@
+             items.set(dest, potionBrewing.mix(ingredient, items.get(dest)));
+         }
+ 
++        net.neoforged.neoforge.event.EventHooks.onPotionBrewed(items);
++        // Neo: Query the crafting remainder prior to stack mutation (shrink) in order to grab the correct value
++        ItemStackTemplate remainder = ingredient.getCraftingRemainder();
+         ingredient.shrink(1);
+-        ItemStackTemplate remainder = ingredient.getItem().getCraftingRemainder();
+         if (remainder != null) {
+             if (ingredient.isEmpty()) {
+                 ingredient = remainder.create();
+@@ -196,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void loadAdditional(ValueInput input) {
++    protected synchronized void loadAdditional(ValueInput input) {
+         super.loadAdditional(input);
+         this.items = NonNullList.withSize(this.getContainerSize(), ItemStack.EMPTY);
+         ContainerHelper.loadAllItems(input, this.items);
+@@ -209,7 +_,7 @@
+     }
+ 
+     @Override
+-    protected void saveAdditional(ValueOutput output) {
++    protected synchronized void saveAdditional(ValueOutput output) {
+         super.saveAdditional(output);
+         output.putShort("BrewTime", (short)this.brewTime);
+         ContainerHelper.saveAllItems(output, this.items);
+@@ -217,14 +_,14 @@
+     }
+ 
+     @Override
+-    public boolean canPlaceItem(int slot, ItemStack itemStack) {
++    public synchronized boolean canPlaceItem(int slot, ItemStack itemStack) {
++        PotionBrewing potionBrewing = this.level != null ? this.level.potionBrewing() : PotionBrewing.EMPTY;
+         if (slot == 3) {
+-            PotionBrewing potionBrewing = this.level != null ? this.level.potionBrewing() : PotionBrewing.EMPTY;
+             return potionBrewing.isIngredient(itemStack);
+         } else {
+             return slot == 4
+                 ? itemStack.is(ItemTags.BREWING_FUEL)
+-                : (itemStack.is(Items.POTION) || itemStack.is(Items.SPLASH_POTION) || itemStack.is(Items.LINGERING_POTION) || itemStack.is(Items.GLASS_BOTTLE))
++                : (potionBrewing.isInput(itemStack) || itemStack.is(Items.GLASS_BOTTLE))
+                     && this.getItem(slot).isEmpty();
+         }
+     }
+@@ -239,12 +_,12 @@
+     }
+ 
+     @Override
+-    public boolean canPlaceItemThroughFace(int slot, ItemStack itemStack, @Nullable Direction direction) {
++    public synchronized boolean canPlaceItemThroughFace(int slot, ItemStack itemStack, @Nullable Direction direction) {
+         return this.canPlaceItem(slot, itemStack);
+     }
+ 
+     @Override
+-    public boolean canTakeItemThroughFace(int slot, ItemStack itemStack, Direction direction) {
++    public synchronized boolean canTakeItemThroughFace(int slot, ItemStack itemStack, Direction direction) {
+         return slot == 3 ? itemStack.is(Items.GLASS_BOTTLE) : true;
+     }
+ 

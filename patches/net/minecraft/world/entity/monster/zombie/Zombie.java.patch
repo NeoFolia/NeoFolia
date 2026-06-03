@@ -1,0 +1,116 @@
+--- a/net/minecraft/world/entity/monster/zombie/Zombie.java
++++ b/net/minecraft/world/entity/monster/zombie/Zombie.java
+@@ -66,6 +_,8 @@
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
++import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class Zombie extends Monster {
+@@ -238,6 +_,7 @@
+     }
+ 
+     protected void doUnderWaterConversion(ServerLevel level) {
++        if (!net.neoforged.neoforge.event.EventHooks.canLivingConvert(this, EntityType.DROWNED, (timer) -> this.conversionTime = timer)) return;
+         this.convertToZombieType(level, EntityType.DROWNED);
+         if (!this.isSilent()) {
+             level.levelEvent(null, 1040, this.blockPosition(), 0);
+@@ -248,9 +_,10 @@
+         this.convertTo(
+             zombieType,
+             ConversionParams.single(this, true, true),
+-            newZombie -> newZombie.handleAttributes(
+-                level.getCurrentDifficultyAt(newZombie.blockPosition()).getSpecialMultiplier(), EntitySpawnReason.CONVERSION
+-            )
++            newZombie -> {
++                newZombie.handleAttributes(level.getCurrentDifficultyAt(newZombie.blockPosition()).getSpecialMultiplier(), EntitySpawnReason.CONVERSION);
++                net.neoforged.neoforge.event.EventHooks.onLivingConvert(this, newZombie);
++            }
+         );
+     }
+ 
+@@ -267,6 +_,7 @@
+                 zombie.setGossips(villager.getGossips().copy());
+                 zombie.setTradeOffers(villager.getOffers().copy());
+                 zombie.setVillagerXp(villager.getVillagerXp());
++                net.neoforged.neoforge.event.EventHooks.onLivingConvert(villager, zombie);
+                 if (!this.isSilent()) {
+                     level.levelEvent(null, 1026, this.blockPosition(), 0);
+                 }
+@@ -284,9 +_,10 @@
+         if (!super.hurtServer(level, source, damage)) {
+             return false;
+         } else {
+-            LivingEntity target = this.getTarget();
+-            if (target == null && source.getEntity() instanceof LivingEntity) {
+-                target = (LivingEntity)source.getEntity();
++            LivingEntity target = this.regionSafeTarget(this.getTarget());
++            Entity sourceEntity = RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), source.getEntity());
++            if (target == null && sourceEntity instanceof LivingEntity) {
++                target = (LivingEntity)sourceEntity;
+             }
+ 
+             if (target != null
+@@ -308,7 +_,7 @@
+                     int zt = z + Mth.nextInt(this.random, 7, 40) * Mth.nextInt(this.random, -1, 1);
+                     BlockPos spawnPos = new BlockPos(xt, yt, zt);
+                     if (SpawnPlacements.isSpawnPositionOk(type, level, spawnPos)
+-                        && SpawnPlacements.checkSpawnRules(type, level, EntitySpawnReason.REINFORCEMENT, spawnPos, level.getRandom())) {
++                        && SpawnPlacements.checkSpawnRules(type, level, EntitySpawnReason.REINFORCEMENT, spawnPos, this.getRandom())) {
+                         reinforcement.setPos(xt, yt, zt);
+                         if (!level.hasNearbyAlivePlayer(xt, yt, zt, 7.0)
+                             && level.isUnobstructed(reinforcement)
+@@ -424,7 +_,7 @@
+     @Override
+     public boolean killedEntity(ServerLevel level, LivingEntity entity, DamageSource source) {
+         boolean perished = super.killedEntity(level, entity, source);
+-        if ((level.getDifficulty() == Difficulty.NORMAL || level.getDifficulty() == Difficulty.HARD) && entity instanceof Villager villager) {
++        if ((level.getDifficulty() == Difficulty.NORMAL || level.getDifficulty() == Difficulty.HARD) && entity instanceof Villager villager && net.neoforged.neoforge.event.EventHooks.canLivingConvert(entity, EntityType.ZOMBIE_VILLAGER, (timer) -> {})) {
+             if (level.getDifficulty() != Difficulty.HARD && this.random.nextBoolean()) {
+                 return perished;
+             }
+@@ -456,7 +_,7 @@
+     public @Nullable SpawnGroupData finalizeSpawn(
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         groupData = super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+         float difficultyModifier = difficulty.getSpecialMultiplier();
+         if (spawnReason != EntitySpawnReason.CONVERSION) {
+@@ -472,9 +_,10 @@
+                 this.setBaby(true);
+                 if (zombieData.canSpawnJockey) {
+                     if (random.nextFloat() < 0.05) {
+-                        List<Chicken> chickens = level.getEntitiesOfClass(
+-                            Chicken.class, this.getBoundingBox().inflate(5.0, 3.0, 5.0), EntitySelector.ENTITY_NOT_BEING_RIDDEN
+-                        );
++                        AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(5.0, 3.0, 5.0));
++                        List<Chicken> chickens = searchBox == null
++                            ? List.of()
++                            : level.getEntitiesOfClass(Chicken.class, searchBox, EntitySelector.ENTITY_NOT_BEING_RIDDEN);
+                         if (!chickens.isEmpty()) {
+                             Chicken chicken = chickens.get(0);
+                             chicken.setChickenJockey(true);
+@@ -566,6 +_,10 @@
+         this.getAttribute(Attributes.SPAWN_REINFORCEMENTS_CHANCE).setBaseValue(this.random.nextDouble() * 0.1F);
+     }
+ 
++    private @Nullable LivingEntity regionSafeTarget(@Nullable LivingEntity target) {
++        return RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), target);
++    }
++
+     private class ZombieAttackTurtleEggGoal extends RemoveBlockGoal {
+         ZombieAttackTurtleEggGoal(PathfinderMob mob, double speedModifier, int verticalSearchRange) {
+             Objects.requireNonNull(Zombie.this);
+@@ -579,7 +_,7 @@
+ 
+         @Override
+         public void playBreakSound(Level level, BlockPos pos) {
+-            level.playSound(null, pos, SoundEvents.TURTLE_EGG_BREAK, SoundSource.BLOCKS, 0.7F, 0.9F + level.getRandom().nextFloat() * 0.2F);
++            level.playSound(null, pos, SoundEvents.TURTLE_EGG_BREAK, SoundSource.BLOCKS, 0.7F, 0.9F + Zombie.this.random.nextFloat() * 0.2F);
+         }
+ 
+         @Override

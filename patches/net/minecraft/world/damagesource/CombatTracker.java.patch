@@ -1,0 +1,55 @@
+--- a/net/minecraft/world/damagesource/CombatTracker.java
++++ b/net/minecraft/world/damagesource/CombatTracker.java
+@@ -34,7 +_,7 @@
+         this.mob = mob;
+     }
+ 
+-    public void recordDamage(DamageSource source, float damage) {
++    public synchronized void recordDamage(DamageSource source, float damage) {
+         this.recheckStatus();
+         FallLocation fallLocation = FallLocation.getCurrentFallLocation(this.mob);
+         CombatEntry entry = new CombatEntry(source, damage, fallLocation, (float)this.mob.fallDistance);
+@@ -83,7 +_,7 @@
+         return entity == null ? null : entity.getDisplayName();
+     }
+ 
+-    public Component getDeathMessage() {
++    public synchronized Component getDeathMessage() {
+         if (this.entries.isEmpty()) {
+             return Component.translatable("death.attack.generic", this.mob.getDisplayName());
+         } else {
+@@ -91,6 +_,11 @@
+             DamageSource killingSource = killingBlow.source();
+             CombatEntry knockOffEntry = this.getMostSignificantFall();
+             DeathMessageType messageType = killingSource.type().deathMessageType();
++            // Neo: Implement IDeathMessageProvider#getDeathMessage
++            // Vanilla logic is replicated in IDeathMessageProvider.DEFAULT
++            if (true) {
++                return messageType.getMessageFunction().getDeathMessage(this.mob, killingBlow, knockOffEntry);
++            }
+             if (messageType == DeathMessageType.FALL_VARIANTS && knockOffEntry != null) {
+                 return this.getFallMessage(knockOffEntry, killingSource.getEntity());
+             } else if (messageType == DeathMessageType.INTENTIONAL_GAME_DESIGN) {
+@@ -103,7 +_,7 @@
+         }
+     }
+ 
+-    public @Nullable CombatEntry getMostSignificantFall() {
++    public synchronized @Nullable CombatEntry getMostSignificantFall() {
+         CombatEntry result = null;
+         CombatEntry alternative = null;
+         float altDamage = 0.0F;
+@@ -138,11 +_,11 @@
+         }
+     }
+ 
+-    public int getCombatDuration() {
++    public synchronized int getCombatDuration() {
+         return this.inCombat ? this.mob.tickCount - this.combatStartTime : this.combatEndTime - this.combatStartTime;
+     }
+ 
+-    public void recheckStatus() {
++    public synchronized void recheckStatus() {
+         int reset = this.inCombat ? 300 : 100;
+         if (this.takingDamage && (!this.mob.isAlive() || this.mob.tickCount - this.lastDamageTime > reset)) {
+             boolean wasInCombat = this.inCombat;

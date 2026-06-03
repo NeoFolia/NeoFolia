@@ -1,0 +1,24 @@
+--- a/net/minecraft/world/entity/projectile/hurtingprojectile/DragonFireball.java
++++ b/net/minecraft/world/entity/projectile/hurtingprojectile/DragonFireball.java
+@@ -11,9 +_,11 @@
+ import net.minecraft.world.entity.EntityType;
+ import net.minecraft.world.entity.LivingEntity;
+ import net.minecraft.world.level.Level;
++import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class DragonFireball extends AbstractHurtingProjectile {
+     public static final float SPLASH_RANGE = 4.0F;
+@@ -31,7 +_,8 @@
+         super.onHit(hitResult);
+         if (hitResult.getType() != HitResult.Type.ENTITY || !this.ownedBy(((EntityHitResult)hitResult).getEntity())) {
+             if (!this.level().isClientSide()) {
+-                List<LivingEntity> entitiesOfClass = this.level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(4.0, 2.0, 4.0));
++                AABB searchBox = RegionizedWorldGuard.restrictToCurrentRegion(this.level(), this.getBoundingBox().inflate(4.0, 2.0, 4.0));
++                List<LivingEntity> entitiesOfClass = searchBox == null ? List.of() : this.level().getEntitiesOfClass(LivingEntity.class, searchBox);
+                 AreaEffectCloud cloud = new AreaEffectCloud(this.level(), this.getX(), this.getY(), this.getZ());
+                 Entity owner = this.getOwner();
+                 if (owner instanceof LivingEntity) {

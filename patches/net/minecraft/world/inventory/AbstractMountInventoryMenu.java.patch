@@ -1,0 +1,40 @@
+--- a/net/minecraft/world/inventory/AbstractMountInventoryMenu.java
++++ b/net/minecraft/world/inventory/AbstractMountInventoryMenu.java
+@@ -5,6 +_,9 @@
+ import net.minecraft.world.entity.player.Inventory;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
++import net.minecraft.world.level.Level;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public abstract class AbstractMountInventoryMenu extends AbstractContainerMenu {
+     protected final Container mountContainer;
+@@ -25,6 +_,11 @@
+ 
+     @Override
+     public boolean stillValid(Player player) {
++        Level level = this.mount.level();
++        if (RegionizedTickContext.isRegionThread() && RegionizedWorldGuard.restrictEntityToCurrentRegion(level, this.mount) == null) {
++            return false;
++        }
++
+         return !this.hasInventoryChanged(this.mountContainer)
+             && this.mountContainer.stillValid(player)
+             && this.mount.isAlive()
+@@ -32,13 +_,13 @@
+     }
+ 
+     @Override
+-    public void removed(Player player) {
++    public synchronized void removed(Player player) {
+         super.removed(player);
+         this.mountContainer.stopOpen(player);
+     }
+ 
+     @Override
+-    public ItemStack quickMoveStack(Player player, int slotIndex) {
++    public synchronized ItemStack quickMoveStack(Player player, int slotIndex) {
+         ItemStack clicked = ItemStack.EMPTY;
+         Slot slot = this.slots.get(slotIndex);
+         if (slot != null && slot.hasItem()) {

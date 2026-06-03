@@ -1,0 +1,326 @@
+--- a/net/minecraft/world/level/ServerExplosion.java
++++ b/net/minecraft/world/level/ServerExplosion.java
+@@ -8,10 +_,19 @@
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.Set;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicInteger;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.server.level.ServerLevel;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.tags.EntityTypeTags;
+ import net.minecraft.util.Mth;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.ProfilerFiller;
+@@ -48,7 +_,12 @@
+     private final float radius;
+     private final DamageSource damageSource;
+     private final ExplosionDamageCalculator damageCalculator;
++    private final long randomSeed;
++    private final RandomSource random;
+     private final Map<Player, Vec3> hitPlayers = new HashMap<>();
++    private final List<CompletableFuture<Void>> regionSpilloverTasks = java.util.Collections.synchronizedList(new ArrayList<>());
++    private final AtomicInteger regionSpilloverBlockCount = new AtomicInteger();
++    private final ConcurrentHashMap<Player, Vec3> regionSpilloverPlayerKnockbacks = new ConcurrentHashMap<>();
+ 
+     public ServerExplosion(
+         ServerLevel level,
+@@ -68,12 +_,41 @@
+         this.blockInteraction = blockInteraction;
+         this.damageSource = damageSource == null ? level.damageSources().explosion(this) : damageSource;
+         this.damageCalculator = damageCalculator == null ? this.makeDamageCalculator(source) : damageCalculator;
++        this.randomSeed = this.seedExplosionRandom(level);
++        this.random = RandomSource.create(this.randomSeed);
++    }
++
++    private ServerExplosion(
++        ServerLevel level,
++        @Nullable Entity source,
++        DamageSource damageSource,
++        ExplosionDamageCalculator damageCalculator,
++        Vec3 center,
++        float radius,
++        boolean fire,
++        Explosion.BlockInteraction blockInteraction,
++        long randomSeed
++    ) {
++        this.level = level;
++        this.source = source;
++        this.radius = radius;
++        this.center = center;
++        this.fire = fire;
++        this.blockInteraction = blockInteraction;
++        this.damageSource = damageSource;
++        this.damageCalculator = damageCalculator;
++        this.randomSeed = randomSeed;
++        this.random = RandomSource.create(randomSeed);
+     }
+ 
+     private ExplosionDamageCalculator makeDamageCalculator(@Nullable Entity source) {
+         return (ExplosionDamageCalculator)(source == null ? EXPLOSION_DAMAGE_CALCULATOR : new EntityBasedExplosionDamageCalculator(source));
+     }
+ 
++    private long seedExplosionRandom(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.random).nextLong();
++    }
++
+     public static float getSeenPercent(Vec3 center, Entity entity) {
+         AABB bb = entity.getBoundingBox();
+         double xs = 1.0 / ((bb.maxX - bb.minX) * 2.0 + 1.0);
+@@ -133,19 +_,26 @@
+                         xd /= d;
+                         yd /= d;
+                         zd /= d;
+-                        float remainingPower = this.radius * (0.7F + this.level.random.nextFloat() * 0.6F);
++                        float remainingPower = this.radius * (0.7F + this.random().nextFloat() * 0.6F);
+                         double xp = this.center.x;
+                         double yp = this.center.y;
+                         double zp = this.center.z;
+ 
+                         for (float stepSize = 0.3F; remainingPower > 0.0F; remainingPower -= 0.22500001F) {
+                             BlockPos pos = BlockPos.containing(xp, yp, zp);
+-                            BlockState block = this.level.getBlockState(pos);
+-                            FluidState fluid = this.level.getFluidState(pos);
+                             if (!this.level.isInWorldBounds(pos)) {
+                                 break;
+                             }
+ 
++                            if (!this.canReadExplosionBlock(pos)) {
++                                xp += xd * 0.3F;
++                                yp += yd * 0.3F;
++                                zp += zd * 0.3F;
++                                continue;
++                            }
++
++                            BlockState block = this.level.getBlockState(pos);
++                            FluidState fluid = this.level.getFluidState(pos);
+                             Optional<Float> resistance = this.damageCalculator.getBlockExplosionResistance(this, this.level, pos, block, fluid);
+                             if (resistance.isPresent()) {
+                                 remainingPower -= (resistance.get() + 0.3F) * 0.3F;
+@@ -167,7 +_,24 @@
+         return new ObjectArrayList<>(toBlowSet);
+     }
+ 
++    private boolean canReadExplosionBlock(BlockPos pos) {
++        return !RegionizedTickContext.isRegionThread() || RegionizedWorldGuard.isRegionThreadFor(this.level, pos);
++    }
++
++    private RandomSource random() {
++        return this.random;
++    }
++
++    private @Nullable AABB restrictEntitySearchBox(AABB box) {
++        return RegionizedWorldGuard.restrictToCurrentRegion(this.level, box);
++    }
++
++    @Deprecated
+     private void hurtEntities() {
++        this.hurtEntities(List.of());
++    }
++
++    private void hurtEntities(List<BlockPos> blocks) {
+         if (!(this.radius < 1.0E-5F)) {
+             float doubleRadius = this.radius * 2.0F;
+             int x0 = Mth.floor(this.center.x - doubleRadius - 1.0);
+@@ -177,7 +_,15 @@
+             int z0 = Mth.floor(this.center.z - doubleRadius - 1.0);
+             int z1 = Mth.floor(this.center.z + doubleRadius + 1.0);
+ 
+-            for (Entity entity : this.level.getEntities(this.source, new AABB(x0, y0, z0, x1, y1, z1))) {
++            @Nullable AABB entitySearchBox = this.restrictEntitySearchBox(new AABB(x0, y0, z0, x1, y1, z1));
++            if (entitySearchBox == null) {
++                return;
++            }
++
++            List<Entity> list = this.level.getEntities(this.source, entitySearchBox);
++            this.retainRegionLocalEntities(list);
++            net.neoforged.neoforge.event.EventHooks.onExplosionDetonate(this.level, this, list, blocks);
++            for (Entity entity : list) {
+                 if (!entity.ignoreExplosion(this)) {
+                     double dist = Math.sqrt(entity.distanceToSqr(this.center)) / doubleRadius;
+                     if (!(dist > 1.0)) {
+@@ -195,9 +_,10 @@
+                             : 0.0;
+                         double knockbackPower = (1.0 - dist) * exposure * knockbackMultiplier * (1.0 - knockbackResistance);
+                         Vec3 knockback = direction.scale(knockbackPower);
++                        knockback = net.neoforged.neoforge.event.EventHooks.getExplosionKnockback(this.level, this, entity, knockback, blocks);
+                         entity.push(knockback);
+                         if (entity.is(EntityTypeTags.REDIRECTABLE_PROJECTILE) && entity instanceof Projectile projectile) {
+-                            projectile.setOwner(this.damageSource.getEntity());
++                            projectile.setOwner(RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, this.damageSource.getEntity()));
+                         } else if (entity instanceof Player player && !player.isSpectator() && (!player.isCreative() || !player.getAbilities().flying)) {
+                             this.hitPlayers.put(player, knockback);
+                         }
+@@ -211,7 +_,7 @@
+ 
+     private void interactWithBlocks(List<BlockPos> targetBlocks) {
+         List<ServerExplosion.StackCollector> stacks = new ArrayList<>();
+-        Util.shuffle(targetBlocks, this.level.random);
++        Util.shuffle(targetBlocks, this.random());
+ 
+         for (BlockPos pos : targetBlocks) {
+             this.level.getBlockState(pos).onExplosionHit(this.level, pos, this, (stackx, position) -> addOrAppendStack(stacks, stackx, position));
+@@ -224,16 +_,28 @@
+ 
+     private void createFire(List<BlockPos> targetBlocks) {
+         for (BlockPos pos : targetBlocks) {
+-            if (this.level.random.nextInt(3) == 0 && this.level.getBlockState(pos).isAir() && this.level.getBlockState(pos.below()).isSolidRender()) {
++            if (this.random().nextInt(3) == 0 && this.level.getBlockState(pos).isAir() && this.level.getBlockState(pos.below()).isSolidRender()) {
+                 this.level.setBlockAndUpdate(pos, BaseFireBlock.getState(this.level, pos));
+             }
+         }
+     }
+ 
+     public int explode() {
+-        this.level.gameEvent(this.source, GameEvent.EXPLODE, this.center);
+-        List<BlockPos> toBlow = this.calculateExplodedPositions();
+-        this.hurtEntities();
++        if (RegionizedTickContext.isRegionThread() && !RegionizedWorldGuard.isRegionThreadFor(this.level, BlockPos.containing(this.center))) {
++            return 0;
++        }
++
++        this.scheduleRegionSpillover();
++        return this.explodeRegionLocal(true);
++    }
++
++    private int explodeRegionLocal(boolean primary) {
++        if (primary) {
++            this.level.gameEvent(this.source, GameEvent.EXPLODE, this.center);
++        }
++
++        List<BlockPos> toBlow = this.retainRegionLocalBlocks(this.calculateExplodedPositions());
++        this.hurtEntities(toBlow);
+         if (this.interactsWithBlocks()) {
+             ProfilerFiller profiler = Profiler.get();
+             profiler.push("explosion_blocks");
+@@ -248,6 +_,110 @@
+         return toBlow.size();
+     }
+ 
++    public boolean hasRegionSpillover() {
++        return !this.regionSpilloverTasks.isEmpty();
++    }
++
++    public CompletableFuture<RegionSpilloverResult> regionSpilloverResult() {
++        List<CompletableFuture<Void>> tasks;
++        synchronized (this.regionSpilloverTasks) {
++            tasks = List.copyOf(this.regionSpilloverTasks);
++        }
++
++        if (tasks.isEmpty()) {
++            return CompletableFuture.completedFuture(new RegionSpilloverResult(0, Map.of()));
++        }
++
++        CompletableFuture<Void> allTasks = CompletableFuture.allOf(tasks.toArray(CompletableFuture[]::new));
++        int timeoutSeconds = RegionizedServerSettings.regionTaskTimeoutSeconds();
++        if (timeoutSeconds > 0) {
++            allTasks = allTasks.orTimeout(timeoutSeconds, TimeUnit.SECONDS);
++        }
++
++        return allTasks.thenApply(ignored -> new RegionSpilloverResult(this.regionSpilloverBlockCount.get(), Map.copyOf(this.regionSpilloverPlayerKnockbacks)));
++    }
++
++    private void scheduleRegionSpillover() {
++        if (!RegionizedTickContext.isRegionThread() || !this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            return;
++        }
++
++        RegionKey currentRegion = RegionizedTickContext.currentRegion().orElse(null);
++        if (currentRegion == null || currentRegion.level() != this.level.dimension()) {
++            return;
++        }
++
++        for (RegionKey region : this.affectedRegions()) {
++            if (region.equals(currentRegion)) {
++                continue;
++            }
++
++            CompletableFuture<Void> task = this.level.getServer().regionizedTaskDispatcher().submit(region, () -> {
++                ServerExplosion spillover = new ServerExplosion(
++                    this.level,
++                    this.source,
++                    this.damageSource,
++                    this.damageCalculator,
++                    this.center,
++                    this.radius,
++                    this.fire,
++                    this.blockInteraction,
++                    this.randomSeed
++                );
++                int blockCount = spillover.explodeRegionLocal(false);
++                this.regionSpilloverBlockCount.addAndGet(blockCount);
++                for (Map.Entry<Player, Vec3> entry : spillover.getHitPlayers().entrySet()) {
++                    this.regionSpilloverPlayerKnockbacks.put(entry.getKey(), entry.getValue());
++                }
++            });
++            this.regionSpilloverTasks.add(task);
++        }
++    }
++
++    private Set<RegionKey> affectedRegions() {
++        Set<RegionKey> regions = new HashSet<>();
++        float doubleRadius = this.radius * 2.0F;
++        int minChunkX = Mth.floor(this.center.x - doubleRadius - 1.0) >> 4;
++        int maxChunkX = Mth.floor(this.center.x + doubleRadius + 1.0) >> 4;
++        int minChunkZ = Mth.floor(this.center.z - doubleRadius - 1.0) >> 4;
++        int maxChunkZ = Mth.floor(this.center.z + doubleRadius + 1.0) >> 4;
++        int minRegionX = minChunkX >> RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT;
++        int maxRegionX = maxChunkX >> RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT;
++        int minRegionZ = minChunkZ >> RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT;
++        int maxRegionZ = maxChunkZ >> RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT;
++
++        for (int regionX = minRegionX; regionX <= maxRegionX; regionX++) {
++            for (int regionZ = minRegionZ; regionZ <= maxRegionZ; regionZ++) {
++                regions.add(new RegionKey(this.level.dimension(), regionX, regionZ));
++            }
++        }
++
++        return regions;
++    }
++
++    private List<BlockPos> retainRegionLocalBlocks(List<BlockPos> blocks) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return blocks;
++        }
++
++        List<BlockPos> localBlocks = new ArrayList<>(blocks.size());
++        for (BlockPos pos : blocks) {
++            if (RegionizedWorldGuard.isRegionThreadFor(this.level, pos)) {
++                localBlocks.add(pos);
++            }
++        }
++
++        return localBlocks;
++    }
++
++    private void retainRegionLocalEntities(List<Entity> entities) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return;
++        }
++
++        entities.removeIf(entity -> !RegionizedWorldGuard.isRegionThreadFor(this.level, entity.blockPosition()));
++    }
++
+     private static void addOrAppendStack(List<ServerExplosion.StackCollector> stacks, ItemStack stack, BlockPos pos) {
+         for (ServerExplosion.StackCollector stackCollector : stacks) {
+             stackCollector.tryMerge(stack);
+@@ -264,7 +_,10 @@
+     }
+ 
+     public Map<Player, Vec3> getHitPlayers() {
+-        return this.hitPlayers;
++        return Map.copyOf(this.hitPlayers);
++    }
++
++    public record RegionSpilloverResult(int blockCount, Map<Player, Vec3> playerKnockbacks) {
+     }
+ 
+     @Override

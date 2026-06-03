@@ -1,0 +1,90 @@
+--- a/net/minecraft/world/entity/ai/goal/target/HurtByTargetGoal.java
++++ b/net/minecraft/world/entity/ai/goal/target/HurtByTargetGoal.java
+@@ -13,6 +_,7 @@
+ import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class HurtByTargetGoal extends TargetGoal {
+@@ -30,9 +_,9 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         int timestamp = this.mob.getLastHurtByMobTimestamp();
+-        LivingEntity lastHurtByMob = this.mob.getLastHurtByMob();
++        LivingEntity lastHurtByMob = this.regionSafeTarget(this.mob.getLastHurtByMob());
+         if (timestamp != this.timestamp && lastHurtByMob != null) {
+             if (lastHurtByMob.is(EntityType.PLAYER) && getServerLevel(this.mob).getGameRules().get(GameRules.UNIVERSAL_ANGER)) {
+                 return false;
+@@ -50,15 +_,15 @@
+         }
+     }
+ 
+-    public HurtByTargetGoal setAlertOthers(Class<?>... exceptTheseTypes) {
++    public synchronized HurtByTargetGoal setAlertOthers(Class<?>... exceptTheseTypes) {
+         this.alertSameType = true;
+         this.toIgnoreAlert = exceptTheseTypes;
+         return this;
+     }
+ 
+     @Override
+-    public void start() {
+-        this.mob.setTarget(this.mob.getLastHurtByMob());
++    public synchronized void start() {
++        this.mob.setTarget(this.regionSafeTarget(this.mob.getLastHurtByMob()));
+         this.targetMob = this.mob.getTarget();
+         this.timestamp = this.mob.getLastHurtByMobTimestamp();
+         this.unseenMemoryTicks = 300;
+@@ -69,10 +_,13 @@
+         super.start();
+     }
+ 
+-    protected void alertOthers() {
++    protected synchronized void alertOthers() {
+         double within = this.getFollowDistance();
+         AABB searchAabb = AABB.unitCubeFromLowerCorner(this.mob.position()).inflate(within, 10.0, within);
+-        List<? extends Mob> nearby = this.mob.level().getEntitiesOfClass((Class<? extends Mob>)this.mob.getClass(), searchAabb, EntitySelector.NO_SPECTATORS);
++        searchAabb = RegionizedWorldGuard.restrictToCurrentRegion(this.mob.level(), searchAabb);
++        List<? extends Mob> nearby = searchAabb == null
++            ? List.of()
++            : List.copyOf(this.mob.level().getEntitiesOfClass((Class<? extends Mob>)this.mob.getClass(), searchAabb, EntitySelector.NO_SPECTATORS));
+         Iterator var5 = nearby.iterator();
+ 
+         while (true) {
+@@ -83,10 +_,13 @@
+                 }
+ 
+                 other = (Mob)var5.next();
++                LivingEntity hurtByMob = this.regionSafeTarget(this.mob.getLastHurtByMob());
++                LivingEntity mobOwner = this.mob instanceof TamableAnimal tamableMob ? this.regionSafeTarget(tamableMob.getOwner()) : null;
++                LivingEntity otherOwner = other instanceof TamableAnimal tamableOther ? this.regionSafeTarget(tamableOther.getOwner()) : null;
+                 if (this.mob != other
+                     && other.getTarget() == null
+-                    && (!(this.mob instanceof TamableAnimal) || ((TamableAnimal)this.mob).getOwner() == ((TamableAnimal)other).getOwner())
+-                    && !other.isAlliedTo(this.mob.getLastHurtByMob())) {
++                    && (!(this.mob instanceof TamableAnimal) || mobOwner != null && other instanceof TamableAnimal && mobOwner == otherOwner)
++                    && (hurtByMob == null || !other.isAlliedTo(hurtByMob))) {
+                     if (this.toIgnoreAlert == null) {
+                         break;
+                     }
+@@ -106,11 +_,14 @@
+                 }
+             }
+ 
+-            this.alertOther(other, this.mob.getLastHurtByMob());
++            LivingEntity hurtByMob = this.regionSafeTarget(this.mob.getLastHurtByMob());
++            if (hurtByMob != null) {
++                this.alertOther(other, hurtByMob);
++            }
+         }
+     }
+ 
+-    protected void alertOther(Mob other, LivingEntity hurtByMob) {
++    protected synchronized void alertOther(Mob other, LivingEntity hurtByMob) {
+         other.setTarget(hurtByMob);
+     }
+ }

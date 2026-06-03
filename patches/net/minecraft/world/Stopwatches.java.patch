@@ -1,0 +1,56 @@
+--- a/net/minecraft/world/Stopwatches.java
++++ b/net/minecraft/world/Stopwatches.java
+@@ -33,18 +_,18 @@
+         return result;
+     }
+ 
+-    private Map<Identifier, Long> pack() {
++    private synchronized Map<Identifier, Long> pack() {
+         long currentTime = currentTime();
+         Map<Identifier, Long> result = new TreeMap<>();
+         this.stopwatches.forEach((id, stopwatch) -> result.put(id, stopwatch.elapsedMilliseconds(currentTime)));
+         return result;
+     }
+ 
+-    public @Nullable Stopwatch get(Identifier id) {
++    public synchronized @Nullable Stopwatch get(Identifier id) {
+         return this.stopwatches.get(id);
+     }
+ 
+-    public boolean add(Identifier id, Stopwatch stopwatch) {
++    public synchronized boolean add(Identifier id, Stopwatch stopwatch) {
+         if (this.stopwatches.putIfAbsent(id, stopwatch) == null) {
+             this.setDirty();
+             return true;
+@@ -53,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean update(Identifier id, UnaryOperator<Stopwatch> update) {
++    public synchronized boolean update(Identifier id, UnaryOperator<Stopwatch> update) {
+         if (this.stopwatches.computeIfPresent(id, (key, value) -> update.apply(value)) != null) {
+             this.setDirty();
+             return true;
+@@ -62,7 +_,7 @@
+         }
+     }
+ 
+-    public boolean remove(Identifier id) {
++    public synchronized boolean remove(Identifier id) {
+         boolean removed = this.stopwatches.remove(id) != null;
+         if (removed) {
+             this.setDirty();
+@@ -72,11 +_,11 @@
+     }
+ 
+     @Override
+-    public boolean isDirty() {
++    public synchronized boolean isDirty() {
+         return super.isDirty() || !this.stopwatches.isEmpty();
+     }
+ 
+-    public List<Identifier> ids() {
++    public synchronized List<Identifier> ids() {
+         return List.copyOf(this.stopwatches.keySet());
+     }
+ 

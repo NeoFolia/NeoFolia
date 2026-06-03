@@ -1,0 +1,37 @@
+--- a/net/minecraft/world/level/block/PumpkinBlock.java
++++ b/net/minecraft/world/level/block/PumpkinBlock.java
+@@ -7,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -37,7 +_,7 @@
+     protected InteractionResult useItemOn(
+         ItemStack itemStack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult
+     ) {
+-        if (!itemStack.is(Items.SHEARS)) {
++        if (!itemStack.canPerformAction(net.neoforged.neoforge.common.ItemAbilities.SHEARS_CARVE)) {
+             return super.useItemOn(itemStack, state, level, pos, player, hand, hitResult);
+         } else if (level instanceof ServerLevel serverLevel) {
+             Direction clickedDirection = hitResult.getDirection();
+@@ -53,7 +_,7 @@
+                     ItemEntity entity = new ItemEntity(
+                         level, pos.getX() + 0.5 + direction.getStepX() * 0.65, pos.getY() + 0.1, pos.getZ() + 0.5 + direction.getStepZ() * 0.65, pumpkinSeeds
+                     );
+-                    RandomSource random = level.getRandom();
++                    RandomSource random = entity.getRandom();
+                     entity.setDeltaMovement(
+                         0.05 * direction.getStepX() + random.nextDouble() * 0.02, 0.05, 0.05 * direction.getStepZ() + random.nextDouble() * 0.02
+                     );
+@@ -64,7 +_,7 @@
+             level.setBlock(pos, Blocks.CARVED_PUMPKIN.defaultBlockState().setValue(CarvedPumpkinBlock.FACING, direction), 11);
+             itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot());
+             level.gameEvent(player, GameEvent.SHEAR, pos);
+-            player.awardStat(Stats.ITEM_USED.get(Items.SHEARS));
++            RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(Items.SHEARS));
+             return InteractionResult.SUCCESS;
+         } else {
+             return InteractionResult.SUCCESS;

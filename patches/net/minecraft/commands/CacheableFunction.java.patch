@@ -1,0 +1,11 @@
+--- a/net/minecraft/commands/CacheableFunction.java
++++ b/net/minecraft/commands/CacheableFunction.java
+@@ -16,7 +_,7 @@
+         this.id = id;
+     }
+ 
+-    public Optional<CommandFunction<CommandSourceStack>> get(ServerFunctionManager manager) {
++    public synchronized Optional<CommandFunction<CommandSourceStack>> get(ServerFunctionManager manager) {
+         if (!this.resolved) {
+             this.function = manager.get(this.id);
+             this.resolved = true;

@@ -1,0 +1,50 @@
+--- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
++++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
+@@ -16,10 +_,12 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.BlockGetter;
+ import net.minecraft.world.level.CustomSpawner;
++import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelReader;
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.level.saveddata.WanderingTraderData;
+ import net.minecraft.world.level.storage.SavedDataStorage;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class WanderingTraderSpawner implements CustomSpawner {
+@@ -124,6 +_,10 @@
+         for (int i = 0; i < 10; i++) {
+             int xPosition = referencePosition.getX() + this.random.nextInt(radius * 2) - radius;
+             int zPosition = referencePosition.getZ() + this.random.nextInt(radius * 2) - radius;
++            if (!canReadChunk(level, xPosition >> 4, zPosition >> 4)) {
++                continue;
++            }
++
+             int yPosition = level.getHeight(SpawnPlacements.getHeightmapType(EntityType.WANDERING_TRADER), xPosition, zPosition);
+             BlockPos spawnPos = new BlockPos(xPosition, yPosition, zPosition);
+             if (wanderingTraderSpawnType.isSpawnPositionOk(level, spawnPos, EntityType.WANDERING_TRADER)) {
+@@ -137,11 +_,23 @@
+ 
+     private boolean hasEnoughSpace(BlockGetter level, BlockPos spawnPos) {
+         for (BlockPos pos : BlockPos.betweenClosed(spawnPos, spawnPos.offset(1, 2, 1))) {
++            if (!canReadBlock(level, pos)) {
++                return false;
++            }
++
+             if (!level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()) {
+                 return false;
+             }
+         }
+ 
+         return true;
++    }
++
++    private static boolean canReadBlock(BlockGetter level, BlockPos pos) {
++        return canReadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
++    }
++
++    private static boolean canReadChunk(BlockGetter level, int chunkX, int chunkZ) {
++        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, chunkX, chunkZ);
+     }
+ }

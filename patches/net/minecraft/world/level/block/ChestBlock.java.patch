@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/level/block/ChestBlock.java
++++ b/net/minecraft/world/level/block/ChestBlock.java
+@@ -18,6 +_,7 @@
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.stats.Stat;
+ import net.minecraft.stats.Stats;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.CompoundContainer;
+ import net.minecraft.world.Container;
+@@ -262,7 +_,7 @@
+             MenuProvider menuProvider = this.getMenuProvider(state, level, pos);
+             if (menuProvider != null) {
+                 player.openMenu(menuProvider);
+-                player.awardStat(this.getOpenChestStat());
++                RegionizedWorldGuard.awardStat(player, this.getOpenChestStat());
+                 PiglinAi.angerNearbyPiglins(serverLevel, player, true);
+             }
+         }
+@@ -368,7 +_,8 @@
+ 
+     @Override
+     protected BlockState mirror(BlockState state, Mirror mirror) {
+-        return state.rotate(mirror.getRotation(state.getValue(FACING)));
++        BlockState rotated = state.rotate(mirror.getRotation(state.getValue(FACING)));
++        return mirror == Mirror.NONE ? rotated : rotated.setValue(TYPE, rotated.getValue(TYPE).getOpposite());  // Forge: Fixed MC-134110 Structure mirroring breaking apart double chests
+     }
+ 
+     @Override

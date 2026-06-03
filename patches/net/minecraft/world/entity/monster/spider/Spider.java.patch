@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/entity/monster/spider/Spider.java
++++ b/net/minecraft/world/entity/monster/spider/Spider.java
+@@ -146,7 +_,7 @@
+         ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnReason, @Nullable SpawnGroupData groupData
+     ) {
+         groupData = super.finalizeSpawn(level, difficulty, spawnReason, groupData);
+-        RandomSource random = level.getRandom();
++        RandomSource random = this.getRandom();
+         if (random.nextInt(100) == 0) {
+             Skeleton skeleton = EntityType.SKELETON.create(this.level(), EntitySpawnReason.JOCKEY);
+             if (skeleton != null) {

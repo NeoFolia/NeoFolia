@@ -1,0 +1,64 @@
+--- a/net/minecraft/world/level/pathfinder/AmphibiousNodeEvaluator.java
++++ b/net/minecraft/world/level/pathfinder/AmphibiousNodeEvaluator.java
+@@ -17,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void prepare(PathNavigationRegion level, Mob entity) {
++    public synchronized void prepare(PathNavigationRegion level, Mob entity) {
+         super.prepare(level, entity);
+         entity.setPathfindingMalus(PathType.WATER, 0.0F);
+         this.oldWalkableCost = entity.getPathfindingMalus(PathType.WALKABLE);
+@@ -27,14 +_,14 @@
+     }
+ 
+     @Override
+-    public void done() {
++    public synchronized void done() {
+         this.mob.setPathfindingMalus(PathType.WALKABLE, this.oldWalkableCost);
+         this.mob.setPathfindingMalus(PathType.WATER_BORDER, this.oldWaterBorderCost);
+         super.done();
+     }
+ 
+     @Override
+-    public Node getStart() {
++    public synchronized Node getStart() {
+         return !this.mob.isInWater()
+             ? super.getStart()
+             : this.getStartNode(
+@@ -45,12 +_,12 @@
+     }
+ 
+     @Override
+-    public Target getTarget(double x, double y, double z) {
++    public synchronized Target getTarget(double x, double y, double z) {
+         return this.getTargetNodeAt(x, y + 0.5, z);
+     }
+ 
+     @Override
+-    public int getNeighbors(Node[] neighbors, Node pos) {
++    public synchronized int getNeighbors(Node[] neighbors, Node pos) {
+         int numValidNeighbors = super.getNeighbors(neighbors, pos);
+         PathType blockPathTypeAbove = this.getCachedPathType(pos.x, pos.y + 1, pos.z);
+         PathType blockPathTypeCurrent = this.getCachedPathType(pos.x, pos.y, pos.z);
+@@ -82,17 +_,17 @@
+         return numValidNeighbors;
+     }
+ 
+-    private boolean isVerticalNeighborValid(@Nullable Node verticalNode, Node pos) {
++    private synchronized boolean isVerticalNeighborValid(@Nullable Node verticalNode, Node pos) {
+         return this.isNeighborValid(verticalNode, pos) && verticalNode.type == PathType.WATER;
+     }
+ 
+     @Override
+-    protected boolean isAmphibious() {
++    protected synchronized boolean isAmphibious() {
+         return true;
+     }
+ 
+     @Override
+-    public PathType getPathType(PathfindingContext context, int x, int y, int z) {
++    public synchronized PathType getPathType(PathfindingContext context, int x, int y, int z) {
+         PathType blockPathType = context.getPathTypeFromState(x, y, z);
+         if (blockPathType == PathType.WATER) {
+             BlockPos.MutableBlockPos reusablePos = new BlockPos.MutableBlockPos();

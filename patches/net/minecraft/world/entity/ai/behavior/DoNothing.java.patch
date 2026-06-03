@@ -1,0 +1,48 @@
+--- a/net/minecraft/world/entity/ai/behavior/DoNothing.java
++++ b/net/minecraft/world/entity/ai/behavior/DoNothing.java
+@@ -17,37 +_,38 @@
+     }
+ 
+     @Override
+-    public Behavior.Status getStatus() {
++    public synchronized Behavior.Status getStatus() {
+         return this.status;
+     }
+ 
+     @Override
+-    public Set<MemoryModuleType<?>> getRequiredMemories() {
++    public synchronized Set<MemoryModuleType<?>> getRequiredMemories() {
+         return Set.of();
+     }
+ 
+     @Override
+-    public final boolean tryStart(ServerLevel level, LivingEntity body, long timestamp) {
++    public final synchronized boolean tryStart(ServerLevel level, LivingEntity body, long timestamp) {
+         this.status = Behavior.Status.RUNNING;
+-        int duration = this.minDuration + level.getRandom().nextInt(this.maxDuration + 1 - this.minDuration);
++        int duration = this.minDuration + body.getRandom().nextInt(this.maxDuration + 1 - this.minDuration);
+         this.endTimestamp = timestamp + duration;
+         return true;
+     }
+ 
+     @Override
+-    public final void tickOrStop(ServerLevel level, LivingEntity body, long timestamp) {
++    public final synchronized void tickOrStop(ServerLevel level, LivingEntity body, long timestamp) {
+         if (timestamp > this.endTimestamp) {
+             this.doStop(level, body, timestamp);
+         }
+     }
+ 
+     @Override
+-    public final void doStop(ServerLevel level, LivingEntity body, long timestamp) {
++    public final synchronized void doStop(ServerLevel level, LivingEntity body, long timestamp) {
+         this.status = Behavior.Status.STOPPED;
++        this.endTimestamp = 0L;
+     }
+ 
+     @Override
+-    public String debugString() {
++    public synchronized String debugString() {
+         return this.getClass().getSimpleName();
+     }
+ }

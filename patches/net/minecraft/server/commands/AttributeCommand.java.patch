@@ -1,0 +1,474 @@
+--- a/net/minecraft/server/commands/AttributeCommand.java
++++ b/net/minecraft/server/commands/AttributeCommand.java
+@@ -2,10 +_,12 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.arguments.DoubleArgumentType;
++import com.mojang.brigadier.context.CommandContext;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.Dynamic3CommandExceptionType;
+ import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
++import java.util.List;
+ import java.util.stream.Stream;
+ import net.minecraft.commands.CommandBuildContext;
+ import net.minecraft.commands.CommandSourceStack;
+@@ -49,21 +_,10 @@
+                             Commands.argument("attribute", ResourceArgument.resource(context, Registries.ATTRIBUTE))
+                                 .then(
+                                     Commands.literal("get")
+-                                        .executes(
+-                                            c -> getAttributeValue(
+-                                                c.getSource(), EntityArgument.getEntity(c, "target"), ResourceArgument.getAttribute(c, "attribute"), 1.0
+-                                            )
+-                                        )
++                                        .executes(c -> getAttributeValue(c, false))
+                                         .then(
+                                             Commands.argument("scale", DoubleArgumentType.doubleArg())
+-                                                .executes(
+-                                                    c -> getAttributeValue(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getEntity(c, "target"),
+-                                                        ResourceArgument.getAttribute(c, "attribute"),
+-                                                        DoubleArgumentType.getDouble(c, "scale")
+-                                                    )
+-                                                )
++                                                .executes(c -> getAttributeValue(c, true))
+                                         )
+                                 )
+                                 .then(
+@@ -72,45 +_,20 @@
+                                             Commands.literal("set")
+                                                 .then(
+                                                     Commands.argument("value", DoubleArgumentType.doubleArg())
+-                                                        .executes(
+-                                                            c -> setAttributeBase(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getEntity(c, "target"),
+-                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                DoubleArgumentType.getDouble(c, "value")
+-                                                            )
+-                                                        )
++                                                        .executes(AttributeCommand::setAttributeBase)
+                                                 )
+                                         )
+                                         .then(
+                                             Commands.literal("get")
+-                                                .executes(
+-                                                    c -> getAttributeBase(
+-                                                        c.getSource(),
+-                                                        EntityArgument.getEntity(c, "target"),
+-                                                        ResourceArgument.getAttribute(c, "attribute"),
+-                                                        1.0
+-                                                    )
+-                                                )
++                                                .executes(c -> getAttributeBase(c, false))
+                                                 .then(
+                                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+-                                                        .executes(
+-                                                            c -> getAttributeBase(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getEntity(c, "target"),
+-                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                DoubleArgumentType.getDouble(c, "scale")
+-                                                            )
+-                                                        )
++                                                        .executes(c -> getAttributeBase(c, true))
+                                                 )
+                                         )
+                                         .then(
+                                             Commands.literal("reset")
+-                                                .executes(
+-                                                    c -> resetAttributeBase(
+-                                                        c.getSource(), EntityArgument.getEntity(c, "target"), ResourceArgument.getAttribute(c, "attribute")
+-                                                    )
+-                                                )
++                                                .executes(AttributeCommand::resetAttributeBase)
+                                         )
+                                 )
+                                 .then(
+@@ -123,42 +_,15 @@
+                                                             Commands.argument("value", DoubleArgumentType.doubleArg())
+                                                                 .then(
+                                                                     Commands.literal("add_value")
+-                                                                        .executes(
+-                                                                            c -> addModifier(
+-                                                                                c.getSource(),
+-                                                                                EntityArgument.getEntity(c, "target"),
+-                                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                                IdentifierArgument.getId(c, "id"),
+-                                                                                DoubleArgumentType.getDouble(c, "value"),
+-                                                                                AttributeModifier.Operation.ADD_VALUE
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> addModifier(c, AttributeModifier.Operation.ADD_VALUE))
+                                                                 )
+                                                                 .then(
+                                                                     Commands.literal("add_multiplied_base")
+-                                                                        .executes(
+-                                                                            c -> addModifier(
+-                                                                                c.getSource(),
+-                                                                                EntityArgument.getEntity(c, "target"),
+-                                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                                IdentifierArgument.getId(c, "id"),
+-                                                                                DoubleArgumentType.getDouble(c, "value"),
+-                                                                                AttributeModifier.Operation.ADD_MULTIPLIED_BASE
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> addModifier(c, AttributeModifier.Operation.ADD_MULTIPLIED_BASE))
+                                                                 )
+                                                                 .then(
+                                                                     Commands.literal("add_multiplied_total")
+-                                                                        .executes(
+-                                                                            c -> addModifier(
+-                                                                                c.getSource(),
+-                                                                                EntityArgument.getEntity(c, "target"),
+-                                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                                IdentifierArgument.getId(c, "id"),
+-                                                                                DoubleArgumentType.getDouble(c, "value"),
+-                                                                                AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> addModifier(c, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL))
+                                                                 )
+                                                         )
+                                                 )
+@@ -170,19 +_,14 @@
+                                                         .suggests(
+                                                             (c, p) -> SharedSuggestionProvider.suggestResource(
+                                                                 getAttributeModifiers(
+-                                                                    EntityArgument.getEntity(c, "target"), ResourceArgument.getAttribute(c, "attribute")
++                                                                    c.getSource(),
++                                                                    EntityArgument.getEntity(c, "target"),
++                                                                    ResourceArgument.getAttribute(c, "attribute")
+                                                                 ),
+                                                                 p
+                                                             )
+                                                         )
+-                                                        .executes(
+-                                                            c -> removeModifier(
+-                                                                c.getSource(),
+-                                                                EntityArgument.getEntity(c, "target"),
+-                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                IdentifierArgument.getId(c, "id")
+-                                                            )
+-                                                        )
++                                                        .executes(AttributeCommand::removeModifier)
+                                                 )
+                                         )
+                                         .then(
+@@ -194,32 +_,17 @@
+                                                                 .suggests(
+                                                                     (c, p) -> SharedSuggestionProvider.suggestResource(
+                                                                         getAttributeModifiers(
++                                                                            c.getSource(),
+                                                                             EntityArgument.getEntity(c, "target"),
+                                                                             ResourceArgument.getAttribute(c, "attribute")
+                                                                         ),
+                                                                         p
+                                                                     )
+                                                                 )
+-                                                                .executes(
+-                                                                    c -> getAttributeModifier(
+-                                                                        c.getSource(),
+-                                                                        EntityArgument.getEntity(c, "target"),
+-                                                                        ResourceArgument.getAttribute(c, "attribute"),
+-                                                                        IdentifierArgument.getId(c, "id"),
+-                                                                        1.0
+-                                                                    )
+-                                                                )
++                                                                .executes(c -> getAttributeModifier(c, false))
+                                                                 .then(
+                                                                     Commands.argument("scale", DoubleArgumentType.doubleArg())
+-                                                                        .executes(
+-                                                                            c -> getAttributeModifier(
+-                                                                                c.getSource(),
+-                                                                                EntityArgument.getEntity(c, "target"),
+-                                                                                ResourceArgument.getAttribute(c, "attribute"),
+-                                                                                IdentifierArgument.getId(c, "id"),
+-                                                                                DoubleArgumentType.getDouble(c, "scale")
+-                                                                            )
+-                                                                        )
++                                                                        .executes(c -> getAttributeModifier(c, true))
+                                                                 )
+                                                         )
+                                                 )
+@@ -230,6 +_,14 @@
+         );
+     }
+ 
++    private static Entity getTarget(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        return EntityArgument.getEntity(context, "target");
++    }
++
++    private static Holder<Attribute> getAttribute(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        return ResourceArgument.getAttribute(context, "attribute");
++    }
++
+     private static AttributeInstance getAttributeInstance(Entity target, Holder<Attribute> attribute) throws CommandSyntaxException {
+         AttributeInstance attributeInstance = getLivingEntity(target).getAttributes().getInstance(attribute);
+         if (attributeInstance == null) {
+@@ -256,102 +_,202 @@
+         }
+     }
+ 
++    private static int getAttributeValue(CommandContext<CommandSourceStack> context, boolean hasScale) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> getAttributeValue(context, hasScale))) {
++            return 0;
++        }
++
++        return getAttributeValue(source, getTarget(context), getAttribute(context), hasScale ? DoubleArgumentType.getDouble(context, "scale") : 1.0);
++    }
++
+     private static int getAttributeValue(CommandSourceStack source, Entity target, Holder<Attribute> attribute, double scale) throws CommandSyntaxException {
+-        LivingEntity livingEntity = getEntityWithAttribute(target, attribute);
+-        double result = livingEntity.getAttributeValue(attribute);
++        AttributeValueResult value = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            LivingEntity livingEntity = getEntityWithAttribute(target, attribute);
++            return new AttributeValueResult(livingEntity.getAttributeValue(attribute), target.getName());
++        });
+         source.sendSuccess(
+-            () -> Component.translatable("commands.attribute.value.get.success", getAttributeDescription(attribute), target.getName(), result), false
++            () -> Component.translatable("commands.attribute.value.get.success", getAttributeDescription(attribute), value.targetName(), value.value()), false
+         );
+-        return (int)(result * scale);
++        return (int)(value.value() * scale);
++    }
++
++    private static int getAttributeBase(CommandContext<CommandSourceStack> context, boolean hasScale) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> getAttributeBase(context, hasScale))) {
++            return 0;
++        }
++
++        return getAttributeBase(source, getTarget(context), getAttribute(context), hasScale ? DoubleArgumentType.getDouble(context, "scale") : 1.0);
+     }
+ 
+     private static int getAttributeBase(CommandSourceStack source, Entity target, Holder<Attribute> attribute, double scale) throws CommandSyntaxException {
+-        LivingEntity livingEntity = getEntityWithAttribute(target, attribute);
+-        double result = livingEntity.getAttributeBaseValue(attribute);
++        AttributeValueResult value = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            LivingEntity livingEntity = getEntityWithAttribute(target, attribute);
++            return new AttributeValueResult(livingEntity.getAttributeBaseValue(attribute), target.getName());
++        });
+         source.sendSuccess(
+-            () -> Component.translatable("commands.attribute.base_value.get.success", getAttributeDescription(attribute), target.getName(), result), false
+-        );
+-        return (int)(result * scale);
++            () -> Component.translatable("commands.attribute.base_value.get.success", getAttributeDescription(attribute), value.targetName(), value.value()), false
++        );
++        return (int)(value.value() * scale);
++    }
++
++    private static int getAttributeModifier(CommandContext<CommandSourceStack> context, boolean hasScale) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> getAttributeModifier(context, hasScale))) {
++            return 0;
++        }
++
++        return getAttributeModifier(
++            source,
++            getTarget(context),
++            getAttribute(context),
++            IdentifierArgument.getId(context, "id"),
++            hasScale ? DoubleArgumentType.getDouble(context, "scale") : 1.0
++        );
+     }
+ 
+     private static int getAttributeModifier(CommandSourceStack source, Entity target, Holder<Attribute> attribute, Identifier id, double scale) throws CommandSyntaxException {
+-        LivingEntity livingEntity = getEntityWithAttribute(target, attribute);
+-        AttributeMap attributes = livingEntity.getAttributes();
+-        if (!attributes.hasModifier(attribute, id)) {
+-            throw ERROR_NO_SUCH_MODIFIER.create(target.getName(), getAttributeDescription(attribute), id);
+-        } else {
+-            double result = attributes.getModifierValue(attribute, id);
+-            source.sendSuccess(
+-                () -> Component.translatable(
+-                    "commands.attribute.modifier.value.get.success", Component.translationArg(id), getAttributeDescription(attribute), target.getName(), result
+-                ),
+-                false
+-            );
+-            return (int)(result * scale);
++        AttributeValueResult value = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            LivingEntity livingEntity = getEntityWithAttribute(target, attribute);
++            AttributeMap attributes = livingEntity.getAttributes();
++            if (!attributes.hasModifier(attribute, id)) {
++                throw ERROR_NO_SUCH_MODIFIER.create(target.getName(), getAttributeDescription(attribute), id);
++            }
++
++            return new AttributeValueResult(attributes.getModifierValue(attribute, id), target.getName());
++        });
++        source.sendSuccess(
++            () -> Component.translatable(
++                "commands.attribute.modifier.value.get.success", Component.translationArg(id), getAttributeDescription(attribute), value.targetName(), value.value()
++            ),
++            false
++        );
++        return (int)(value.value() * scale);
++    }
++
++    private static Stream<Identifier> getAttributeModifiers(CommandSourceStack source, Entity target, Holder<Attribute> attribute)
++        throws CommandSyntaxException {
++        List<Identifier> modifiers = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            AttributeInstance attributeInstance = getAttributeInstance(target, attribute);
++            return attributeInstance.getModifiers().stream().map(AttributeModifier::id).toList();
++        });
++        return modifiers.stream();
++    }
++
++    private static int setAttributeBase(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> setAttributeBase(context))) {
++            return 0;
+         }
+-    }
+ 
+-    private static Stream<Identifier> getAttributeModifiers(Entity target, Holder<Attribute> attribute) throws CommandSyntaxException {
+-        AttributeInstance attributeInstance = getAttributeInstance(target, attribute);
+-        return attributeInstance.getModifiers().stream().map(AttributeModifier::id);
++        return setAttributeBase(source, getTarget(context), getAttribute(context), DoubleArgumentType.getDouble(context, "value"));
+     }
+ 
+     private static int setAttributeBase(CommandSourceStack source, Entity target, Holder<Attribute> attribute, double value) throws CommandSyntaxException {
+-        getAttributeInstance(target, attribute).setBaseValue(value);
++        Component targetName = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            getAttributeInstance(target, attribute).setBaseValue(value);
++            return target.getName();
++        });
+         source.sendSuccess(
+-            () -> Component.translatable("commands.attribute.base_value.set.success", getAttributeDescription(attribute), target.getName(), value), false
++            () -> Component.translatable("commands.attribute.base_value.set.success", getAttributeDescription(attribute), targetName, value), false
+         );
+         return 1;
++    }
++
++    private static int resetAttributeBase(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> resetAttributeBase(context))) {
++            return 0;
++        }
++
++        return resetAttributeBase(source, getTarget(context), getAttribute(context));
+     }
+ 
+     private static int resetAttributeBase(CommandSourceStack source, Entity target, Holder<Attribute> attribute) throws CommandSyntaxException {
+-        LivingEntity livingTarget = getLivingEntity(target);
+-        if (!livingTarget.getAttributes().resetBaseValue(attribute)) {
+-            throw ERROR_NO_SUCH_ATTRIBUTE.create(target.getName(), getAttributeDescription(attribute));
+-        } else {
+-            double value = livingTarget.getAttributeBaseValue(attribute);
+-            source.sendSuccess(
+-                () -> Component.translatable("commands.attribute.base_value.reset.success", getAttributeDescription(attribute), target.getName(), value), false
+-            );
+-            return 1;
++        AttributeValueResult value = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            LivingEntity livingTarget = getLivingEntity(target);
++            if (!livingTarget.getAttributes().resetBaseValue(attribute)) {
++                throw ERROR_NO_SUCH_ATTRIBUTE.create(target.getName(), getAttributeDescription(attribute));
++            }
++
++            return new AttributeValueResult(livingTarget.getAttributeBaseValue(attribute), target.getName());
++        });
++        source.sendSuccess(
++            () -> Component.translatable("commands.attribute.base_value.reset.success", getAttributeDescription(attribute), value.targetName(), value.value()), false
++        );
++        return 1;
++    }
++
++    private static int addModifier(CommandContext<CommandSourceStack> context, AttributeModifier.Operation operation) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> addModifier(context, operation))) {
++            return 0;
+         }
++
++        return addModifier(
++            source,
++            getTarget(context),
++            getAttribute(context),
++            IdentifierArgument.getId(context, "id"),
++            DoubleArgumentType.getDouble(context, "value"),
++            operation
++        );
+     }
+ 
+     private static int addModifier(
+         CommandSourceStack source, Entity target, Holder<Attribute> attribute, Identifier id, double value, AttributeModifier.Operation operation
+     ) throws CommandSyntaxException {
+-        AttributeInstance attributeInstance = getAttributeInstance(target, attribute);
+-        AttributeModifier modifier = new AttributeModifier(id, value, operation);
+-        if (attributeInstance.hasModifier(id)) {
+-            throw ERROR_MODIFIER_ALREADY_PRESENT.create(target.getName(), getAttributeDescription(attribute), id);
+-        } else {
++        Component targetName = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            AttributeInstance attributeInstance = getAttributeInstance(target, attribute);
++            AttributeModifier modifier = new AttributeModifier(id, value, operation);
++            if (attributeInstance.hasModifier(id)) {
++                throw ERROR_MODIFIER_ALREADY_PRESENT.create(target.getName(), getAttributeDescription(attribute), id);
++            }
++
+             attributeInstance.addPermanentModifier(modifier);
+-            source.sendSuccess(
+-                () -> Component.translatable(
+-                    "commands.attribute.modifier.add.success", Component.translationArg(id), getAttributeDescription(attribute), target.getName()
+-                ),
+-                false
+-            );
+-            return 1;
++            return target.getName();
++        });
++        source.sendSuccess(
++            () -> Component.translatable(
++                "commands.attribute.modifier.add.success", Component.translationArg(id), getAttributeDescription(attribute), targetName
++            ),
++            false
++        );
++        return 1;
++    }
++
++    private static int removeModifier(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> removeModifier(context))) {
++            return 0;
+         }
++
++        return removeModifier(source, getTarget(context), getAttribute(context), IdentifierArgument.getId(context, "id"));
+     }
+ 
+     private static int removeModifier(CommandSourceStack source, Entity target, Holder<Attribute> attribute, Identifier id) throws CommandSyntaxException {
+-        AttributeInstance attributeInstance = getAttributeInstance(target, attribute);
+-        if (attributeInstance.removeModifier(id)) {
+-            source.sendSuccess(
+-                () -> Component.translatable(
+-                    "commands.attribute.modifier.remove.success", Component.translationArg(id), getAttributeDescription(attribute), target.getName()
+-                ),
+-                false
+-            );
+-            return 1;
+-        } else {
+-            throw ERROR_NO_SUCH_MODIFIER.create(target.getName(), getAttributeDescription(attribute), id);
+-        }
++        Component targetName = RegionizedCommandHelper.callOnEntityRegionThrowing(source, target, () -> {
++            AttributeInstance attributeInstance = getAttributeInstance(target, attribute);
++            if (!attributeInstance.removeModifier(id)) {
++                throw ERROR_NO_SUCH_MODIFIER.create(target.getName(), getAttributeDescription(attribute), id);
++            }
++
++            return target.getName();
++        });
++        source.sendSuccess(
++            () -> Component.translatable(
++                "commands.attribute.modifier.remove.success", Component.translationArg(id), getAttributeDescription(attribute), targetName
++            ),
++            false
++        );
++        return 1;
+     }
+ 
+     private static Component getAttributeDescription(Holder<Attribute> attribute) {
+         return Component.translatable(attribute.value().getDescriptionId());
++    }
++
++    private record AttributeValueResult(double value, Component targetName) {
+     }
+ }

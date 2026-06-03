@@ -1,0 +1,57 @@
+--- a/net/minecraft/world/entity/animal/golem/CopperGolem.java
++++ b/net/minecraft/world/entity/animal/golem/CopperGolem.java
+@@ -53,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.level.storage.ValueOutput;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CopperGolem extends AbstractGolem implements ContainerUser, Shearable {
+@@ -197,7 +_,7 @@
+                 this.setupAnimationStates();
+             }
+         } else {
+-            this.updateWeathering((ServerLevel)this.level(), this.level().getRandom(), this.level().getGameTime());
++            this.updateWeathering((ServerLevel)this.level(), this.getRandom(), this.level().getGameTime());
+         }
+     }
+ 
+@@ -274,11 +_,16 @@
+     }
+ 
+     private boolean canTurnToStatue(Level level) {
+-        return level.getBlockState(this.blockPosition()).isAir() && level.getRandom().nextFloat() <= 0.0058F;
++        BlockPos pos = this.blockPosition();
++        return canReadBlock(level, pos) && level.getBlockState(pos).isAir() && this.random.nextFloat() <= 0.0058F;
+     }
+ 
+     private void turnToStatue(ServerLevel level) {
+         BlockPos pos = this.blockPosition();
++        if (!canReadBlock(level, pos)) {
++            return;
++        }
++
+         level.setBlock(
+             pos,
+             Blocks.OXIDIZED_COPPER_GOLEM_STATUE
+@@ -407,6 +_,8 @@
+     public boolean hasContainerOpen(ContainerOpenersCounter container, BlockPos blockPos) {
+         if (this.openedChestPos == null) {
+             return false;
++        } else if (!canReadBlock(this.level(), this.openedChestPos)) {
++            return false;
+         } else {
+             BlockState blockState = this.level().getBlockState(this.openedChestPos);
+             return this.openedChestPos.equals(blockPos)
+@@ -419,6 +_,10 @@
+     @Override
+     public double getContainerInteractionRange() {
+         return 3.0;
++    }
++
++    private static boolean canReadBlock(Level level, BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(level, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ 
+     @Override

@@ -1,0 +1,762 @@
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -118,6 +_,8 @@
+ import net.minecraft.util.TimeUtil;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.debug.ServerDebugSubscribers;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import net.minecraft.util.debugchart.SampleLogger;
+ import net.minecraft.util.debugchart.TpsDebugDimensions;
+ import net.minecraft.util.profiling.EmptyProfileResults;
+@@ -294,10 +_,12 @@
+     private final PacketProcessor packetProcessor;
+     private final TimerQueue<MinecraftServer> scheduledEvents;
+     private final ServerClockManager clockManager;
++    private final net.neoforged.neoforge.server.region.RegionizedTaskDispatcher regionizedTaskDispatcher =
++        new net.neoforged.neoforge.server.region.RegionizedTaskDispatcher();
+ 
+     public static <S extends MinecraftServer> S spin(Function<Thread, S> factory) {
+         AtomicReference<S> serverReference = new AtomicReference<>();
+-        Thread thread = new Thread(() -> serverReference.get().runServer(), "Server thread");
++        Thread thread = new Thread(net.neoforged.fml.util.thread.SidedThreadGroups.SERVER, () -> serverReference.get().runServer(), "Server thread");
+         thread.setUncaughtExceptionHandler((t, e) -> LOGGER.error("Uncaught exception in server thread", e));
+         if (Runtime.getRuntime().availableProcessors() > 4) {
+             thread.setPriority(8);
+@@ -352,9 +_,9 @@
+             this.structureTemplateManager = new StructureTemplateManager(worldStem.resourceManager(), storageSource, fixerUpper, blockLookup);
+             this.serverThread = serverThread;
+             this.executor = Util.backgroundExecutor();
+-            this.potionBrewing = PotionBrewing.bootstrap(this.worldData.enabledFeatures());
++            this.potionBrewing = PotionBrewing.bootstrap(this.worldData.enabledFeatures(), this.registryAccess());
+             this.resources.managers.getRecipeManager().finalizeRecipeLoading(this.worldData.enabledFeatures());
+-            this.fuelValues = FuelValues.vanillaBurnTimes(this.registries.compositeAccess(), this.worldData.enabledFeatures());
++            this.fuelValues = net.neoforged.neoforge.common.DataMapHooks.populateFuelValues(this.registries.compositeAccess(), this.worldData.enabledFeatures());
+             this.tickFrame = TracyClient.createDiscontinuousFrame("Server Tick");
+             this.notificationManager = new NotificationManager();
+             this.serverActivityMonitor = new ServerActivityMonitor(this.notificationManager, 30);
+@@ -443,6 +_,7 @@
+         this.scoreboard.load(this.savedDataStorage.computeIfAbsent(ScoreboardSaveData.TYPE).getData());
+         this.commandStorage = new CommandStorage(this.savedDataStorage);
+         this.stopwatches = this.savedDataStorage.computeIfAbsent(Stopwatches.TYPE);
++        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.level.LevelEvent.Load(levels.get(Level.OVERWORLD)));
+         if (!levelData.isInitialized()) {
+             try {
+                 setInitialSpawn(overworld, levelData, worldOptions.generateBonusChest(), isDebug, this.levelLoadListener);
+@@ -477,6 +_,7 @@
+                     this, this.executor, this.storageSource, derivedLevelData, dimension, entry.getValue(), isDebug, biomeZoomSeed, ImmutableList.of(), false
+                 );
+                 this.levels.put(dimension, level);
++                net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.level.LevelEvent.Load(levels.get(name)));
+             } else {
+                 level = overworld;
+             }
+@@ -495,6 +_,7 @@
+             levelData.setSpawn(LevelData.RespawnData.of(level.dimension(), BlockPos.ZERO.above(80), 0.0F, 0.0F));
+         } else {
+             ServerChunkCache chunkSource = level.getChunkSource();
++            if (net.neoforged.neoforge.event.EventHooks.onCreateWorldSpawn(level, levelData)) return;
+             ChunkPos spawnChunk = ChunkPos.containing(chunkSource.randomState().sampler().findSpawnPosition());
+             levelLoadListener.start(LevelLoadListener.Stage.PREPARE_GLOBAL_SPAWN, 0);
+             levelLoadListener.updateFocus(level.dimension(), spawnChunk);
+@@ -557,6 +_,7 @@
+                 TicketStorage savedTickets = level.getDataStorage().get(TicketStorage.TYPE);
+                 if (savedTickets != null) {
+                     savedTickets.activateAllDeactivatedTickets();
++                    net.neoforged.neoforge.common.world.chunk.ForcedChunkManager.activateAllDeactivatedTickets(level, savedTickets);
+                 }
+             });
+         }
+@@ -593,6 +_,10 @@
+     public abstract boolean shouldRconBroadcast();
+ 
+     public boolean saveAllChunks(boolean silent, boolean flush, boolean force) {
++        if (this.scheduleGlobalIfRegionized(() -> this.saveAllChunks(silent, flush, force))) {
++            return true;
++        }
++
+         this.scoreboard.storeToSaveDataIfDirty(this.getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE));
+         boolean result = false;
+ 
+@@ -626,6 +_,10 @@
+     }
+ 
+     public boolean saveEverything(boolean silent, boolean flush, boolean force) {
++        if (this.scheduleGlobalIfRegionized(() -> this.saveEverything(silent, flush, force))) {
++            return true;
++        }
++
+         boolean var5;
+         try {
+             this.isSaving = true;
+@@ -684,6 +_,7 @@
+         for (ServerLevel levelx : this.getAllLevels()) {
+             if (levelx != null) {
+                 try {
++                    net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.level.LevelEvent.Unload(levelx));
+                     levelx.close();
+                 } catch (IOException var5) {
+                     LOGGER.error("Exception closing the level", (Throwable)var5);
+@@ -715,6 +_,10 @@
+     }
+ 
+     public void halt(boolean wait) {
++        if (this.scheduleGlobalIfRegionized(() -> this.halt(wait))) {
++            return;
++        }
++
+         this.running = false;
+         if (wait) {
+             try {
+@@ -731,9 +_,12 @@
+                 throw new IllegalStateException("Failed to initialize server");
+             }
+ 
++            net.neoforged.neoforge.server.ServerLifecycleHooks.handleServerStarted(this);
++            this.regionizedTaskDispatcher.start(net.neoforged.neoforge.server.region.RegionizedTaskDispatcher.defaultThreadCount());
+             this.nextTickTimeNanos = Util.getNanos();
+             this.statusIcon = this.loadStatusIcon().orElse(null);
+             this.status = this.buildServerStatus();
++            resetStatusCache(status);
+ 
+             while (this.running) {
+                 long thisTickNanos;
+@@ -787,6 +_,8 @@
+                 this.isReady = true;
+                 JvmProfiler.INSTANCE.onServerTick(this.smoothedTickTimeMillis);
+             }
++            net.neoforged.neoforge.server.ServerLifecycleHooks.handleServerStopping(this);
++            net.neoforged.neoforge.server.ServerLifecycleHooks.expectServerStopped(); // Forge: Has to come before MinecraftServer#onServerCrash to avoid race conditions
+         } catch (Throwable var69) {
+             LOGGER.error("Encountered an unexpected exception", var69);
+             CrashReport report = constructOrExtractCrashReport(var69);
+@@ -798,14 +_,17 @@
+                 LOGGER.error("We were unable to save this crash report to disk.");
+             }
+ 
++            net.neoforged.neoforge.server.ServerLifecycleHooks.expectServerStopped(); // Forge: Has to come before MinecraftServer#onServerCrash to avoid race conditions
+             this.onServerCrash(report);
+         } finally {
+             try {
+                 this.stopped = true;
++                this.regionizedTaskDispatcher.close();
+                 this.stopServer();
+             } catch (Throwable var64) {
+                 LOGGER.error("Exception stopping the server", var64);
+             } finally {
++                net.neoforged.neoforge.server.ServerLifecycleHooks.handleServerStopped(this);
+                 this.onServerExit();
+             }
+         }
+@@ -987,11 +_,17 @@
+         }
+ 
+         this.tickCount++;
++        this.regionizedTaskDispatcher.beginServerTick(this.tickCount);
++        net.neoforged.neoforge.event.EventHooks.fireServerTickPre(haveTime, this);
+         this.tickRateManager.tick();
+         this.tickChildren(haveTime);
++        if (this.regionizedTaskDispatcher.isRunning() && this.tickCount % 20 == 0) {
++            this.refreshRegionStats();
++        }
+         if (nano - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) {
+             this.lastServerStatus = nano;
+             this.status = this.buildServerStatus();
++            resetStatusCache(status);
+         }
+ 
+         this.ticksUntilAutosave--;
+@@ -1003,12 +_,15 @@
+         profiler.push("tallying");
+         long tickTime = Util.getNanos() - nano;
+         int tickIndex = this.tickCount % 100;
+-        this.aggregatedTickTimesNanos = this.aggregatedTickTimesNanos - this.tickTimesNanos[tickIndex];
+-        this.aggregatedTickTimesNanos += tickTime;
+-        this.tickTimesNanos[tickIndex] = tickTime;
+-        this.smoothedTickTimeMillis = this.smoothedTickTimeMillis * 0.8F + (float)tickTime / (float)TimeUtil.NANOSECONDS_PER_MILLISECOND * 0.19999999F;
++        synchronized (this) {
++            this.aggregatedTickTimesNanos = this.aggregatedTickTimesNanos - this.tickTimesNanos[tickIndex];
++            this.aggregatedTickTimesNanos += tickTime;
++            this.tickTimesNanos[tickIndex] = tickTime;
++            this.smoothedTickTimeMillis = this.smoothedTickTimeMillis * 0.8F + (float)tickTime / (float)TimeUtil.NANOSECONDS_PER_MILLISECOND * 0.19999999F;
++        }
+         this.logTickMethodTime(nano);
+         profiler.pop();
++        net.neoforged.neoforge.event.EventHooks.fireServerTickPost(haveTime, this);
+     }
+ 
+     protected void processPacketsAndTick(boolean sprinting) {
+@@ -1039,6 +_,16 @@
+         }
+     }
+ 
++    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
++    private String cachedServerStatus; // Neo: cache the server status json in case a client spams requests
++    private void resetStatusCache(ServerStatus status) {
++        this.cachedServerStatus = GSON.toJson(ServerStatus.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE, status)
++                .result().orElseThrow());
++    }
++    public String getStatusJson() {
++        return cachedServerStatus;
++    }
++
+     private int computeNextAutosaveInterval() {
+         float ticksPerSecond;
+         if (this.tickRateManager.isSprinting()) {
+@@ -1070,12 +_,13 @@
+             Optional.of(players),
+             Optional.of(ServerStatus.Version.current()),
+             Optional.ofNullable(this.statusIcon),
+-            this.enforceSecureProfile()
++            this.enforceSecureProfile(),
++            true //TODO Neo: Possible build a system which indicates what the status of the modded server is.
+         );
+     }
+ 
+     private ServerStatus.Players buildPlayerStatus() {
+-        List<ServerPlayer> players = this.playerList.getPlayers();
++        List<ServerPlayer> players = this.playerList.getAllPlayers();
+         int maxPlayers = this.getMaxPlayers();
+         if (this.hidesOnlinePlayers()) {
+             return new ServerStatus.Players(maxPlayers, players.size(), List.of());
+@@ -1096,7 +_,10 @@
+ 
+     protected void tickChildren(BooleanSupplier haveTime) {
+         ProfilerFiller profiler = Profiler.get();
+-        this.getPlayerList().getPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
++        this.getPlayerList().getAllPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
++        profiler.push("regionizedGlobalTasks");
++        this.regionizedTaskDispatcher.drainGlobalTasks();
++        profiler.pop();
+         profiler.push("commandFunctions");
+         this.getFunctions().tick();
+         profiler.pop();
+@@ -1115,9 +_,11 @@
+         profiler.push("levels");
+         this.updateEffectiveRespawnData();
+ 
+-        for (ServerLevel level : this.getAllLevels()) {
++        for (ServerLevel level : this.getWorldArray()) {
++            long tickStart = Util.getNanos();
+             profiler.push(() -> level + " " + level.dimension().identifier());
+             profiler.push("tick");
++            net.neoforged.neoforge.event.EventHooks.fireLevelTickPre(level, haveTime);
+ 
+             try {
+                 level.tick(haveTime);
+@@ -1126,9 +_,13 @@
+                 level.fillReportDetails(report);
+                 throw new ReportedException(report);
+             }
++            net.neoforged.neoforge.event.EventHooks.fireLevelTickPost(level, haveTime);
+ 
+             profiler.pop();
+             profiler.pop();
++            synchronized (this.perWorldTickTimes) {
++                this.perWorldTickTimes.computeIfAbsent(level.dimension(), k -> new long[100])[this.tickCount % 100] = Util.getNanos() - tickStart;
++            }
+         }
+ 
+         profiler.popPush("connection");
+@@ -1137,8 +_,8 @@
+         this.playerList.tick();
+         profiler.popPush("debugSubscribers");
+         this.debugSubscribers.tick();
+-        if (this.tickRateManager.runsNormally()) {
+             profiler.popPush("gameTests");
++        if (net.neoforged.neoforge.gametest.GameTestHooks.isGametestEnabled() && this.tickRateManager.runsNormally()) {
+             GameTestTicker.SINGLETON.tick();
+         }
+ 
+@@ -1150,7 +_,7 @@
+ 
+         profiler.popPush("send chunks");
+ 
+-        for (ServerPlayer player : this.playerList.getPlayers()) {
++        for (ServerPlayer player : this.playerList.getAllPlayers()) {
+             player.connection.chunkSender.sendNextChunks(player);
+             player.connection.resumeFlushing();
+         }
+@@ -1170,6 +_,9 @@
+     }
+ 
+     public void forceGameTimeSynchronization() {
++        if (this.overworld() == null) {
++            return; // Neo: Our ephemeral JUnit server has no overworld
++        }
+         ProfilerFiller profiler = Profiler.get();
+         profiler.push("timeSync");
+         this.playerList.broadcastAll(new ClientboundSetTimePacket(this.overworld().getGameTime(), Map.of()));
+@@ -1180,6 +_,61 @@
+         this.tickables.add(tickable);
+     }
+ 
++    public net.neoforged.neoforge.server.region.RegionizedTaskDispatcher regionizedTaskDispatcher() {
++        return this.regionizedTaskDispatcher;
++    }
++
++    public void refreshRegionStats() {
++        Map<net.neoforged.neoforge.server.region.RegionKey, MutableRegionStats> mutableStats = new java.util.HashMap<>();
++        for (ServerLevel level : this.getAllLevels()) {
++            level.getChunkSource().visibleChunkCountsByRegion().forEach((region, chunks) ->
++                mutableStats.computeIfAbsent(region, unused -> new MutableRegionStats()).chunks += chunks
++            );
++
++            level.getAllEntities().forEach(entity -> {
++                net.neoforged.neoforge.server.region.RegionKey region =
++                    net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(level, entity.blockPosition());
++                mutableStats.computeIfAbsent(region, unused -> new MutableRegionStats()).entities++;
++            });
++        }
++
++        for (ServerPlayer player : this.getPlayerList().getPlayers()) {
++            net.neoforged.neoforge.server.region.RegionKey region =
++                net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(player.level(), player.blockPosition());
++            mutableStats.computeIfAbsent(region, unused -> new MutableRegionStats()).players++;
++        }
++
++        Map<net.neoforged.neoforge.server.region.RegionKey, net.neoforged.neoforge.server.region.RegionizedTaskDispatcher.RegionStatsSnapshot> stats =
++            new java.util.HashMap<>();
++        mutableStats.forEach((region, mutable) -> stats.put(
++            region,
++            new net.neoforged.neoforge.server.region.RegionizedTaskDispatcher.RegionStatsSnapshot(
++                mutable.chunks,
++                mutable.players,
++                mutable.entities
++            )
++        ));
++        this.regionizedTaskDispatcher.replaceRegionStats(stats);
++    }
++
++    private static final class MutableRegionStats {
++        private int chunks;
++        private int players;
++        private int entities;
++    }
++
++    public void scheduleRegionTask(ServerLevel level, int chunkX, int chunkZ, Runnable task) {
++        this.regionizedTaskDispatcher.execute(net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(level, chunkX, chunkZ), task);
++    }
++
++    public CompletableFuture<Void> submitRegionTask(ServerLevel level, int chunkX, int chunkZ, Runnable task) {
++        return this.regionizedTaskDispatcher.submit(net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(level, chunkX, chunkZ), task);
++    }
++
++    public <T> CompletableFuture<T> submitRegionTask(ServerLevel level, int chunkX, int chunkZ, java.util.function.Supplier<T> task) {
++        return this.regionizedTaskDispatcher.submit(net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(level, chunkX, chunkZ), task);
++    }
++
+     protected void setId(String serverId) {
+         this.serverId = serverId;
+     }
+@@ -1201,11 +_,11 @@
+     }
+ 
+     public Set<ResourceKey<Level>> levelKeys() {
+-        return this.levels.keySet();
++        return Collections.unmodifiableSet(new java.util.LinkedHashSet<>(this.levels.keySet()));
+     }
+ 
+     public Iterable<ServerLevel> getAllLevels() {
+-        return this.levels.values();
++        return List.copyOf(this.levels.values());
+     }
+ 
+     @Override
+@@ -1223,7 +_,7 @@
+     }
+ 
+     public String getServerModName() {
+-        return "vanilla";
++        return net.neoforged.neoforge.internal.BrandingControl.getServerBranding();
+     }
+ 
+     public ServerClockManager clockManager() {
+@@ -1234,7 +_,7 @@
+         systemReport.setDetail("Server Running", () -> Boolean.toString(this.running));
+         if (this.playerList != null) {
+             systemReport.setDetail(
+-                "Player Count", () -> this.playerList.getPlayerCount() + " / " + this.playerList.getMaxPlayers() + "; " + this.playerList.getPlayers()
++                "Player Count", () -> this.playerList.getPlayerCount() + " / " + this.playerList.getMaxPlayers() + "; " + this.playerList.getAllPlayers()
+             );
+         }
+ 
+@@ -1300,10 +_,14 @@
+     }
+ 
+     public void setDifficulty(Difficulty difficulty, boolean ignoreLock) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setDifficulty(difficulty, ignoreLock))) {
++            return;
++        }
++
+         if (ignoreLock || !this.worldData.isDifficultyLocked()) {
+             this.worldData.setDifficulty(this.worldData.isHardcore() ? Difficulty.HARD : difficulty);
+             this.updateMobSpawningFlags();
+-            this.getPlayerList().getPlayers().forEach(this::sendDifficultyUpdate);
++            this.getPlayerList().getAllPlayers().forEach(this::sendDifficultyUpdate);
+         }
+     }
+ 
+@@ -1318,13 +_,19 @@
+     }
+ 
+     public void setDifficultyLocked(boolean locked) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setDifficultyLocked(locked))) {
++            return;
++        }
++
+         this.worldData.setDifficultyLocked(locked);
+-        this.getPlayerList().getPlayers().forEach(this::sendDifficultyUpdate);
++        this.getPlayerList().getAllPlayers().forEach(this::sendDifficultyUpdate);
+     }
+ 
+     private void sendDifficultyUpdate(ServerPlayer player) {
+-        LevelData levelData = player.level().getLevelData();
+-        player.connection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> {
++            LevelData levelData = player.level().getLevelData();
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
++        });
+     }
+ 
+     public boolean isDemo() {
+@@ -1397,17 +_,25 @@
+     public abstract boolean isPublished();
+ 
+     public void setDefaultGameType(GameType gameType) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setDefaultGameType(gameType))) {
++            return;
++        }
++
+         this.worldData.setGameType(gameType);
+     }
+ 
+     public int enforceGameTypeForPlayers(@Nullable GameType gameType) {
++        if (this.scheduleGlobalIfRegionized(() -> this.enforceGameTypeForPlayers(gameType))) {
++            return 0;
++        }
++
+         if (gameType == null) {
+             return 0;
+         } else {
+             int count = 0;
+ 
+-            for (ServerPlayer player : this.getPlayerList().getPlayers()) {
+-                if (player.setGameMode(gameType)) {
++            for (ServerPlayer player : this.getPlayerList().getAllPlayers()) {
++                if (this.enforceGameTypeForPlayer(player, gameType)) {
+                     count++;
+                 }
+             }
+@@ -1416,6 +_,10 @@
+         }
+     }
+ 
++    private boolean enforceGameTypeForPlayer(ServerPlayer player, GameType gameType) {
++        return RegionizedWorldGuard.callOnPlayerRegionAndWait(player, "forced game mode update", () -> player.setGameMode(gameType));
++    }
++
+     public ServerConnectionListener getConnection() {
+         return this.connection;
+     }
+@@ -1453,6 +_,10 @@
+     }
+ 
+     public void setPlayerIdleTimeout(int playerIdleTimeout) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setPlayerIdleTimeout(playerIdleTimeout))) {
++            return;
++        }
++
+         this.playerIdleTimeout = playerIdleTimeout;
+     }
+ 
+@@ -1516,10 +_,26 @@
+     }
+ 
+     public CompletableFuture<Void> reloadResources(Collection<String> packsToEnable) {
++        if (RegionizedTickContext.isRegionThread()) {
++            CompletableFuture<Void> deferred = new CompletableFuture<>();
++            if (!this.regionizedTaskDispatcher.tryExecuteGlobal(
++                () -> this.reloadResources(packsToEnable).whenComplete((resultx, throwable) -> {
++                    if (throwable != null) {
++                        deferred.completeExceptionally(throwable);
++                    } else {
++                        deferred.complete(resultx);
++                    }
++                })
++            )) {
++                deferred.completeExceptionally(new IllegalStateException("Region dispatcher is not running"));
++            }
++            return deferred;
++        }
++
+         CompletableFuture<Void> result = CompletableFuture.<ImmutableList>supplyAsync(
+-                () -> packsToEnable.stream()
+-                    .map(this.packRepository::getPack)
+-                    .filter(Objects::nonNull)
++                () -> this.packRepository
++                    .rebuildSelected(packsToEnable)
++                    .stream()
+                     .map(Pack::open)
+                     .collect(ImmutableList.toImmutableList()),
+                 this
+@@ -1558,7 +_,8 @@
+                 this.getPlayerList().reloadResources();
+                 this.functionManager.replaceLibrary(this.resources.managers.getFunctionLibrary());
+                 this.structureTemplateManager.onResourceManagerReload(this.resources.resourceManager);
+-                this.fuelValues = FuelValues.vanillaBurnTimes(this.registries.compositeAccess(), this.worldData.enabledFeatures());
++                this.fuelValues = net.neoforged.neoforge.common.DataMapHooks.populateFuelValues(this.registries.compositeAccess(), this.worldData.enabledFeatures());
++                this.getPlayerList().getAllPlayers().forEach(this.getPlayerList()::sendPlayerPermissionLevel); //Forge: Fix newly added/modified commands not being sent to the client when commands reload.
+             }, this);
+         if (this.isSameThread()) {
+             this.managedBlock(result::isDone);
+@@ -1574,8 +_,10 @@
+         FeatureFlagSet forcedFeatures = initMode ? FeatureFlagSet.of() : initialDataConfig.enabledFeatures();
+         FeatureFlagSet allowedFeatures = initMode ? FeatureFlags.REGISTRY.allFlags() : initialDataConfig.enabledFeatures();
+         packRepository.reload();
++        DataPackConfig.DEFAULT.addModPacks(net.neoforged.neoforge.common.CommonHooks.getModDataPacks());
++        dataPackConfig.addModPacks(net.neoforged.neoforge.common.CommonHooks.getModDataPacks());
+         if (safeMode) {
+-            return configureRepositoryWithSelection(packRepository, List.of("vanilla"), forcedFeatures, false);
++            return configureRepositoryWithSelection(packRepository, net.neoforged.neoforge.common.CommonHooks.getModDataPacksWithVanilla(), forcedFeatures, false);
+         } else {
+             Set<String> selected = Sets.newLinkedHashSet();
+ 
+@@ -1621,6 +_,8 @@
+                 selected.add("vanilla");
+             }
+ 
++            net.neoforged.neoforge.resource.ResourcePackLoader.reorderNewlyDiscoveredPacks(selected, dataPackConfig.getEnabled(), packRepository);
++
+             return configureRepositoryWithSelection(packRepository, selected, forcedFeatures, true);
+         }
+     }
+@@ -1672,13 +_,21 @@
+     }
+ 
+     public void kickUnlistedPlayers() {
++        if (this.scheduleGlobalIfRegionized(this::kickUnlistedPlayers)) {
++            return;
++        }
++
+         if (this.isEnforceWhitelist() && this.isUsingWhitelist()) {
+             PlayerList playerList = this.getPlayerList();
+             UserWhiteList whiteList = playerList.getWhiteList();
+ 
+-            for (ServerPlayer player : Lists.newArrayList(playerList.getPlayers())) {
++            for (ServerPlayer player : Lists.newArrayList(playerList.getAllPlayers())) {
+                 if (!whiteList.isWhiteListed(player.nameAndId())) {
+-                    player.connection.disconnect(Component.translatable("multiplayer.disconnect.not_whitelisted"));
++                    RegionizedWorldGuard.executeOnPlayerRegionAndWait(
++                        player,
++                        "whitelist disconnect",
++                        () -> player.connection.disconnect(Component.translatable("multiplayer.disconnect.not_whitelisted"))
++                    );
+                 }
+             }
+         }
+@@ -1715,6 +_,10 @@
+     }
+ 
+     public void setRespawnData(LevelData.RespawnData respawnData) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setRespawnData(respawnData))) {
++            return;
++        }
++
+         ServerLevelData levelData = this.worldData.overworldData();
+         LevelData.RespawnData oldRespawnData = levelData.getRespawnData();
+         if (!oldRespawnData.equals(respawnData)) {
+@@ -1782,6 +_,10 @@
+     }
+ 
+     public void setWeatherParameters(int clearTime, int rainTime, boolean raining, boolean thundering) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setWeatherParameters(clearTime, rainTime, raining, thundering))) {
++            return;
++        }
++
+         WeatherData weatherData = this.getWeatherData();
+         weatherData.setClearWeatherTime(clearTime);
+         weatherData.setRainTime(rainTime);
+@@ -1810,7 +_,7 @@
+         this.usingWhitelist = usingWhitelist;
+     }
+ 
+-    public float getCurrentSmoothedTickTime() {
++    public synchronized float getCurrentSmoothedTickTime() {
+         return this.smoothedTickTimeMillis;
+     }
+ 
+@@ -1818,12 +_,12 @@
+         return this.tickRateManager;
+     }
+ 
+-    public long getAverageTickTimeNanos() {
++    public synchronized long getAverageTickTimeNanos() {
+         return this.aggregatedTickTimesNanos / Math.min(100, Math.max(this.tickCount, 1));
+     }
+ 
+-    public long[] getTickTimesNanos() {
+-        return this.tickTimesNanos;
++    public synchronized long[] getTickTimesNanos() {
++        return Arrays.copyOf(this.tickTimesNanos, this.tickTimesNanos.length);
+     }
+ 
+     public LevelBasedPermissionSet getProfilePermissions(NameAndId nameAndId) {
+@@ -1845,6 +_,34 @@
+ 
+     public abstract boolean isSingleplayerOwner(NameAndId nameAndId);
+ 
++    private final Map<ResourceKey<Level>, long[]> perWorldTickTimes = Maps.newIdentityHashMap();
++    @Nullable
++    public long[] getTickTime(ResourceKey<Level> dim) {
++        synchronized (this.perWorldTickTimes) {
++            long[] tickTimes = this.perWorldTickTimes.get(dim);
++            return tickTimes == null ? null : Arrays.copyOf(tickTimes, tickTimes.length);
++        }
++    }
++
++    @Deprecated //Forge Internal use Only, You can screw up a lot of things if you mess with this map.
++    public synchronized Map<ResourceKey<Level>, ServerLevel> forgeGetWorldMap() {
++        return Collections.unmodifiableMap(new java.util.LinkedHashMap<>(this.levels));
++    }
++    private int worldArrayMarker = 0;
++    private int worldArrayLast = -1;
++    private ServerLevel[] worldArray;
++    @Deprecated //Forge Internal use Only, use to protect against concurrent modifications in the world tick loop.
++    public synchronized void markWorldsDirty() {
++        worldArrayMarker++;
++    }
++    private ServerLevel[] getWorldArray() {
++        if (worldArrayMarker == worldArrayLast && worldArray != null)
++            return worldArray;
++        worldArray = this.levels.values().stream().toArray(x -> new ServerLevel[x]);
++        worldArrayLast = worldArrayMarker;
++        return worldArray;
++    }
++
+     public void dumpServerProperties(Path path) throws IOException {
+     }
+ 
+@@ -1973,6 +_,10 @@
+     }
+ 
+     public void startRecordingMetrics(Consumer<ProfileResults> onStopped, Consumer<Path> onFinished) {
++        if (this.scheduleGlobalIfRegionized(() -> this.startRecordingMetrics(onStopped, onFinished))) {
++            return;
++        }
++
+         this.onMetricsRecordingStopped = report -> {
+             this.stopRecordingMetrics();
+             onStopped.accept(report);
+@@ -1982,14 +_,26 @@
+     }
+ 
+     public void stopRecordingMetrics() {
++        if (this.scheduleGlobalIfRegionized(this::stopRecordingMetrics)) {
++            return;
++        }
++
+         this.metricsRecorder = InactiveMetricsRecorder.INSTANCE;
+     }
+ 
+     public void finishRecordingMetrics() {
++        if (this.scheduleGlobalIfRegionized(this::finishRecordingMetrics)) {
++            return;
++        }
++
+         this.metricsRecorder.end();
+     }
+ 
+     public void cancelRecordingMetrics() {
++        if (this.scheduleGlobalIfRegionized(this::cancelRecordingMetrics)) {
++            return;
++        }
++
+         this.metricsRecorder.cancel();
+     }
+ 
+@@ -2009,6 +_,10 @@
+         return this.worldData;
+     }
+ 
++    public MinecraftServer.ReloadableResources getServerResources() {
++         return resources;
++    }
++
+     public RegistryAccess.Frozen registryAccess() {
+         return this.registries.compositeAccess();
+     }
+@@ -2080,6 +_,13 @@
+         return true;
+     }
+ 
++    public void handleCustomClickAction(Identifier id, Optional<Tag> payload, @Nullable ServerPlayer player, GameProfile profile) {
++        if (!net.neoforged.neoforge.common.CommonHooks.onCustomClickAction(player, profile, id, payload))
++            handleCustomClickAction(id, payload);
++    }
++
++    /// @deprecated Neo: Use the overload that has the player context and triggers the appropriate event.
++    @Deprecated
+     public void handleCustomClickAction(Identifier id, Optional<Tag> payload) {
+         LOGGER.debug("Received custom click action {} with payload {}", id, payload.orElse(null));
+     }
+@@ -2089,6 +_,10 @@
+     }
+ 
+     public boolean setAutoSave(boolean enable) {
++        if (this.scheduleGlobalIfRegionized(() -> this.setAutoSave(enable))) {
++            return true;
++        }
++
+         boolean success = false;
+ 
+         for (ServerLevel level : this.getAllLevels()) {
+@@ -2112,19 +_,23 @@
+     }
+ 
+     public <T> void onGameRuleChanged(GameRule<T> rule, T value) {
++        if (this.scheduleGlobalIfRegionized(() -> this.onGameRuleChanged(rule, value))) {
++            return;
++        }
++
+         this.notificationManager().onGameRuleChanged(rule, value);
+         if (rule == GameRules.REDUCED_DEBUG_INFO) {
+             byte event = (byte)((Boolean)value ? 22 : 23);
+ 
+-            for (ServerPlayer player : this.getPlayerList().getPlayers()) {
+-                player.connection.send(new ClientboundEntityEventPacket(player, event));
++            for (ServerPlayer player : this.getPlayerList().getAllPlayers()) {
++                RegionizedWorldGuard.sendToPlayer(player, new ClientboundEntityEventPacket(player, event));
+             }
+         } else if (rule == GameRules.LIMITED_CRAFTING || rule == GameRules.IMMEDIATE_RESPAWN) {
+             ClientboundGameEventPacket.Type eventType = rule == GameRules.LIMITED_CRAFTING
+                 ? ClientboundGameEventPacket.LIMITED_CRAFTING
+                 : ClientboundGameEventPacket.IMMEDIATE_RESPAWN;
+             ClientboundGameEventPacket packet = new ClientboundGameEventPacket(eventType, (Boolean)value ? 1.0F : 0.0F);
+-            this.getPlayerList().getPlayers().forEach(playerx -> playerx.connection.send(packet));
++            this.getPlayerList().getAllPlayers().forEach(playerx -> RegionizedWorldGuard.sendToPlayer(playerx, packet));
+         } else if (rule == GameRules.LOCATOR_BAR) {
+             this.getAllLevels().forEach(level -> {
+                 ServerWaypointManager waypointManager = level.getWaypointManager();
+@@ -2139,6 +_,21 @@
+         } else if (rule == GameRules.ADVANCE_TIME) {
+             this.getPlayerList().broadcastAll(this.clockManager().createFullSyncPacket());
+         }
++
++        // Neo: Allow mods to react to game rule state changes
++        net.neoforged.neoforge.event.EventHooks.onGameRuleChanged(this, rule, value);
++    }
++
++    private boolean scheduleGlobalIfRegionized(Runnable task) {
++        if (!RegionizedTickContext.isRegionThread()) {
++            return false;
++        }
++
++        if (this.regionizedTaskDispatcher.tryExecuteGlobal(task)) {
++            return true;
++        }
++
++        throw new IllegalStateException("Cannot mutate server state from region worker while region dispatcher is not running");
+     }
+ 
+     @Deprecated

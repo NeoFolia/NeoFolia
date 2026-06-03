@@ -1,0 +1,85 @@
+--- a/net/minecraft/world/level/block/CrafterBlock.java
++++ b/net/minecraft/world/level/block/CrafterBlock.java
+@@ -1,12 +_,14 @@
+ package net.minecraft.world.level.block;
+ 
+ import com.mojang.serialization.MapCodec;
++import java.util.List;
+ import java.util.Optional;
+ import net.minecraft.advancements.CriteriaTriggers;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.FrontAndTop;
+ import net.minecraft.core.dispenser.DefaultDispenseItemBehavior;
++import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.RandomSource;
+@@ -19,6 +_,7 @@
+ import net.minecraft.world.item.context.BlockPlaceContext;
+ import net.minecraft.world.item.crafting.CraftingInput;
+ import net.minecraft.world.item.crafting.CraftingRecipe;
++import net.minecraft.world.item.crafting.Recipe;
+ import net.minecraft.world.item.crafting.RecipeCache;
+ import net.minecraft.world.item.crafting.RecipeHolder;
+ import net.minecraft.world.level.Level;
+@@ -37,6 +_,7 @@
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class CrafterBlock extends BaseEntityBlock {
+@@ -182,7 +_,8 @@
+ 
+     private void dispenseItem(ServerLevel level, BlockPos pos, CrafterBlockEntity blockEntity, ItemStack results, BlockState blockState, RecipeHolder<?> recipe) {
+         Direction direction = blockState.getValue(ORIENTATION).front();
+-        Container into = HopperBlockEntity.getContainerAt(level, pos.relative(direction));
++        var containerOrHandler = HopperBlockEntity.getContainerOrHandlerAt(level, pos.relative(direction), direction.getOpposite());
++        Container into = containerOrHandler.container();
+         ItemStack remaining = results.copy();
+         if (into != null && (into instanceof CrafterBlockEntity || results.getCount() > into.getMaxStackSize(results))) {
+             while (!remaining.isEmpty()) {
+@@ -194,10 +_,14 @@
+ 
+                 remaining.shrink(1);
+             }
+-        } else if (into != null) {
++        } else if (!containerOrHandler.isEmpty()) {
+             while (!remaining.isEmpty()) {
+                 int oldSize = remaining.getCount();
+-                remaining = HopperBlockEntity.addItem(blockEntity, into, remaining, direction.getOpposite());
++                if (into != null) {
++                    remaining = HopperBlockEntity.addItem(blockEntity, into, remaining, direction.getOpposite());
++                } else {
++                    remaining = net.neoforged.neoforge.transfer.item.ItemUtil.insertItemReturnRemaining(containerOrHandler.itemHandler(), remaining, false, null);
++                }
+                 if (oldSize == remaining.getCount()) {
+                     break;
+                 }
+@@ -208,14 +_,22 @@
+             Vec3 centerPos = Vec3.atCenterOf(pos);
+             Vec3 itemSpawnOffset = centerPos.relative(direction, 0.7);
+             DefaultDispenseItemBehavior.spawnItem(level, remaining, 6, direction, itemSpawnOffset);
++            List<ItemStack> ingredientsSnapshot = blockEntity.getItems().stream().map(ItemStack::copy).toList();
+ 
+-            for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class, AABB.ofSize(centerPos, 17.0, 17.0, 17.0))) {
+-                CriteriaTriggers.CRAFTER_RECIPE_CRAFTED.trigger(player, recipe.id(), blockEntity.getItems());
++            AABB triggerBox = RegionizedWorldGuard.restrictToCurrentRegion(level, AABB.ofSize(centerPos, 17.0, 17.0, 17.0));
++            if (triggerBox != null) {
++                for (ServerPlayer player : level.getEntitiesOfClass(ServerPlayer.class, triggerBox)) {
++                    triggerCrafterRecipeCrafted(player, recipe.id(), ingredientsSnapshot);
++                }
+             }
+ 
+             level.levelEvent(1049, pos, 0);
+             level.levelEvent(2010, pos, direction.get3DDataValue());
+         }
++    }
++
++    private static void triggerCrafterRecipeCrafted(ServerPlayer player, ResourceKey<Recipe<?>> recipeId, List<ItemStack> ingredients) {
++        RegionizedWorldGuard.executeOnPlayerRegion(player, () -> CriteriaTriggers.CRAFTER_RECIPE_CRAFTED.trigger(player, recipeId, ingredients));
+     }
+ 
+     @Override

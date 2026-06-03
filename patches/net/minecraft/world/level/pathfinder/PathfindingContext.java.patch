@@ -1,0 +1,51 @@
+--- a/net/minecraft/world/level/pathfinder/PathfindingContext.java
++++ b/net/minecraft/world/level/pathfinder/PathfindingContext.java
+@@ -4,7 +_,10 @@
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.level.CollisionGetter;
++import net.minecraft.world.level.Level;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PathfindingContext {
+@@ -24,20 +_,32 @@
+         this.mobPosition = mob.blockPosition();
+     }
+ 
+-    public PathType getPathTypeFromState(int x, int y, int z) {
++    public synchronized PathType getPathTypeFromState(int x, int y, int z) {
+         BlockPos pos = this.mutablePos.set(x, y, z);
++        if (!this.canReadBlock(pos)) {
++            return PathType.BLOCKED;
++        }
++
+         return this.cache == null ? WalkNodeEvaluator.getPathTypeFromState(this.level, pos) : this.cache.getOrCompute(this.level, pos);
+     }
+ 
+-    public BlockState getBlockState(BlockPos pos) {
+-        return this.level.getBlockState(pos);
++    public synchronized BlockState getBlockState(BlockPos pos) {
++        return this.canReadBlock(pos) ? this.level.getBlockState(pos) : Blocks.BARRIER.defaultBlockState();
+     }
+ 
+-    public CollisionGetter level() {
++    public synchronized CollisionGetter level() {
+         return this.level;
+     }
+ 
+-    public BlockPos mobPosition() {
++    public synchronized BlockPos mobPosition() {
+         return this.mobPosition;
++    }
++
++    synchronized BlockPos currentEvalPos() {
++        return this.mutablePos.immutable();
++    }
++
++    synchronized boolean canReadBlock(BlockPos pos) {
++        return !(this.level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

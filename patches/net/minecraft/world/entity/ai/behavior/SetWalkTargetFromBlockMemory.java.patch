@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/behavior/SetWalkTargetFromBlockMemory.java
++++ b/net/minecraft/world/entity/ai/behavior/SetWalkTargetFromBlockMemory.java
+@@ -11,7 +_,7 @@
+ import net.minecraft.world.phys.Vec3;
+ 
+ public class SetWalkTargetFromBlockMemory {
+-    public static OneShot<Villager> create(
++    public static synchronized OneShot<Villager> create(
+         MemoryModuleType<GlobalPos> memoryType, float speedModifier, int closeEnoughDist, int tooFarDistance, int tooLongUnreachableDuration
+     ) {
+         return BehaviorBuilder.create(
+@@ -21,8 +_,9 @@
+                     (cantReachSince, walkTarget, memory) -> (level, body, timestamp) -> {
+                         GlobalPos targetPos = i.get(memory);
+                         Optional<Long> cantReachTargetSince = i.tryGet(cantReachSince);
++                        long cantReachSinceTimestamp = cantReachTargetSince.orElse(Long.MAX_VALUE);
+                         if (targetPos.dimension() == level.dimension()
+-                            && (!cantReachTargetSince.isPresent() || level.getGameTime() - cantReachTargetSince.get() <= tooLongUnreachableDuration)) {
++                            && (cantReachSinceTimestamp == Long.MAX_VALUE || level.getGameTime() - cantReachSinceTimestamp <= tooLongUnreachableDuration)) {
+                             if (targetPos.pos().distManhattan(body.blockPosition()) > tooFarDistance) {
+                                 Vec3 towardsTargetPos = null;
+                                 int tries = 0;

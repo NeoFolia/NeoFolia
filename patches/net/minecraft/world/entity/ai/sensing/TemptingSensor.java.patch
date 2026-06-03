@@ -1,0 +1,22 @@
+--- a/net/minecraft/world/entity/ai/sensing/TemptingSensor.java
++++ b/net/minecraft/world/entity/ai/sensing/TemptingSensor.java
+@@ -17,6 +_,7 @@
+ import net.minecraft.world.entity.animal.Animal;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TemptingSensor extends Sensor<PathfinderMob> {
+     private static final TargetingConditions TEMPT_TARGETING = TargetingConditions.forNonCombat().ignoreLineOfSight();
+@@ -37,9 +_,10 @@
+     protected void doTick(ServerLevel level, PathfinderMob body) {
+         Brain<?> brain = body.getBrain();
+         TargetingConditions targeting = TEMPT_TARGETING.copy().range((float)body.getAttributeValue(Attributes.TEMPT_RANGE));
+-        List<Player> players = level.players()
++        List<Player> players = List.copyOf(level.players())
+             .stream()
+             .filter(EntitySelector.NO_SPECTATORS)
++            .filter(playerx -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, playerx) != null)
+             .filter(playerx -> targeting.test(level, body, playerx))
+             .filter(p -> this.playerHoldingTemptation(body, p))
+             .filter(playerx -> !body.hasPassenger(playerx))

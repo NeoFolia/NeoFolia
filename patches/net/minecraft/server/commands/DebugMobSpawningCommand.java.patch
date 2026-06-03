@@ -1,0 +1,42 @@
+--- a/net/minecraft/server/commands/DebugMobSpawningCommand.java
++++ b/net/minecraft/server/commands/DebugMobSpawningCommand.java
+@@ -2,6 +_,8 @@
+ 
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
++import com.mojang.brigadier.context.CommandContext;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
+@@ -18,7 +_,7 @@
+                 Commands.literal(mobCategory.getName())
+                     .then(
+                         Commands.argument("at", BlockPosArgument.blockPos())
+-                            .executes(c -> spawnMobs(c.getSource(), mobCategory, BlockPosArgument.getLoadedBlockPos(c, "at")))
++                            .executes(c -> spawnMobs(c, mobCategory))
+                     )
+             );
+         }
+@@ -26,8 +_,20 @@
+         dispatcher.register(base);
+     }
+ 
++    private static int spawnMobs(CommandContext<CommandSourceStack> context, MobCategory mobCategory) throws CommandSyntaxException {
++        CommandSourceStack source = context.getSource();
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> spawnMobs(context, mobCategory))) {
++            return 0;
++        }
++
++        return spawnMobs(source, mobCategory, BlockPosArgument.getLoadedBlockPos(context, "at"));
++    }
++
+     private static int spawnMobs(CommandSourceStack source, MobCategory mobCategory, BlockPos at) {
+-        NaturalSpawner.spawnCategoryForPosition(mobCategory, source.getLevel(), at);
++        RegionizedCommandHelper.callOnRegion(source, source.getLevel(), at, () -> {
++            NaturalSpawner.spawnCategoryForPosition(mobCategory, source.getLevel(), at);
++            return null;
++        });
+         return 1;
+     }
+ }

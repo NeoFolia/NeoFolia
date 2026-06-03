@@ -1,0 +1,99 @@
+--- a/net/minecraft/world/entity/ai/goal/DolphinJumpGoal.java
++++ b/net/minecraft/world/entity/ai/goal/DolphinJumpGoal.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.world.entity.animal.dolphin.Dolphin;
+ import net.minecraft.world.level.material.FluidState;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class DolphinJumpGoal extends JumpGoal {
+     private static final int[] STEPS_TO_CHECK = new int[]{0, 1, 4, 5, 6, 7};
+@@ -21,7 +_,7 @@
+     }
+ 
+     @Override
+-    public boolean canUse() {
++    public synchronized boolean canUse() {
+         if (this.dolphin.getRandom().nextInt(this.interval) != 0) {
+             return false;
+         } else {
+@@ -40,45 +_,58 @@
+         }
+     }
+ 
+-    private boolean waterIsClear(BlockPos dolphinPos, int stepX, int stepZ, int currentStep) {
++    private synchronized boolean waterIsClear(BlockPos dolphinPos, int stepX, int stepZ, int currentStep) {
+         BlockPos nextPos = dolphinPos.offset(stepX * currentStep, 0, stepZ * currentStep);
+-        return this.dolphin.level().getFluidState(nextPos).is(FluidTags.WATER) && !this.dolphin.level().getBlockState(nextPos).blocksMotion();
++        return this.canReadBlock(nextPos)
++            && this.dolphin.level().getFluidState(nextPos).is(FluidTags.WATER)
++            && !this.dolphin.level().getBlockState(nextPos).blocksMotion();
+     }
+ 
+-    private boolean surfaceIsClear(BlockPos dolphinPos, int stepX, int stepZ, int currentStep) {
+-        return this.dolphin.level().getBlockState(dolphinPos.offset(stepX * currentStep, 1, stepZ * currentStep)).isAir()
+-            && this.dolphin.level().getBlockState(dolphinPos.offset(stepX * currentStep, 2, stepZ * currentStep)).isAir();
++    private synchronized boolean surfaceIsClear(BlockPos dolphinPos, int stepX, int stepZ, int currentStep) {
++        BlockPos lower = dolphinPos.offset(stepX * currentStep, 1, stepZ * currentStep);
++        BlockPos upper = dolphinPos.offset(stepX * currentStep, 2, stepZ * currentStep);
++        return this.canReadBlock(lower)
++            && this.canReadBlock(upper)
++            && this.dolphin.level().getBlockState(lower).isAir()
++            && this.dolphin.level().getBlockState(upper).isAir();
+     }
+ 
+     @Override
+-    public boolean canContinueToUse() {
++    public synchronized boolean canContinueToUse() {
+         double yd = this.dolphin.getDeltaMovement().y;
+         return (!(yd * yd < 0.03F) || this.dolphin.getXRot() == 0.0F || !(Math.abs(this.dolphin.getXRot()) < 10.0F) || !this.dolphin.isInWater())
+             && !this.dolphin.onGround();
+     }
+ 
+     @Override
+-    public boolean isInterruptable() {
++    public synchronized boolean isInterruptable() {
+         return false;
+     }
+ 
+     @Override
+-    public void start() {
++    public synchronized void start() {
++        this.breached = false;
+         Direction direction = this.dolphin.getMotionDirection();
+         this.dolphin.setDeltaMovement(this.dolphin.getDeltaMovement().add(direction.getStepX() * 0.6, 0.7, direction.getStepZ() * 0.6));
+         this.dolphin.getNavigation().stop();
+     }
+ 
+     @Override
+-    public void stop() {
++    public synchronized void stop() {
+         this.dolphin.setXRot(0.0F);
++        this.breached = false;
+     }
+ 
+     @Override
+-    public void tick() {
++    public synchronized void tick() {
+         boolean alreadyBreached = this.breached;
+         if (!alreadyBreached) {
+-            FluidState fluidState = this.dolphin.level().getFluidState(this.dolphin.blockPosition());
++            BlockPos dolphinPos = this.dolphin.blockPosition();
++            if (!this.canReadBlock(dolphinPos)) {
++                return;
++            }
++
++            FluidState fluidState = this.dolphin.level().getFluidState(dolphinPos);
+             this.breached = fluidState.is(FluidTags.WATER);
+         }
+ 
+@@ -94,5 +_,9 @@
+             double rotation = Math.atan2(-movement.y, horizontalDistance) * 180.0F / (float)Math.PI;
+             this.dolphin.setXRot((float)rotation);
+         }
++    }
++
++    private synchronized boolean canReadBlock(BlockPos pos) {
++        return RegionizedWorldGuard.shouldLoadChunk(this.dolphin.level(), pos.getX() >> 4, pos.getZ() >> 4);
+     }
+ }

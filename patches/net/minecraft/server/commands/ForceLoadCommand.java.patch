@@ -1,0 +1,80 @@
+--- a/net/minecraft/server/commands/ForceLoadCommand.java
++++ b/net/minecraft/server/commands/ForceLoadCommand.java
+@@ -93,13 +_,13 @@
+         if (result) {
+             source.sendSuccess(
+                 () -> Component.translatable(
+-                    "commands.forceload.query.success", Component.translationArg(chunkPos), Component.translationArg(dimension.identifier())
++                        "commands.forceload.query.success", Component.translationArg(chunkPos), level.getDescription() // Neo: Use dimension translation, if one exists
+                 ),
+                 false
+             );
+             return 1;
+         } else {
+-            throw ERROR_NOT_TICKING.create(chunkPos, dimension.identifier());
++            throw ERROR_NOT_TICKING.create(chunkPos, level.getDescription()); // Neo: Use dimension translation, if one exists
+         }
+     }
+ 
+@@ -112,31 +_,39 @@
+             String chunkList = Joiner.on(", ").join(forcedChunks.stream().sorted().map(ChunkPos::unpack).map(ChunkPos::toString).iterator());
+             if (chunkCount == 1) {
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.forceload.list.single", Component.translationArg(dimension.identifier()), chunkList), false
++                    () -> Component.translatable("commands.forceload.list.single", level.getDescription(), chunkList), false // Neo: Use dimension translation, if one exists
+                 );
+             } else {
+                 source.sendSuccess(
+-                    () -> Component.translatable("commands.forceload.list.multiple", chunkCount, Component.translationArg(dimension.identifier()), chunkList),
++                    () -> Component.translatable("commands.forceload.list.multiple", chunkCount, level.getDescription(), chunkList), // Neo: Use dimension translation, if one exists
+                     false
+                 );
+             }
+         } else {
+-            source.sendFailure(Component.translatable("commands.forceload.added.none", Component.translationArg(dimension.identifier())));
++            source.sendFailure(Component.translatable("commands.forceload.added.none", level.getDescription())); // Neo: Use dimension translation, if one exists
+         }
+ 
+         return chunkCount;
+     }
+ 
+     private static int removeAll(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> removeAll(source))) {
++            return 0;
++        }
++
+         ServerLevel level = source.getLevel();
+         ResourceKey<Level> dimension = level.dimension();
+         LongSet forcedChunks = level.getForceLoadedChunks();
+         forcedChunks.forEach(chunk -> level.setChunkForced(ChunkPos.getX(chunk), ChunkPos.getZ(chunk), false));
+-        source.sendSuccess(() -> Component.translatable("commands.forceload.removed.all", Component.translationArg(dimension.identifier())), true);
++        source.sendSuccess(() -> Component.translatable("commands.forceload.removed.all", level.getDescription()), true); // Neo: Use dimension translation, if one exists
+         return 0;
+     }
+ 
+     private static int changeForceLoad(CommandSourceStack source, ColumnPos from, ColumnPos to, boolean add) throws CommandSyntaxException {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> changeForceLoad(source, from, to, add))) {
++            return 0;
++        }
++
+         int minX = Math.min(from.x(), to.x());
+         int minZ = Math.min(from.z(), to.z());
+         int maxX = Math.max(from.x(), to.x());
+@@ -177,7 +_,7 @@
+                             () -> Component.translatable(
+                                 "commands.forceload." + (add ? "added" : "removed") + ".single",
+                                 Component.translationArg(finalFirstChanged),
+-                                Component.translationArg(dimension.identifier())
++                                    level.getDescription() // Neo: Use dimension translation, if one exists
+                             ),
+                             true
+                         );
+@@ -188,7 +_,7 @@
+                             () -> Component.translatable(
+                                 "commands.forceload." + (add ? "added" : "removed") + ".multiple",
+                                 changedChunks,
+-                                Component.translationArg(dimension.identifier()),
++                                level.getDescription(), // Neo: Use dimension translation, if one exists
+                                 Component.translationArg(min),
+                                 Component.translationArg(max)
+                             ),

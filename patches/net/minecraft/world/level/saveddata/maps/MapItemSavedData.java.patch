@@ -1,0 +1,155 @@
+--- a/net/minecraft/world/level/saveddata/maps/MapItemSavedData.java
++++ b/net/minecraft/world/level/saveddata/maps/MapItemSavedData.java
+@@ -137,7 +_,7 @@
+         return new MapItemSavedData(0, 0, scale, false, false, isLocked, dimension);
+     }
+ 
+-    public MapItemSavedData locked() {
++    public synchronized MapItemSavedData locked() {
+         MapItemSavedData result = new MapItemSavedData(
+             this.centerX, this.centerZ, this.scale, this.trackingPosition, this.unlimitedTracking, true, this.dimension
+         );
+@@ -157,7 +_,7 @@
+         return stack -> stack == mapStack ? true : stack.is(mapStack.getItem()) && Objects.equals(mapId, stack.get(DataComponents.MAP_ID));
+     }
+ 
+-    public void tickCarriedBy(Player tickingPlayer, ItemStack itemStack, @Nullable ItemFrame placedInFrame) {
++    public synchronized void tickCarriedBy(Player tickingPlayer, ItemStack itemStack, @Nullable ItemFrame placedInFrame) {
+         if (!this.carriedByPlayers.containsKey(tickingPlayer)) {
+             MapItemSavedData.HoldingPlayer holdingPlayer = new MapItemSavedData.HoldingPlayer(tickingPlayer);
+             this.carriedByPlayers.put(tickingPlayer, holdingPlayer);
+@@ -235,7 +_,7 @@
+         return false;
+     }
+ 
+-    public void removeDecoration(String string) {
++    public synchronized void removeDecoration(String string) {
+         MapDecoration decoration = this.decorations.remove(string);
+         if (decoration != null && decoration.type().value().trackCount()) {
+             this.trackedDecorationCount--;
+@@ -252,7 +_,7 @@
+         }
+     }
+ 
+-    public void addDecoration(
++    public synchronized void addDecoration(
+         Holder<MapDecorationType> type, @Nullable LevelAccessor level, String key, double xPos, double zPos, double yRot, @Nullable Component name
+     ) {
+         int scaling = 1 << this.scale;
+@@ -344,12 +_,12 @@
+         }
+     }
+ 
+-    public @Nullable Packet<?> getUpdatePacket(MapId id, Player player) {
++    public synchronized @Nullable Packet<?> getUpdatePacket(MapId id, Player player) {
+         MapItemSavedData.HoldingPlayer holdingPlayer = this.carriedByPlayers.get(player);
+         return holdingPlayer == null ? null : holdingPlayer.nextUpdatePacket(id);
+     }
+ 
+-    private void setColorsDirty(int x, int y) {
++    private synchronized void setColorsDirty(int x, int y) {
+         this.setDirty();
+ 
+         for (MapItemSavedData.HoldingPlayer holdingPlayer : this.carriedBy) {
+@@ -357,11 +_,11 @@
+         }
+     }
+ 
+-    private void setDecorationsDirty() {
++    private synchronized void setDecorationsDirty() {
+         this.carriedBy.forEach(MapItemSavedData.HoldingPlayer::markDecorationsDirty);
+     }
+ 
+-    public MapItemSavedData.HoldingPlayer getHoldingPlayer(Player player) {
++    public synchronized MapItemSavedData.HoldingPlayer getHoldingPlayer(Player player) {
+         MapItemSavedData.HoldingPlayer holdingPlayer = this.carriedByPlayers.get(player);
+         if (holdingPlayer == null) {
+             holdingPlayer = new MapItemSavedData.HoldingPlayer(player);
+@@ -372,7 +_,7 @@
+         return holdingPlayer;
+     }
+ 
+-    public boolean toggleBanner(LevelAccessor level, BlockPos pos) {
++    public synchronized boolean toggleBanner(LevelAccessor level, BlockPos pos) {
+         double xPos = pos.getX() + 0.5;
+         double zPos = pos.getZ() + 0.5;
+         int scale = 1 << this.scale;
+@@ -402,7 +_,7 @@
+         return false;
+     }
+ 
+-    public void checkBanners(BlockGetter level, int x, int z) {
++    public synchronized void checkBanners(BlockGetter level, int x, int z) {
+         Iterator<MapBanner> iterator = this.bannerMarkers.values().iterator();
+ 
+         while (iterator.hasNext()) {
+@@ -418,17 +_,17 @@
+         }
+     }
+ 
+-    public Collection<MapBanner> getBanners() {
+-        return this.bannerMarkers.values();
++    public synchronized Collection<MapBanner> getBanners() {
++        return List.copyOf(this.bannerMarkers.values());
+     }
+ 
+-    public void removedFromFrame(BlockPos pos, int entityID) {
++    public synchronized void removedFromFrame(BlockPos pos, int entityID) {
+         this.removeDecoration(getFrameKey(entityID));
+         this.frameMarkers.remove(MapFrame.frameId(pos));
+         this.setDirty();
+     }
+ 
+-    public boolean updateColor(int x, int y, byte newColor) {
++    public synchronized boolean updateColor(int x, int y, byte newColor) {
+         byte oldColor = this.colors[x + y * 128];
+         if (oldColor != newColor) {
+             this.setColor(x, y, newColor);
+@@ -438,12 +_,12 @@
+         }
+     }
+ 
+-    public void setColor(int x, int y, byte newColor) {
++    public synchronized void setColor(int x, int y, byte newColor) {
+         this.colors[x + y * 128] = newColor;
+         this.setColorsDirty(x, y);
+     }
+ 
+-    public boolean isExplorationMap() {
++    public synchronized boolean isExplorationMap() {
+         for (MapDecoration decoration : this.decorations.values()) {
+             if (decoration.type().value().explorationMapElement()) {
+                 return true;
+@@ -453,7 +_,7 @@
+         return false;
+     }
+ 
+-    public void addClientSideDecorations(List<MapDecoration> decorations) {
++    public synchronized void addClientSideDecorations(List<MapDecoration> decorations) {
+         this.decorations.clear();
+         this.trackedDecorationCount = 0;
+ 
+@@ -466,11 +_,11 @@
+         }
+     }
+ 
+-    public Iterable<MapDecoration> getDecorations() {
+-        return this.decorations.values();
++    public synchronized Iterable<MapDecoration> getDecorations() {
++        return List.copyOf(this.decorations.values());
+     }
+ 
+-    public boolean isTrackedCountOverLimit(int limit) {
++    public synchronized boolean isTrackedCountOverLimit(int limit) {
+         return this.trackedDecorationCount > limit;
+     }
+ 
+@@ -527,7 +_,7 @@
+             Collection<MapDecoration> decorations;
+             if (this.dirtyDecorations && this.tick++ % 5 == 0) {
+                 this.dirtyDecorations = false;
+-                decorations = MapItemSavedData.this.decorations.values();
++                decorations = List.copyOf(MapItemSavedData.this.decorations.values());
+             } else {
+                 decorations = null;
+             }

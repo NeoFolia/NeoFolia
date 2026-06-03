@@ -1,0 +1,50 @@
+--- a/net/minecraft/server/commands/ReloadCommand.java
++++ b/net/minecraft/server/commands/ReloadCommand.java
+@@ -16,6 +_,10 @@
+     private static final Logger LOGGER = LogUtils.getLogger();
+ 
+     public static void reloadPacks(Collection<String> selectedPacks, CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> reloadPacks(selectedPacks, source))) {
++            return;
++        }
++
+         source.getServer().reloadResources(selectedPacks).exceptionally(throwable -> {
+             LOGGER.warn("Failed to execute reload", throwable);
+             source.sendFailure(Component.translatable("commands.reload.failure"));
+@@ -34,20 +_,26 @@
+             }
+         }
+ 
++        net.neoforged.neoforge.resource.ResourcePackLoader.reorderNewlyDiscoveredPacks(selected, currentPacks, packRepository);
+         return selected;
+     }
+ 
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+-        dispatcher.register(Commands.literal("reload").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).executes(s -> {
+-            CommandSourceStack source = s.getSource();
+-            MinecraftServer server = source.getServer();
+-            PackRepository packRepository = server.getPackRepository();
+-            WorldData worldData = server.getWorldData();
+-            Collection<String> currentPacks = packRepository.getSelectedIds();
+-            Collection<String> newSelectedPacks = discoverNewPacks(packRepository, worldData, currentPacks);
+-            source.sendSuccess(() -> Component.translatable("commands.reload.success"), true);
+-            reloadPacks(newSelectedPacks, source);
++        dispatcher.register(Commands.literal("reload").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).executes(s -> reload(s.getSource())));
++    }
++
++    private static int reload(CommandSourceStack source) {
++        if (RegionizedCommandHelper.scheduleGlobalIfRegionized(source, () -> reload(source))) {
+             return 0;
+-        }));
++        }
++
++        MinecraftServer server = source.getServer();
++        PackRepository packRepository = server.getPackRepository();
++        WorldData worldData = server.getWorldData();
++        Collection<String> currentPacks = packRepository.getSelectedIds();
++        Collection<String> newSelectedPacks = discoverNewPacks(packRepository, worldData, currentPacks);
++        source.sendSuccess(() -> Component.translatable("commands.reload.success"), true);
++        reloadPacks(newSelectedPacks, source);
++        return 0;
+     }
+ }

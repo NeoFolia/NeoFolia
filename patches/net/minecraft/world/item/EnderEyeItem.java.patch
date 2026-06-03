@@ -1,0 +1,29 @@
+--- a/net/minecraft/world/item/EnderEyeItem.java
++++ b/net/minecraft/world/item/EnderEyeItem.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class EnderEyeItem extends Item {
+     public EnderEyeItem(Item.Properties properties) {
+@@ -92,13 +_,15 @@
+                 level.gameEvent(GameEvent.PROJECTILE_SHOOT, eyeOfEnder.position(), GameEvent.Context.of(player));
+                 level.addFreshEntity(eyeOfEnder);
+                 if (player instanceof ServerPlayer serverPlayer) {
+-                    CriteriaTriggers.USED_ENDER_EYE.trigger(serverPlayer, nearestMapFeature);
++                    RegionizedWorldGuard.executeOnPlayerRegion(
++                        serverPlayer, () -> CriteriaTriggers.USED_ENDER_EYE.trigger(serverPlayer, nearestMapFeature)
++                    );
+                 }
+ 
+-                float pitch = Mth.lerp(level.getRandom().nextFloat(), 0.33F, 0.5F);
++                float pitch = Mth.lerp(player.getRandom().nextFloat(), 0.33F, 0.5F);
+                 level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.ENDER_EYE_LAUNCH, SoundSource.NEUTRAL, 1.0F, pitch);
+                 itemStack.consume(1, player);
+-                player.awardStat(Stats.ITEM_USED.get(this));
++                RegionizedWorldGuard.awardStat(player, Stats.ITEM_USED.get(this));
+             }
+ 
+             return InteractionResult.SUCCESS_SERVER;

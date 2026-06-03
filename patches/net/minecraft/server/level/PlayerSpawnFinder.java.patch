@@ -1,0 +1,31 @@
+--- a/net/minecraft/server/level/PlayerSpawnFinder.java
++++ b/net/minecraft/server/level/PlayerSpawnFinder.java
+@@ -19,10 +_,13 @@
+ import net.minecraft.world.level.GameType;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.LevelChunk;
++import net.minecraft.world.level.chunk.status.ChunkStatus;
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class PlayerSpawnFinder {
+@@ -147,7 +_,13 @@
+ 
+     protected static @Nullable BlockPos getOverworldRespawnPos(ServerLevel level, int x, int z) {
+         boolean caveWorld = level.dimensionType().hasCeiling();
+-        LevelChunk chunk = level.getChunk(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
++        int chunkX = SectionPos.blockToSectionCoord(x);
++        int chunkZ = SectionPos.blockToSectionCoord(z);
++        ChunkAccess chunkAccess = level.getChunk(chunkX, chunkZ, ChunkStatus.FULL, RegionizedWorldGuard.shouldLoadChunk(level, chunkX, chunkZ));
++        if (!(chunkAccess instanceof LevelChunk chunk)) {
++            return null;
++        }
++
+         int topY = caveWorld ? level.getChunkSource().getGenerator().getSpawnHeight(level) : chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, x & 15, z & 15);
+         if (topY < level.getMinY()) {
+             return null;

@@ -1,0 +1,98 @@
+--- a/net/minecraft/world/entity/ai/behavior/AnimalMakeLove.java
++++ b/net/minecraft/world/entity/ai/behavior/AnimalMakeLove.java
+@@ -44,12 +_,21 @@
+         this.closeEnoughDistance = closeEnoughDistance;
+     }
+ 
+-    protected boolean checkExtraStartConditions(ServerLevel level, Animal body) {
++    protected synchronized boolean checkExtraStartConditions(ServerLevel level, Animal body) {
+         return body.isInLove() && this.findValidBreedPartner(body).isPresent();
+     }
+ 
+-    protected void start(ServerLevel level, Animal body, long timestamp) {
+-        Animal partner = this.findValidBreedPartner(body).get();
++    protected synchronized void start(ServerLevel level, Animal body, long timestamp) {
++        Optional<? extends Animal> partnerCandidate = this.findValidBreedPartner(body);
++        if (partnerCandidate.isEmpty()) {
++            return;
++        }
++
++        Animal partner = partnerCandidate.get();
++        if (BehaviorUtils.regionSafeEntity(body, partner) == null || BehaviorUtils.regionSafeEntity(partner, body) == null) {
++            return;
++        }
++
+         body.getBrain().setMemory(MemoryModuleType.BREED_TARGET, partner);
+         partner.getBrain().setMemory(MemoryModuleType.BREED_TARGET, body);
+         BehaviorUtils.lockGazeAndWalkToEachOther(body, partner, this.speedModifier, this.closeEnoughDistance);
+@@ -57,11 +_,15 @@
+         this.spawnChildAtTime = timestamp + duration;
+     }
+ 
+-    protected boolean canStillUse(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized boolean canStillUse(ServerLevel level, Animal body, long timestamp) {
+         if (!this.hasBreedTargetOfRightType(body)) {
+             return false;
+         } else {
+             Animal partner = this.getBreedTarget(body);
++            if (partner == null) {
++                return false;
++            }
++
+             return partner.isAlive()
+                 && body.canMate(partner)
+                 && BehaviorUtils.entityIsVisible(body.getBrain(), partner)
+@@ -71,8 +_,12 @@
+         }
+     }
+ 
+-    protected void tick(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized void tick(ServerLevel level, Animal body, long timestamp) {
+         Animal partner = this.getBreedTarget(body);
++        if (partner == null) {
++            return;
++        }
++
+         BehaviorUtils.lockGazeAndWalkToEachOther(body, partner, this.speedModifier, this.closeEnoughDistance);
+         if (body.closerThan(partner, 3.0)) {
+             if (timestamp >= this.spawnChildAtTime) {
+@@ -83,27 +_,31 @@
+         }
+     }
+ 
+-    protected void stop(ServerLevel level, Animal body, long timestamp) {
++    protected synchronized void stop(ServerLevel level, Animal body, long timestamp) {
+         body.getBrain().eraseMemory(MemoryModuleType.BREED_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+         body.getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+         this.spawnChildAtTime = 0L;
+     }
+ 
+-    private Animal getBreedTarget(Animal body) {
+-        return (Animal)body.getBrain().getMemory(MemoryModuleType.BREED_TARGET).get();
++    private synchronized @org.jspecify.annotations.Nullable Animal getBreedTarget(Animal body) {
++        Animal target = body.getBrain().getMemory(MemoryModuleType.BREED_TARGET).filter(Animal.class::isInstance).map(Animal.class::cast).orElse(null);
++        return BehaviorUtils.regionSafeEntity(body, target);
+     }
+ 
+-    private boolean hasBreedTargetOfRightType(Animal body) {
++    private synchronized boolean hasBreedTargetOfRightType(Animal body) {
+         Brain<?> brain = body.getBrain();
+-        return brain.hasMemoryValue(MemoryModuleType.BREED_TARGET) && brain.getMemory(MemoryModuleType.BREED_TARGET).get().is(this.partnerType);
++        return brain.getMemory(MemoryModuleType.BREED_TARGET).filter(target -> BehaviorUtils.regionSafeEntity(body, target) != null).filter(target -> target.is(this.partnerType)).isPresent();
+     }
+ 
+-    private Optional<? extends Animal> findValidBreedPartner(Animal body) {
++    private synchronized Optional<? extends Animal> findValidBreedPartner(Animal body) {
+         return body.getBrain()
+             .getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES)
+-            .get()
+-            .findClosest(entity -> entity.is(this.partnerType) && entity instanceof Animal animal && body.canMate(animal) && !animal.isPanicking())
++            .flatMap(visibleEntities -> visibleEntities.findClosest(entity -> entity.is(this.partnerType)
++                && entity instanceof Animal animal
++                && BehaviorUtils.regionSafeEntity(body, animal) != null
++                && body.canMate(animal)
++                && !animal.isPanicking()))
+             .map(Animal.class::cast);
+     }
+ }
