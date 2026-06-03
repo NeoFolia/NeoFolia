@@ -1,4 +1,4 @@
-# Forgia — Minecraft 1.21.1
+# NeoFolia — Minecraft 26.1.2
 
 A NeoForge fork porting [Folia](https://github.com/PaperMC/Folia)'s regionized multithreaded server model natively into the NeoForge modding ecosystem.
 
@@ -14,9 +14,8 @@ Currently at **stage 1** of the port (region data primitives and tick scheduler 
 
 ## Requirements
 
-- **Java 21**
-- **Minecraft 1.21.1**
-- **NeoForm** 20240808.144430
+- **Java 25**
+- **Minecraft 26.1.2**
 
 ## Configuration
 
@@ -45,24 +44,10 @@ Internal implementation is in `net.neoforged.neoforge.server.threading.region`.
 ## Diagnostics
 
 ```
-/neoforge regionthreading status
+/tps
 ```
 
 Prints region count, running regions, sections, tracked entities, entity tasks, worker threads, global tick count, and last tick duration. Requires permission level 2.
-
-## Port Roadmap
-
-1. ~~Port Folia's region data primitives and tick scheduler internals without Bukkit/Paper API exposure~~ *(in progress)*
-2. Wire regionized server/global tick loops into `MinecraftServer` and `ServerLevel`
-3. Move entity and position scheduling behind the native NeoForge API skeleton
-4. Convert NeoForge tick and gameplay event dispatch to run on the owning context
-5. Add hard ownership checks for unsafe off-region access
-6. Add optional mod metadata declaring support for regionized execution
-
-## Building
-
-```bash
-./gradlew setup
 ./gradlew build
 ```
 
