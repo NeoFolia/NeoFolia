@@ -21,7 +21,7 @@ Region threading is gated behind experimental server config options, **both defa
 |--------|------|---------|-------------|
 | `-Dneoforge.regionThreads=4` | Args | `4` | Number of native region worker threads. |
 | `-Dneoforge.regionizedChunkTicks=true` | Args | `false` | Enabling chunk ticks by region. |
-| `-Dneoforge.regionizedScheduledTicks=true` | Args | `false` | Number of native region worker threads; `0` means `max(1, availableProcessors - 1)` |
+| `-Dneoforge.regionizedScheduledTicks=true` | Args | `false` | Enabling scheduled ticks by region. |
 | `-Dneoforge.regionizedBlockEntityTicks=true` | Args | `false` | Enable block ticks by region. |
 | `-Dneoforge.regionizedEntityTicks=true` | Args | `false` | Enabling entity ticks by region. |
 | `-Dneoforge.regionTaskTimeoutSeconds=60` | Args | `false` | Error message server shutdown timeout. |
