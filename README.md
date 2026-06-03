@@ -19,23 +19,12 @@ Region threading is gated behind experimental server config options, **both defa
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enableRegionThreadingBridge` | boolean | `false` | Enables the single-thread bridge that exposes the scheduling API and drains global/region queues on the existing server tick loop |
-| `regionThreadingWorkerThreads` | int (0–512) | `0` | Number of native region worker threads; `0` means `max(1, availableProcessors - 1)` |
-
-## API Surface
-
-The public API lives in `net.neoforged.neoforge.server.threading`:
-
-| Interface | Purpose |
-|-----------|---------|
-| `RegionThreading` | Entry point: global/region/entity schedulers, ownership assertions, `executeOrSchedule` helpers |
-| `GlobalRegionScheduler` | Schedule work on the global region |
-| `RegionScheduler` | Schedule work on the region owning a block position |
-| `EntityRegionScheduler` | Schedule work on the region owning an entity |
-| `RegionThreadingContext` | Describes current execution context (`NONE`, `GLOBAL_REGION`, `REGION`, `ASYNC`) |
-| `ScheduledRegionTask` | Cancellable/completable handle for scheduled work |
-
-Internal implementation is in `net.neoforged.neoforge.server.threading.region`.
+| `-Dneoforge.regionThreads=4` | JVM Flag | `4` | Number of native region worker threads; `4` means `max(1, availableProcessors - 1)` |
+| `-Dneoforge.regionizedChunkTicks=true` | JVM Flag | `false` | Enabling chunk ticks by region. |
+| `-Dneoforge.regionizedScheduledTicks=true` | JVM Flag | `false` | Number of native region worker threads; `0` means `max(1, availableProcessors - 1)` |
+| `-Dneoforge.regionizedBlockEntityTicks=true` | JVM Flag | `false` | Enable block ticks by region. |
+| `-Dneoforge.regionizedEntityTicks=true` | JVM Flag | `false` | Enabling entity ticks by region. |
+| `-Dneoforge.regionTaskTimeoutSeconds=60` | JVM Flag | `false` | Error message server shutdown timeout. |
 
 ## Diagnostics
 
@@ -43,8 +32,7 @@ Internal implementation is in `net.neoforged.neoforge.server.threading.region`.
 /tps
 ```
 
-Prints region count, running regions, sections, tracked entities, entity tasks, worker threads, global tick count, and last tick duration. Requires permission level 2.
-./gradlew build
+Prints region count, running regions, sections, tracked entities, entity tasks, worker threads, global tick count, and last tick duration.
 ```
 
 ## License
