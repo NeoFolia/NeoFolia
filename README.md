@@ -8,10 +8,6 @@ Enables Minecraft servers running NeoForge mods to distribute world tick process
 
 **This is not a Paper/Bukkit plugin.** The runtime stays NeoForge/FML — scheduling and ownership are exposed through native NeoForge API interfaces, not Bukkit or Paper APIs.
 
-## Status
-
-Currently at **stage 1** of the port (region data primitives and tick scheduler internals). The `ThreadedRegionizer` is a minimal facade; Folia's adjacency, merge radius, section split/merge, and empty-section retirement logic still need to be ported. The active bridge drains scheduled tasks on the main server thread rather than delegating to independent region workers.
-
 ## Requirements
 
 - **Java 25**
