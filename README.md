@@ -21,11 +21,13 @@ Java startup arguments are no longer required, configuration and settings are no
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `region_threads` | config | `0` | Number of native region worker threads. |
+| `netty_io_threads` | config | `0` | Number of native netty io threads. |
 | `regionized_chunk_ticks` | config | `true` | Enabling chunk ticks by region. |
 | `regionized_scheduled_ticks` | config | `true` | Enabling scheduled ticks by region. |
 | `regionized_block_entity_ticks` | config | `true` | Enable block ticks by region. |
 | `regionized_entity_ticks` | config | `true` | Enabling entity ticks by region. |
 | `region_task_timeout_seconds` | config | `60` | Error message server shutdown timeout. |
+
 
 ## Mod Compatibility
 
