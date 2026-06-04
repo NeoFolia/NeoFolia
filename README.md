@@ -27,6 +27,10 @@ Java startup arguments are no longer required, configuration and settings are no
 | `regionized_entity_ticks` | config | `true` | Enabling entity ticks by region. |
 | `region_task_timeout_seconds` | config | `60` | Error message server shutdown timeout. |
 
+## Mod Compatibility
+
+Once the core becomes more or less stable, we'll port many popular mods to NeoFolia ourselves and give you access to the source code and builds.
+
 ## Diagnostics
 
 ```
