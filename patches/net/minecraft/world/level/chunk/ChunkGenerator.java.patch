@@ -1,5 +1,21 @@
 --- a/net/minecraft/world/level/chunk/ChunkGenerator.java
 +++ b/net/minecraft/world/level/chunk/ChunkGenerator.java
+@@ -39,7 +_,6 @@
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.WorldGenRegion;
+-import net.minecraft.util.Util;
+ import net.minecraft.util.random.WeightedList;
+ import net.minecraft.world.entity.MobCategory;
+ import net.minecraft.world.level.ChunkPos;
+@@ -76,6 +_,7 @@
+ import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
+ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
+ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
++import net.neoforged.neoforge.server.region.RegionizedChunkExecutors;
+ import org.apache.commons.lang3.mutable.MutableBoolean;
+ import org.jspecify.annotations.Nullable;
+ 
 @@ -94,11 +_,16 @@
      public ChunkGenerator(BiomeSource biomeSource, Function<Holder<Biome>, BiomeGenerationSettings> generationSettingsGetter) {
          this.biomeSource = biomeSource;
@@ -18,6 +34,15 @@
      public void validate() {
          this.featuresPerStep.get();
      }
+@@ -117,7 +_,7 @@
+         return CompletableFuture.supplyAsync(() -> {
+             protoChunk.fillBiomesFromNoise(this.biomeSource, randomState.sampler());
+             return protoChunk;
+-        }, Util.backgroundExecutor().forName("init_biomes"));
++        }, RegionizedChunkExecutors.chunkGenerationExecutor());
+     }
+ 
+     public abstract void applyCarvers(
 @@ -401,6 +_,7 @@
                  }
  

@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -20,13 +_,21 @@
+@@ -20,13 +_,22 @@
  import java.util.ArrayList;
  import java.util.Collection;
  import java.util.Comparator;
@@ -16,6 +16,7 @@
  import java.util.UUID;
 +import java.util.concurrent.CompletableFuture;
 +import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.CopyOnWriteArrayList;
  import java.util.concurrent.Executor;
 +import java.util.concurrent.atomic.AtomicBoolean;
 +import java.util.function.BiConsumer;
@@ -44,7 +45,14 @@
  import org.jspecify.annotations.Nullable;
  import org.slf4j.Logger;
  
-@@ -197,29 +_,37 @@
+@@ -191,35 +_,43 @@
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private static final int EMPTY_TIME_NO_TICK = 300;
+     private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
+-    private final List<ServerPlayer> players = Lists.newArrayList();
++    private final List<ServerPlayer> players = new CopyOnWriteArrayList<>();
+     private final ServerChunkCache chunkSource;
+     private final MinecraftServer server;
      private final ServerLevelData serverLevelData;
      private final EntityTickList entityTickList = new EntityTickList();
      private final ServerWaypointManager waypointManager;
@@ -222,7 +230,7 @@
              profiler.popPush("blockEntities");
              this.tickBlockEntities();
              profiler.pop();
-@@ -457,6 +_,63 @@
+@@ -457,6 +_,58 @@
          this.environmentAttributes().invalidateTickCache();
      }
  
@@ -235,12 +243,7 @@
 +    }
 +
 +    private void tickEntitiesRegionized(TickRateManager tickRateManager) {
-+        Map<RegionKey, List<Entity>> entitiesByRegion = new LinkedHashMap<>();
-+        for (Entity entity : this.entityTickList.snapshot()) {
-+            ChunkPos chunkPos = entity.chunkPosition();
-+            entitiesByRegion.computeIfAbsent(this.regionKeyForChunk(chunkPos), key -> new ArrayList<>()).add(entity);
-+        }
-+
++        Map<RegionKey, List<Entity>> entitiesByRegion = RegionizedWorldGuard.tickingEntitiesByOwnerRegion(this);
 +        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
 +        entitiesByRegion.forEach((region, entities) -> tasksByRegion.put(region, () -> {
 +            for (Entity entity : entities) {
@@ -299,7 +302,7 @@
      }
  
      public void tickChunk(LevelChunk chunk, int tickSpeed) {
-@@ -528,19 +_,113 @@
+@@ -528,19 +_,131 @@
          profiler.pop();
      }
  
@@ -315,17 +318,18 @@
 +        }
 +
 +        profiler.push("blockTicks");
-+        this.blockTicks.tickRegionized(tick, MAX_SCHEDULED_TICKS_PER_TICK, ticks -> this.runScheduledTicksByRegion("regionized block ticks", ticks, this::tickBlock));
++        this.blockTicks.tickRegionized(tick, MAX_SCHEDULED_TICKS_PER_TICK, ticks -> this.runScheduledTicksByRegion("regionized block ticks", this.blockTicks, ticks, this::tickBlock));
 +        profiler.popPush("fluidTicks");
-+        this.fluidTicks.tickRegionized(tick, MAX_SCHEDULED_TICKS_PER_TICK, ticks -> this.runScheduledTicksByRegion("regionized fluid ticks", ticks, this::tickFluid));
++        this.fluidTicks.tickRegionized(tick, MAX_SCHEDULED_TICKS_PER_TICK, ticks -> this.runScheduledTicksByRegion("regionized fluid ticks", this.fluidTicks, ticks, this::tickFluid));
 +        profiler.pop();
 +    }
 +
-+    private <T> void runScheduledTicksByRegion(String description, List<ScheduledTick<T>> ticks, BiConsumer<BlockPos, T> output) {
++    private <T> void runScheduledTicksByRegion(String description, LevelTicks<T> levelTicks, List<ScheduledTick<T>> ticks, BiConsumer<BlockPos, T> output) {
 +        if (ticks.isEmpty()) {
 +            return;
 +        }
 +
++        levelTicks.markRegionizedTicksPending(ticks);
 +        Map<RegionKey, List<ScheduledTick<T>>> ticksByRegion = new LinkedHashMap<>();
 +        for (ScheduledTick<T> scheduledTick : ticks) {
 +            ticksByRegion.computeIfAbsent(this.regionKeyForBlock(scheduledTick.pos()), key -> new ObjectArrayList<>()).add(scheduledTick);
@@ -333,12 +337,29 @@
 +
 +        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
 +        ticksByRegion.forEach((region, scheduledTicks) -> tasksByRegion.put(region, () -> {
-+            for (ScheduledTick<T> scheduledTick : scheduledTicks) {
-+                this.ensureRegionThreadFor(scheduledTick.pos(), description);
-+                output.accept(scheduledTick.pos(), scheduledTick.type());
++            try {
++                for (ScheduledTick<T> scheduledTick : scheduledTicks) {
++                    if (!levelTicks.isRegionizedTickPending(scheduledTick)) {
++                        continue;
++                    }
++
++                    try {
++                        this.ensureRegionThreadFor(scheduledTick.pos(), description);
++                        output.accept(scheduledTick.pos(), scheduledTick.type());
++                    } finally {
++                        levelTicks.finishRegionizedTick(scheduledTick);
++                    }
++                }
++            } finally {
++                levelTicks.finishRegionizedTicks(scheduledTicks);
 +            }
 +        }));
-+        this.server.regionizedTaskDispatcher().awaitAll(description + " for " + this.dimension().identifier(), tasksByRegion);
++        try {
++            this.server.regionizedTaskDispatcher().executeAll(description + " for " + this.dimension().identifier(), tasksByRegion);
++        } catch (RuntimeException ex) {
++            levelTicks.finishRegionizedTicks(ticks);
++            throw ex;
++        }
 +    }
 +
 +    public void tickChunkRegionized(LevelChunk chunk, int tickSpeed) {
@@ -615,17 +636,15 @@
                  result.add(entity);
                  if (result.size() >= maxResults) {
                      return AbortableIterationConsumer.Continuation.ABORT;
-@@ -926,8 +_,8 @@
+@@ -926,7 +_,7 @@
      public List<ServerPlayer> getPlayers(Predicate<? super ServerPlayer> selector, int maxResults) {
          List<ServerPlayer> result = Lists.newArrayList();
  
 -        for (ServerPlayer player : this.players) {
--            if (selector.test(player)) {
-+        for (ServerPlayer player : this.playersSnapshot()) {
-+            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this, player) != null && selector.test(player)) {
++        for (ServerPlayer player : this.getLocalPlayers()) {
+             if (selector.test(player)) {
                  result.add(player);
                  if (result.size() >= maxResults) {
-                     return result;
 @@ -940,7 +_,8 @@
  
      public @Nullable ServerPlayer getRandomPlayer() {
@@ -902,7 +921,7 @@
      }
  
      public int getLogicalHeight() {
-@@ -1100,75 +_,160 @@
+@@ -1100,75 +_,169 @@
  
      @Override
      public void gameEvent(Holder<GameEvent> gameEvent, Vec3 position, GameEvent.Context context) {
@@ -923,8 +942,17 @@
 +        return this.server.regionizedTaskDispatcher().tryExecuteGlobal(task);
 +    }
 +
-+    private void executeGlobalOrServer(Runnable task) {
-+        if (this.scheduleGlobalTaskIfRegionized(task)) {
++    private void executeAtRegionOrServer(BlockPos pos, String reason, Runnable task) {
++        if (RegionizedTickContext.isRegionThread()) {
++            if (RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(this, pos, reason, task)) {
++                return;
++            }
++
++            task.run();
++            return;
++        }
++
++        if (RegionizedWorldGuard.scheduleAtRegionIfRegionized(this, pos, reason, task)) {
 +            return;
 +        }
 +
@@ -1388,7 +1416,7 @@
          boolean updated = this.chunkSource.updateChunkForced(new ChunkPos(chunkX, chunkZ), forced);
          if (forced && updated) {
              this.getChunk(chunkX, chunkZ);
-@@ -1471,9 +_,122 @@
+@@ -1471,9 +_,125 @@
          return updated;
      }
  
@@ -1441,21 +1469,15 @@
 +    }
 +
 +    private List<ServerPlayer> playersSnapshot() {
-+        synchronized (this.players) {
-+            return new ArrayList<>(this.players);
-+        }
++        return new ArrayList<>(this.players);
 +    }
 +
 +    private void addTrackedPlayer(ServerPlayer player) {
-+        synchronized (this.players) {
-+            this.players.add(player);
-+        }
++        this.players.add(player);
 +    }
 +
 +    private void removeTrackedPlayer(ServerPlayer player) {
-+        synchronized (this.players) {
-+            this.players.remove(player);
-+        }
++        this.players.remove(player);
 +    }
 +
 +    private List<Mob> navigatingMobsSnapshot() {
@@ -1509,6 +1531,15 @@
 +        }
 +
 +        return players;
++    }
++
++    @Override
++    public List<ServerPlayer> getLocalPlayers() {
++        if (RegionizedTickContext.isRegionThread()) {
++            return RegionizedWorldGuard.localPlayersForCurrentRegion(this);
++        }
++
++        return this.playersSnapshot();
      }
  
      @Override
@@ -1517,12 +1548,12 @@
          if (!Objects.equals(oldType, newType)) {
              BlockPos immutable = pos.immutable();
 -            oldType.ifPresent(poiType -> this.getServer().execute(() -> {
-+            oldType.ifPresent(poiType -> this.executeGlobalOrServer(() -> {
++            oldType.ifPresent(poiType -> this.executeAtRegionOrServer(immutable, "POI remove", () -> {
                  this.getPoiManager().remove(immutable);
                  this.debugSynchronizers.dropPoi(immutable);
              }));
 -            newType.ifPresent(poiType -> this.getServer().execute(() -> {
-+            newType.ifPresent(poiType -> this.executeGlobalOrServer(() -> {
++            newType.ifPresent(poiType -> this.executeAtRegionOrServer(immutable, "POI add", () -> {
                  PoiRecord record = this.getPoiManager().add(immutable, (Holder<PoiType>)poiType);
                  if (record != null) {
                      this.debugSynchronizers.registerPoi(record);
@@ -1535,7 +1566,7 @@
          }
  
          Path blockEntities = rootDir.resolve("block_entities.csv");
-@@ -1623,10 +_,23 @@
+@@ -1623,10 +_,16 @@
      @VisibleForTesting
      public void clearBlockEvents(BoundingBox bb) {
          this.blockEvents.removeIf(e -> bb.isInside(e.pos()));
@@ -1545,18 +1576,11 @@
      public Iterable<Entity> getAllEntities() {
 -        return this.getEntities().getAll();
 +        Iterable<Entity> entities = this.getEntities().getAll();
-+        if (!RegionizedTickContext.isRegionThread()) {
++        if (!RegionizedTickContext.isRegionThread() || !this.server.regionizedTaskDispatcher().isRunning()) {
 +            return entities;
 +        }
 +
-+        List<Entity> regionEntities = new ArrayList<>();
-+        for (Entity entity : entities) {
-+            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this, entity) != null) {
-+                regionEntities.add(entity);
-+            }
-+        }
-+
-+        return regionEntities;
++        return RegionizedWorldGuard.loadedEntitiesForCurrentRegion(this);
      }
  
      @Override
@@ -1588,11 +1612,11 @@
  
      public void onStructureStartsAvailable(ChunkAccess chunk) {
 -        this.server.execute(() -> this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts()));
-+        this.executeGlobalOrServer(() -> this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts()));
++        this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts());
      }
  
      public PathTypeCache getPathTypeCache() {
-@@ -1859,12 +_,20 @@
+@@ -1859,12 +_,22 @@
          }
  
          public void onCreated(Entity entity) {
@@ -1610,10 +1634,21 @@
 +                return;
 +            }
 +
++            RegionizedWorldGuard.removeTickingEntity(ServerLevel.this, entity);
++            RegionizedWorldGuard.removeLoadedEntity(ServerLevel.this, entity);
              if (entity instanceof WaypointTransmitter waypoint) {
                  ServerLevel.this.getWaypointManager().untrackWaypoint(waypoint);
              }
-@@ -1881,9 +_,13 @@
+@@ -1874,16 +_,23 @@
+ 
+         public void onTickingStart(Entity entity) {
+             ServerLevel.this.entityTickList.add(entity);
++            RegionizedWorldGuard.addTickingEntity(ServerLevel.this, entity);
+         }
+ 
+         public void onTickingEnd(Entity entity) {
++            RegionizedWorldGuard.removeTickingEntity(ServerLevel.this, entity);
+             ServerLevel.this.entityTickList.remove(entity);
          }
  
          public void onTrackingStart(Entity entity) {
@@ -1621,6 +1656,7 @@
 +                return;
 +            }
 +
++            RegionizedWorldGuard.addLoadedEntity(ServerLevel.this, entity);
              ServerLevel.this.getChunkSource().addEntity(entity);
              if (entity instanceof ServerPlayer player) {
 -                ServerLevel.this.players.add(player);
@@ -1653,7 +1689,7 @@
                  }
              }
  
-@@ -1916,36 +_,87 @@
+@@ -1916,36 +_,91 @@
          }
  
          public void onTrackingEnd(Entity entity) {
@@ -1661,6 +1697,8 @@
 +                return;
 +            }
 +
++            RegionizedWorldGuard.removeTickingEntity(ServerLevel.this, entity);
++            RegionizedWorldGuard.removeLoadedEntity(ServerLevel.this, entity);
              ServerLevel.this.getChunkSource().removeEntity(entity);
              if (entity instanceof ServerPlayer player) {
 -                ServerLevel.this.players.remove(player);
@@ -1711,6 +1749,8 @@
 +                return;
 +            }
 +
++            RegionizedWorldGuard.updateLoadedEntityRegion(ServerLevel.this, entity);
++            RegionizedWorldGuard.updateTickingEntityRegion(ServerLevel.this, entity);
              entity.updateDynamicGameEventListener(DynamicGameEventListener::move);
          }
 +    }

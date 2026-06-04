@@ -1,0 +1,36 @@
+--- a/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
++++ b/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
+@@ -23,7 +_,6 @@
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.level.WorldGenRegion;
+ import net.minecraft.util.Mth;
+-import net.minecraft.util.Util;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.LevelHeightAccessor;
+ import net.minecraft.world.level.NaturalSpawner;
+@@ -45,6 +_,7 @@
+ import net.minecraft.world.level.levelgen.blending.Blender;
+ import net.minecraft.world.level.levelgen.carver.CarvingContext;
+ import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
++import net.neoforged.neoforge.server.region.RegionizedChunkExecutors;
+ import org.apache.commons.lang3.mutable.MutableObject;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -85,7 +_,7 @@
+         return CompletableFuture.supplyAsync(() -> {
+             this.doCreateBiomes(blender, randomState, structureManager, protoChunk);
+             return protoChunk;
+-        }, Util.backgroundExecutor().forName("init_biomes"));
++        }, RegionizedChunkExecutors.chunkGenerationExecutor());
+     }
+ 
+     private void doCreateBiomes(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess protoChunk) {
+@@ -367,7 +_,7 @@
+             }
+ 
+             return var20;
+-        }, Util.backgroundExecutor().forName("wgen_fill_noise"));
++        }, RegionizedChunkExecutors.chunkGenerationExecutor());
+     }
+ 
+     private ChunkAccess doFill(

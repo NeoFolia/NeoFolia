@@ -1,0 +1,63 @@
+--- a/net/minecraft/world/level/levelgen/structure/StructureCheck.java
++++ b/net/minecraft/world/level/levelgen/structure/StructureCheck.java
+@@ -79,21 +_,31 @@
+ 
+     public StructureCheckResult checkStart(ChunkPos pos, Structure structure, StructurePlacement placement, boolean requireUnreferenced) {
+         long posKey = pos.pack();
+-        Object2IntMap<Structure> cachedResult = this.loadedChunks.get(posKey);
+-        if (cachedResult != null) {
+-            return this.checkStructureInfo(cachedResult, structure, requireUnreferenced);
++        synchronized (this) {
++            Object2IntMap<Structure> cachedResult = this.loadedChunks.get(posKey);
++            if (cachedResult != null) {
++                return this.checkStructureInfo(cachedResult, structure, requireUnreferenced);
++            }
++        }
++
++        StructureCheckResult storageCheckResult = this.tryLoadFromStorage(pos, structure, requireUnreferenced, posKey);
++        if (storageCheckResult != null) {
++            return storageCheckResult;
++        } else if (!placement.applyAdditionalChunkRestrictions(pos.x(), pos.z(), this.seed)) {
++            return StructureCheckResult.START_NOT_PRESENT;
+         } else {
+-            StructureCheckResult storageCheckResult = this.tryLoadFromStorage(pos, structure, requireUnreferenced, posKey);
+-            if (storageCheckResult != null) {
+-                return storageCheckResult;
+-            } else if (!placement.applyAdditionalChunkRestrictions(pos.x(), pos.z(), this.seed)) {
+-                return StructureCheckResult.START_NOT_PRESENT;
+-            } else {
+-                boolean isFeatureChunk = this.featureChecks
+-                    .computeIfAbsent(structure, k -> new Long2BooleanOpenHashMap())
+-                    .computeIfAbsent(posKey, k -> this.canCreateStructure(pos, structure));
+-                return !isFeatureChunk ? StructureCheckResult.START_NOT_PRESENT : StructureCheckResult.CHUNK_LOAD_NEEDED;
+-            }
++            synchronized (this) {
++                Long2BooleanMap cachedChecks = this.featureChecks.get(structure);
++                if (cachedChecks != null && cachedChecks.containsKey(posKey)) {
++                    return !cachedChecks.get(posKey) ? StructureCheckResult.START_NOT_PRESENT : StructureCheckResult.CHUNK_LOAD_NEEDED;
++                }
++            }
++
++            boolean isFeatureChunk = this.canCreateStructure(pos, structure);
++            synchronized (this) {
++                this.featureChecks.computeIfAbsent(structure, k -> new Long2BooleanOpenHashMap()).put(posKey, isFeatureChunk);
++            }
++            return !isFeatureChunk ? StructureCheckResult.START_NOT_PRESENT : StructureCheckResult.CHUNK_LOAD_NEEDED;
+         }
+     }
+ 
+@@ -205,12 +_,12 @@
+         this.storeFullResults(posKey, startsToReferences);
+     }
+ 
+-    private void storeFullResults(long posKey, Object2IntMap<Structure> starts) {
++    private synchronized void storeFullResults(long posKey, Object2IntMap<Structure> starts) {
+         this.loadedChunks.put(posKey, deduplicateEmptyMap(starts));
+         this.featureChecks.values().forEach(m -> m.remove(posKey));
+     }
+ 
+-    public void incrementReference(ChunkPos chunkPos, Structure structure) {
++    public synchronized void incrementReference(ChunkPos chunkPos, Structure structure) {
+         this.loadedChunks.compute(chunkPos.pack(), (key, counts) -> {
+             if (counts == null || counts.isEmpty()) {
+                 counts = new Object2IntOpenHashMap<>();

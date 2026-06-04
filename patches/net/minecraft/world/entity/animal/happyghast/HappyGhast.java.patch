@@ -37,14 +37,12 @@
      }
  
      @Override
-@@ -548,6 +_,10 @@
+@@ -547,7 +_,7 @@
+             happyGhastBb.maxZ + 1.0
          );
  
-         for (Player player : this.level().players()) {
-+            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level(), player) == null) {
-+                continue;
-+            }
-+
+-        for (Player player : this.level().players()) {
++        for (Player player : this.level().getLocalPlayers()) {
              if (!player.isSpectator()) {
                  Entity rootVehicle = player.getRootVehicle();
                  if (!(rootVehicle instanceof HappyGhast) && ghastDetectionBox.contains(rootVehicle.position())) {

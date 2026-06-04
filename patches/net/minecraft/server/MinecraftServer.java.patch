@@ -9,6 +9,14 @@
  import net.minecraft.util.debugchart.SampleLogger;
  import net.minecraft.util.debugchart.TpsDebugDimensions;
  import net.minecraft.util.profiling.EmptyProfileResults;
+@@ -247,6 +_,7 @@
+     private @Nullable String motd;
+     private int playerIdleTimeout;
+     private final long[] tickTimesNanos = new long[100];
++    private final long[] fullTickTimesNanos = new long[100];
+     private long aggregatedTickTimesNanos = 0L;
+     private @Nullable KeyPair keyPair;
+     private @Nullable GameProfile singleplayerProfile;
 @@ -294,10 +_,12 @@
      private final PacketProcessor packetProcessor;
      private final TimerQueue<MinecraftServer> scheduledEvents;
@@ -148,11 +156,35 @@
                  this.onServerExit();
              }
          }
-@@ -987,11 +_,17 @@
+@@ -813,8 +_,10 @@
+ 
+     private void logFullTickTime() {
+         long currentTime = Util.getNanos();
++        long fullTickTime = currentTime - this.lastTickNanos;
++        this.fullTickTimesNanos[this.tickCount % this.fullTickTimesNanos.length] = fullTickTime;
+         if (this.isTickTimeLoggingEnabled()) {
+-            this.getTickTimeLogger().logSample(currentTime - this.lastTickNanos);
++            this.getTickTimeLogger().logSample(fullTickTime);
+         }
+ 
+         this.lastTickNanos = currentTime;
+@@ -906,7 +_,7 @@
+         if (super.pollTask()) {
+             return true;
+         } else {
+-            if (this.tickRateManager.isSprinting() || this.shouldRunAllTasks() || this.haveTime()) {
++            if (!this.regionizedTaskDispatcher.isRunning() && (this.tickRateManager.isSprinting() || this.shouldRunAllTasks() || this.haveTime())) {
+                 for (ServerLevel level : this.getAllLevels()) {
+                     if (level.getChunkSource().pollTask()) {
+                         return true;
+@@ -987,11 +_,20 @@
          }
  
          this.tickCount++;
 +        this.regionizedTaskDispatcher.beginServerTick(this.tickCount);
++        if (this.regionizedTaskDispatcher.isRunning()) {
++            this.refreshRegionOwnership();
++        }
 +        net.neoforged.neoforge.event.EventHooks.fireServerTickPre(haveTime, this);
          this.tickRateManager.tick();
          this.tickChildren(haveTime);
@@ -219,12 +251,15 @@
          int maxPlayers = this.getMaxPlayers();
          if (this.hidesOnlinePlayers()) {
              return new ServerStatus.Players(maxPlayers, players.size(), List.of());
-@@ -1096,7 +_,10 @@
+@@ -1096,7 +_,13 @@
  
      protected void tickChildren(BooleanSupplier haveTime) {
          ProfilerFiller profiler = Profiler.get();
 -        this.getPlayerList().getPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
-+        this.getPlayerList().getAllPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
++        boolean regionizedConnections = this.regionizedTaskDispatcher.isRunning();
++        if (!regionizedConnections) {
++            this.getPlayerList().getAllPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
++        }
 +        profiler.push("regionizedGlobalTasks");
 +        this.regionizedTaskDispatcher.drainGlobalTasks();
 +        profiler.pop();
@@ -268,15 +303,21 @@
              GameTestTicker.SINGLETON.tick();
          }
  
-@@ -1150,7 +_,7 @@
+@@ -1150,9 +_,11 @@
  
          profiler.popPush("send chunks");
  
 -        for (ServerPlayer player : this.playerList.getPlayers()) {
-+        for (ServerPlayer player : this.playerList.getAllPlayers()) {
-             player.connection.chunkSender.sendNextChunks(player);
-             player.connection.resumeFlushing();
+-            player.connection.chunkSender.sendNextChunks(player);
+-            player.connection.resumeFlushing();
++        if (!regionizedConnections) {
++            for (ServerPlayer player : this.playerList.getAllPlayers()) {
++                player.connection.chunkSender.sendNextChunks(player);
++                player.connection.resumeFlushing();
++            }
          }
+ 
+         profiler.pop();
 @@ -1170,6 +_,9 @@
      }
  
@@ -287,7 +328,7 @@
          ProfilerFiller profiler = Profiler.get();
          profiler.push("timeSync");
          this.playerList.broadcastAll(new ClientboundSetTimePacket(this.overworld().getGameTime(), Map.of()));
-@@ -1180,6 +_,61 @@
+@@ -1180,6 +_,46 @@
          this.tickables.add(tickable);
      }
  
@@ -295,43 +336,28 @@
 +        return this.regionizedTaskDispatcher;
 +    }
 +
-+    public void refreshRegionStats() {
-+        Map<net.neoforged.neoforge.server.region.RegionKey, MutableRegionStats> mutableStats = new java.util.HashMap<>();
++    public void refreshRegionOwnership() {
 +        for (ServerLevel level : this.getAllLevels()) {
-+            level.getChunkSource().visibleChunkCountsByRegion().forEach((region, chunks) ->
-+                mutableStats.computeIfAbsent(region, unused -> new MutableRegionStats()).chunks += chunks
++            net.neoforged.neoforge.server.region.RegionizedWorldGuard.refreshChunkRegions(
++                level,
++                level.getChunkSource().fixedRegionizerChunkCountsByRegion()
 +            );
-+
-+            level.getAllEntities().forEach(entity -> {
-+                net.neoforged.neoforge.server.region.RegionKey region =
-+                    net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(level, entity.blockPosition());
-+                mutableStats.computeIfAbsent(region, unused -> new MutableRegionStats()).entities++;
-+            });
 +        }
-+
-+        for (ServerPlayer player : this.getPlayerList().getPlayers()) {
-+            net.neoforged.neoforge.server.region.RegionKey region =
-+                net.neoforged.neoforge.server.region.RegionizedWorldGuard.regionFor(player.level(), player.blockPosition());
-+            mutableStats.computeIfAbsent(region, unused -> new MutableRegionStats()).players++;
-+        }
-+
-+        Map<net.neoforged.neoforge.server.region.RegionKey, net.neoforged.neoforge.server.region.RegionizedTaskDispatcher.RegionStatsSnapshot> stats =
-+            new java.util.HashMap<>();
-+        mutableStats.forEach((region, mutable) -> stats.put(
-+            region,
-+            new net.neoforged.neoforge.server.region.RegionizedTaskDispatcher.RegionStatsSnapshot(
-+                mutable.chunks,
-+                mutable.players,
-+                mutable.entities
-+            )
-+        ));
-+        this.regionizedTaskDispatcher.replaceRegionStats(stats);
 +    }
 +
-+    private static final class MutableRegionStats {
-+        private int chunks;
-+        private int players;
-+        private int entities;
++    public void refreshRegionStats() {
++        Map<net.neoforged.neoforge.server.region.RegionKey, net.neoforged.neoforge.server.region.RegionizedTaskDispatcher.RegionStatsSnapshot> stats =
++            new java.util.HashMap<>();
++        for (ServerLevel level : this.getAllLevels()) {
++            stats.putAll(
++                net.neoforged.neoforge.server.region.RegionizedWorldGuard.collectRegionStats(
++                    level,
++                    level.getChunkSource().visibleChunkCountsByRegion()
++                )
++            );
++        }
++
++        this.regionizedTaskDispatcher.replaceRegionStats(stats);
 +    }
 +
 +    public void scheduleRegionTask(ServerLevel level, int chunkX, int chunkZ, Runnable task) {
@@ -586,7 +612,7 @@
          return this.smoothedTickTimeMillis;
      }
  
-@@ -1818,12 +_,12 @@
+@@ -1818,12 +_,16 @@
          return this.tickRateManager;
      }
  
@@ -599,6 +625,10 @@
 -        return this.tickTimesNanos;
 +    public synchronized long[] getTickTimesNanos() {
 +        return Arrays.copyOf(this.tickTimesNanos, this.tickTimesNanos.length);
++    }
++
++    public synchronized long[] getFullTickTimesNanos() {
++        return Arrays.copyOf(this.fullTickTimesNanos, this.fullTickTimesNanos.length);
      }
  
      public LevelBasedPermissionSet getProfilePermissions(NameAndId nameAndId) {

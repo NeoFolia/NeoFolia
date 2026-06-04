@@ -1,6 +1,28 @@
 --- a/net/minecraft/world/level/storage/SavedDataStorage.java
 +++ b/net/minecraft/world/level/storage/SavedDataStorage.java
-@@ -46,8 +_,17 @@
+@@ -12,12 +_,13 @@
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.util.ArrayList;
+-import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.Map.Entry;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.function.Consumer;
+ import net.minecraft.SharedConstants;
+ import net.minecraft.core.HolderLookup;
+ import net.minecraft.nbt.CompoundTag;
+@@ -40,14 +_,23 @@
+ 
+ public class SavedDataStorage implements AutoCloseable {
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private final Map<SavedDataType<?>, Optional<SavedData>> cache = new HashMap<>();
++    private final Map<SavedDataType<?>, Optional<SavedData>> cache = new ConcurrentHashMap<>();
+     private final DataFixer fixerUpper;
+     private final HolderLookup.Provider registries;
      private final Path dataFolder;
      private CompletableFuture<?> pendingWriteFuture = CompletableFuture.completedFuture(null);
      private boolean closed;
@@ -18,28 +40,72 @@
          this.fixerUpper = fixerUpper;
          this.dataFolder = dataFolder;
          this.registries = registries;
-@@ -62,18 +_,18 @@
+@@ -62,25 +_,53 @@
          }
      }
  
--    public <T extends SavedData> T computeIfAbsent(SavedDataType<T> type) {
-+    public synchronized <T extends SavedData> T computeIfAbsent(SavedDataType<T> type) {
-         T data = this.get(type);
-         if (data != null) {
-             return data;
-         } else {
++    public <T extends SavedData> @Nullable T read(SavedDataType<T> type, @Nullable Consumer<@Nullable T> onRead) {
++        Optional<SavedData> immediate = this.cache.get(type);
++        if (immediate != null) {
++            return (T)immediate.orElse(null);
++        }
++
++        return (T)this.cache.computeIfAbsent(type, key -> {
++            SavedData onDisk = SavedDataStorage.this.readSavedData(key);
++            if (onRead != null) {
++                onRead.accept((T)onDisk);
++            }
++
++            return Optional.ofNullable(onDisk);
++        }).orElse(null);
++    }
++
+     public <T extends SavedData> T computeIfAbsent(SavedDataType<T> type) {
+-        T data = this.get(type);
+-        if (data != null) {
+-            return data;
+-        } else {
 -            T newData = (T)type.constructor().get();
-+            T newData = (T)type.factory().create(this.level);
-             this.set(type, newData);
-             return newData;
+-            this.set(type, newData);
+-            return newData;
++        Optional<SavedData> immediate = this.cache.get(type);
++        if (immediate != null && immediate.isPresent()) {
++            return (T)immediate.orElse(null);
          }
++
++        return (T)this.cache.compute(type, (key, valueInMap) -> {
++            if (valueInMap != null && valueInMap.isPresent()) {
++                return valueInMap;
++            }
++
++            if (valueInMap == null) {
++                SavedData onDisk = SavedDataStorage.this.readSavedData(key);
++                if (onDisk != null) {
++                    return Optional.of(onDisk);
++                }
++            }
++
++            SavedData newData = key.factory().create(this.level);
++            newData.setDirty();
++            return Optional.of(newData);
++        }).orElse(null);
      }
  
--    public <T extends SavedData> @Nullable T get(SavedDataType<T> type) {
-+    public synchronized <T extends SavedData> @Nullable T get(SavedDataType<T> type) {
-         Optional<SavedData> data = this.cache.get(type);
-         if (data == null) {
-             data = Optional.ofNullable(this.readSavedData(type));
+     public <T extends SavedData> @Nullable T get(SavedDataType<T> type) {
+-        Optional<SavedData> data = this.cache.get(type);
+-        if (data == null) {
+-            data = Optional.ofNullable(this.readSavedData(type));
+-            this.cache.put(type, data);
++        Optional<SavedData> immediate = this.cache.get(type);
++        if (immediate != null) {
++            return (T)immediate.orElse(null);
+         }
+ 
+-        return (T)data.orElse(null);
++        return (T)this.cache.computeIfAbsent(type, key -> Optional.ofNullable(SavedDataStorage.this.readSavedData(key))).orElse(null);
+     }
+ 
+     private <T extends SavedData> @Nullable T readSavedData(SavedDataType<T> type) {
 @@ -89,7 +_,7 @@
              if (Files.exists(file)) {
                  CompoundTag tag = this.readTagFromDisk(file, type.dataFixType(), SharedConstants.getCurrentVersion().dataVersion().version());
@@ -49,14 +115,13 @@
                      .parse(ops, tag.get("data"))
                      .resultOrPartial(error -> LOGGER.error("Failed to parse saved data for '{}': {}", type, error))
                      .orElse(null);
-@@ -101,12 +_,12 @@
-         return null;
+@@ -102,11 +_,11 @@
      }
  
--    public <T extends SavedData> void set(SavedDataType<T> type, T data) {
-+    public synchronized <T extends SavedData> void set(SavedDataType<T> type, T data) {
-         this.cache.put(type, Optional.of(data));
+     public <T extends SavedData> void set(SavedDataType<T> type, T data) {
+-        this.cache.put(type, Optional.of(data));
          data.setDirty();
++        this.cache.put(type, Optional.of(data));
      }
  
 -    public CompoundTag readTagFromDisk(Path dataFile, DataFixTypes type, int newVersion) throws IOException {
@@ -95,7 +160,7 @@
          if (this.closed) {
              throw new IllegalStateException("Trying to schedule save when SavedDataStorage is already closed");
          } else {
-@@ -188,7 +_,7 @@
+@@ -188,20 +_,22 @@
          }
      }
  
@@ -104,15 +169,24 @@
          Map<SavedDataType<?>, CompoundTag> tagsToSave = new Object2ObjectArrayMap<>();
          RegistryOps<Tag> ops = this.registries.createSerializationContext(NbtOps.INSTANCE);
          this.cache.forEach((type, optional) -> optional.filter(SavedData::isDirty).ifPresent(data -> {
-@@ -199,7 +_,7 @@
+-            tagsToSave.put(type, this.encodeUnchecked(type, data, ops));
+             data.setDirty(false);
++            tagsToSave.put(type, this.encodeUnchecked(type, data, ops));
+         }));
+         return tagsToSave;
      }
  
      private <T extends SavedData> CompoundTag encodeUnchecked(SavedDataType<T> type, SavedData data, RegistryOps<Tag> ops) {
 -        Codec<T> codec = type.codec();
 +        Codec<T> codec = type.codecFactory().create(this.level);
          CompoundTag tag = new CompoundTag();
-         tag.put("data", codec.encodeStart(ops, (T)data).getOrThrow());
+-        tag.put("data", codec.encodeStart(ops, (T)data).getOrThrow());
++        synchronized (data) {
++            tag.put("data", codec.encodeStart(ops, (T)data).getOrThrow());
++        }
          NbtUtils.addCurrentDataVersion(tag);
+         return tag;
+     }
 @@ -211,18 +_,22 @@
  
          try {

@@ -7,7 +7,9 @@ package net.neoforged.neoforge.server.region;
 
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -40,7 +42,6 @@ import org.slf4j.Logger;
  */
 public final class RegionizedTaskDispatcher implements AutoCloseable {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final String THREAD_COUNT_PROPERTY = "neoforge.regionThreads";
     private static final int REGION_TIMING_WINDOW = 100;
     private static final int REGION_TICK_REPORT_WINDOW = 20 * 15;
     private static final long REGION_TICK_REPORT_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(15L);
@@ -50,6 +51,8 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     private final ConcurrentHashMap<RegionKey, RegionTiming> regionTimings = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<RegionKey, RegionStatsSnapshot> regionStats = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<CoalescedRegionTaskKey, Boolean> coalescedRegionTasks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<CoalescedGlobalTaskKey, Boolean> coalescedGlobalTasks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, ConcurrentLinkedQueue<DelayedRegionTask>> delayedRegionTasks = new ConcurrentHashMap<>();
     private final BlockingQueue<RegionQueue> readyRegions = new LinkedBlockingQueue<>();
     private final ConcurrentLinkedQueue<GlobalTask> globalTasks = new ConcurrentLinkedQueue<>();
     private final AtomicBoolean running = new AtomicBoolean();
@@ -58,24 +61,22 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     private final AtomicLong completedRegionTasks = new AtomicLong();
     private final AtomicLong failedRegionTasks = new AtomicLong();
     private final AtomicLong cancelledRegionTasks = new AtomicLong();
+    private final AtomicLong queuedDelayedRegionTasks = new AtomicLong();
     private final AtomicLong submittedGlobalTasks = new AtomicLong();
     private final AtomicLong completedGlobalTasks = new AtomicLong();
     private final AtomicLong failedGlobalTasks = new AtomicLong();
     private final AtomicLong cancelledGlobalTasks = new AtomicLong();
     private volatile ExecutorService workers;
     private volatile int workerCount;
+    private volatile int lastDrainedGlobalTaskCount;
+    private volatile long lastGlobalDrainTimeNanos;
+    private volatile long lastLongestGlobalTaskNanos;
+    private volatile String lastLongestGlobalTaskLane = "";
+    private volatile long activeGlobalTaskStartNanos;
+    private volatile String activeGlobalTaskLane = "";
 
     public static int defaultThreadCount() {
-        String configured = System.getProperty(THREAD_COUNT_PROPERTY);
-        if (configured != null && !configured.isBlank()) {
-            try {
-                return Math.max(1, Integer.parseInt(configured));
-            } catch (NumberFormatException ex) {
-                LOGGER.warn("Invalid {} value '{}', using automatic region thread count", THREAD_COUNT_PROPERTY, configured);
-            }
-        }
-
-        return Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+        return RegionizedServerSettings.regionThreadCount();
     }
 
     public synchronized void start(int threadCount) {
@@ -110,8 +111,15 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     public int executeCoalescedAll(String lane, Map<RegionKey, ? extends Runnable> tasks) {
         Objects.requireNonNull(lane, "lane");
         Objects.requireNonNull(tasks, "tasks");
+        Map<RegionKey, Runnable> canonicalTasks = new LinkedHashMap<>();
+        tasks.forEach((region, task) -> canonicalTasks.merge(
+            this.canonicalRegion(region),
+            task,
+            RegionizedTaskDispatcher::combineTasks
+        ));
+
         int submitted = 0;
-        for (Map.Entry<RegionKey, ? extends Runnable> entry : tasks.entrySet()) {
+        for (Map.Entry<RegionKey, Runnable> entry : canonicalTasks.entrySet()) {
             if (this.tryExecuteCoalesced(entry.getKey(), lane, entry.getValue())) {
                 submitted++;
             }
@@ -119,12 +127,36 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         return submitted;
     }
 
+    public int executeAll(String lane, Map<RegionKey, ? extends Runnable> tasks) {
+        Objects.requireNonNull(lane, "lane");
+        Objects.requireNonNull(tasks, "tasks");
+        if (tasks.isEmpty()) {
+            return 0;
+        }
+
+        Map<RegionKey, Runnable> canonicalTasks = this.canonicalTaskMap(tasks);
+        int submitted = 0;
+        for (Map.Entry<RegionKey, Runnable> entry : canonicalTasks.entrySet()) {
+            if (!this.tryExecuteTask(entry.getKey(), new RunnableRegionTask(entry.getValue(), lane, System.nanoTime(), this.currentServerTick.get()))) {
+                throw new IllegalStateException("Region dispatcher is not running");
+            }
+            submitted++;
+        }
+        return submitted;
+    }
+
     public boolean tryExecuteCoalesced(RegionKey region, String lane, Runnable task) {
+        return this.tryExecuteCoalesced(region, lane, lane, task);
+    }
+
+    public boolean tryExecuteCoalesced(RegionKey region, String lane, Object key, Runnable task) {
         Objects.requireNonNull(region, "region");
         Objects.requireNonNull(lane, "lane");
+        Objects.requireNonNull(key, "key");
         Objects.requireNonNull(task, "task");
-        CoalescedRegionTaskKey key = new CoalescedRegionTaskKey(region, lane);
-        if (this.coalescedRegionTasks.putIfAbsent(key, Boolean.TRUE) != null) {
+        region = this.canonicalRegion(region);
+        CoalescedRegionTaskKey taskKey = new CoalescedRegionTaskKey(region, lane, key);
+        if (this.coalescedRegionTasks.putIfAbsent(taskKey, Boolean.TRUE) != null) {
             return false;
         }
 
@@ -132,25 +164,48 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             try {
                 task.run();
             } finally {
-                this.coalescedRegionTasks.remove(key);
+                this.coalescedRegionTasks.remove(taskKey);
             }
         };
         if (!this.tryExecuteTask(region, new RunnableRegionTask(coalescedTask, lane, System.nanoTime(), this.currentServerTick.get()))) {
-            this.coalescedRegionTasks.remove(key);
+            this.coalescedRegionTasks.remove(taskKey);
             return false;
         }
 
         return true;
     }
 
+    public boolean tryExecuteNextTick(RegionKey region, String lane, Runnable task) {
+        Objects.requireNonNull(region, "region");
+        Objects.requireNonNull(lane, "lane");
+        Objects.requireNonNull(task, "task");
+        if (!this.running.get()) {
+            return false;
+        }
+
+        region = this.canonicalRegion(region);
+        long targetTick = this.currentServerTick.get() + 1L;
+        RunnableRegionTask regionTask = new RunnableRegionTask(task, lane, System.nanoTime(), targetTick);
+        this.delayedRegionTasks.computeIfAbsent(targetTick, unused -> new ConcurrentLinkedQueue<>()).add(new DelayedRegionTask(region, regionTask));
+        this.queuedDelayedRegionTasks.incrementAndGet();
+        return true;
+    }
+
     private synchronized boolean tryExecuteTask(RegionKey region, RegionTask task) {
+        return this.enqueueTask(region, task, true);
+    }
+
+    private synchronized boolean enqueueTask(RegionKey region, RegionTask task, boolean countSubmitted) {
         Objects.requireNonNull(region, "region");
         Objects.requireNonNull(task, "task");
         if (!this.running.get()) {
             return false;
         }
 
-        this.submittedRegionTasks.incrementAndGet();
+        region = this.canonicalRegion(region);
+        if (countSubmitted) {
+            this.submittedRegionTasks.incrementAndGet();
+        }
         this.regionQueues.computeIfAbsent(region, RegionQueue::new).add(task);
         return true;
     }
@@ -166,6 +221,7 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     public <T> CompletableFuture<T> submit(RegionKey region, Supplier<T> task) {
         Objects.requireNonNull(region, "region");
         Objects.requireNonNull(task, "task");
+        region = this.canonicalRegion(region);
         if (RegionizedTickContext.currentRegion().map(region::equals).orElse(false)) {
             try {
                 return CompletableFuture.completedFuture(task.get());
@@ -189,9 +245,10 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             return CompletableFuture.completedFuture(null);
         }
 
-        CompletableFuture<?>[] futures = new CompletableFuture<?>[tasks.size()];
+        Map<RegionKey, Runnable> canonicalTasks = this.canonicalTaskMap(tasks);
+        CompletableFuture<?>[] futures = new CompletableFuture<?>[canonicalTasks.size()];
         int index = 0;
-        for (Map.Entry<RegionKey, ? extends Runnable> entry : tasks.entrySet()) {
+        for (Map.Entry<RegionKey, Runnable> entry : canonicalTasks.entrySet()) {
             futures[index++] = this.submit(entry.getKey(), entry.getValue());
         }
         return CompletableFuture.allOf(futures);
@@ -204,10 +261,11 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             return;
         }
 
-        this.ensureSafeBlockingAwait(description, tasks);
+        Map<RegionKey, Runnable> canonicalTasks = this.canonicalTaskMap(tasks);
+        this.ensureSafeBlockingAwait(description, canonicalTasks);
 
         Map<RegionKey, CompletableFuture<Void>> futures = new LinkedHashMap<>();
-        for (Map.Entry<RegionKey, ? extends Runnable> entry : tasks.entrySet()) {
+        for (Map.Entry<RegionKey, Runnable> entry : canonicalTasks.entrySet()) {
             futures.put(entry.getKey(), this.submit(entry.getKey(), entry.getValue()));
         }
 
@@ -237,14 +295,15 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         Objects.requireNonNull(primaryRegion, "primaryRegion");
         Objects.requireNonNull(task, "task");
 
-        List<RegionKey> uniqueRegions = new ArrayList<>(new LinkedHashSet<>(regions));
+        List<RegionKey> uniqueRegions = this.canonicalRegions(regions);
+        RegionKey canonicalPrimaryRegion = this.canonicalRegion(primaryRegion);
         if (uniqueRegions.isEmpty()) {
             task.run();
             return;
         }
 
-        if (!uniqueRegions.contains(primaryRegion)) {
-            uniqueRegions.add(0, primaryRegion);
+        if (!uniqueRegions.contains(canonicalPrimaryRegion)) {
+            uniqueRegions.add(0, canonicalPrimaryRegion);
         }
 
         this.ensureSafeBlockingAwait(description, uniqueRegions);
@@ -261,7 +320,7 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         int activeWorkerCount = this.workerCount;
         if (uniqueRegions.size() > activeWorkerCount) {
             if (activeWorkerCount == 1) {
-                this.awaitPrimaryRegion(description, primaryRegion, task);
+                this.awaitPrimaryRegion(description, canonicalPrimaryRegion, task);
                 return;
             }
 
@@ -285,7 +344,7 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
                 readyRegions.countDown();
                 try {
                     awaitLatch(description + " region reservation", readyRegions);
-                    if (RegionizedTickContext.currentRegion().map(primaryRegion::equals).orElse(false)) {
+                    if (RegionizedTickContext.currentRegion().map(canonicalPrimaryRegion::equals).orElse(false)) {
                         try {
                             task.run();
                         } catch (Throwable throwable) {
@@ -334,7 +393,7 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         Objects.requireNonNull(regions, "regions");
         Objects.requireNonNull(task, "task");
 
-        List<RegionKey> uniqueRegions = new ArrayList<>(new LinkedHashSet<>(regions));
+        List<RegionKey> uniqueRegions = this.canonicalRegions(regions);
         if (uniqueRegions.isEmpty()) {
             task.run();
             return;
@@ -527,15 +586,49 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     }
 
     public synchronized void executeGlobal(Runnable task) {
+        this.executeGlobal("global-task", task);
+    }
+
+    public synchronized void executeGlobal(String lane, Runnable task) {
+        Objects.requireNonNull(lane, "lane");
         Objects.requireNonNull(task, "task");
-        if (!this.tryExecuteGlobal(task)) {
+        if (!this.tryExecuteGlobal(lane, task)) {
             throw new IllegalStateException("Region dispatcher is not running");
         }
     }
 
     public synchronized boolean tryExecuteGlobal(Runnable task) {
+        return this.tryExecuteGlobal("global-task", task);
+    }
+
+    public synchronized boolean tryExecuteGlobal(String lane, Runnable task) {
+        Objects.requireNonNull(lane, "lane");
         Objects.requireNonNull(task, "task");
-        return this.tryExecuteGlobalTask(new RunnableGlobalTask(task));
+        return this.tryExecuteGlobalTask(new RunnableGlobalTask(task, lane, System.nanoTime()));
+    }
+
+    public synchronized boolean tryExecuteGlobalCoalesced(String lane, Object key, Runnable task) {
+        Objects.requireNonNull(lane, "lane");
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(task, "task");
+        CoalescedGlobalTaskKey taskKey = new CoalescedGlobalTaskKey(lane, key);
+        if (this.coalescedGlobalTasks.putIfAbsent(taskKey, Boolean.TRUE) != null) {
+            return true;
+        }
+
+        Runnable coalescedTask = () -> {
+            try {
+                task.run();
+            } finally {
+                this.coalescedGlobalTasks.remove(taskKey);
+            }
+        };
+        if (!this.tryExecuteGlobalTask(new RunnableGlobalTask(coalescedTask, lane, System.nanoTime()))) {
+            this.coalescedGlobalTasks.remove(taskKey);
+            return false;
+        }
+
+        return true;
     }
 
     private synchronized boolean tryExecuteGlobalTask(GlobalTask task) {
@@ -550,38 +643,77 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     }
 
     public CompletableFuture<Void> submitGlobal(Runnable task) {
+        return this.submitGlobal("global-call", task);
+    }
+
+    public CompletableFuture<Void> submitGlobal(String lane, Runnable task) {
+        Objects.requireNonNull(lane, "lane");
         Objects.requireNonNull(task, "task");
-        return this.submitGlobal(() -> {
+        return this.submitGlobal(lane, () -> {
             task.run();
             return null;
         });
     }
 
     public <T> CompletableFuture<T> submitGlobal(Supplier<T> task) {
+        return this.submitGlobal("global-call", task);
+    }
+
+    public <T> CompletableFuture<T> submitGlobal(String lane, Supplier<T> task) {
+        Objects.requireNonNull(lane, "lane");
         Objects.requireNonNull(task, "task");
         CompletableFuture<T> future = new CompletableFuture<>();
-        if (!this.tryExecuteGlobalTask(new FutureGlobalTask<>(task, future))) {
+        if (!this.tryExecuteGlobalTask(new FutureGlobalTask<>(task, future, lane, System.nanoTime()))) {
             future.completeExceptionally(new IllegalStateException("Region dispatcher is not running"));
         }
         return future;
     }
 
     public int drainGlobalTasks() {
+        int maxTasks = RegionizedServerSettings.globalTaskMaxTasksPerTick();
+        long maxTimeNanos = TimeUnit.MILLISECONDS.toNanos(RegionizedServerSettings.globalTaskMaxTimeMs());
+        long drainStartNanos = System.nanoTime();
+        long deadlineNanos = maxTimeNanos <= 0L ? Long.MAX_VALUE : drainStartNanos + maxTimeNanos;
+        long longestTaskNanos = 0L;
+        String longestTaskLane = "";
         int count = 0;
         GlobalTask task;
-        while ((task = this.globalTasks.poll()) != null) {
-            if (runSafely("global task", task::run)) {
+        while ((maxTasks <= 0 || count < maxTasks) && (task = this.globalTasks.poll()) != null) {
+            long taskStartNanos = System.nanoTime();
+            this.activeGlobalTaskStartNanos = taskStartNanos;
+            this.activeGlobalTaskLane = task.lane();
+            if (runSafely("global task " + task.lane(), task::run)) {
                 this.completedGlobalTasks.incrementAndGet();
             } else {
                 this.failedGlobalTasks.incrementAndGet();
             }
+            long taskElapsedNanos = System.nanoTime() - taskStartNanos;
+            if (taskElapsedNanos > longestTaskNanos) {
+                longestTaskNanos = taskElapsedNanos;
+                longestTaskLane = task.lane();
+            }
+            this.activeGlobalTaskStartNanos = 0L;
+            this.activeGlobalTaskLane = "";
             count++;
+            if (maxTimeNanos > 0L && System.nanoTime() >= deadlineNanos) {
+                break;
+            }
         }
+        this.activeGlobalTaskStartNanos = 0L;
+        this.activeGlobalTaskLane = "";
+        this.lastDrainedGlobalTaskCount = count;
+        this.lastGlobalDrainTimeNanos = System.nanoTime() - drainStartNanos;
+        this.lastLongestGlobalTaskNanos = longestTaskNanos;
+        this.lastLongestGlobalTaskLane = longestTaskLane;
         return count;
     }
 
     public long queuedRegionTaskCount() {
         return this.regionQueues.values().stream().mapToLong(RegionQueue::taskCount).sum();
+    }
+
+    public long queuedDelayedRegionTaskCount() {
+        return this.queuedDelayedRegionTasks.get();
     }
 
     public int queuedRegionCount() {
@@ -592,12 +724,127 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         return this.globalTasks.size();
     }
 
+    public long oldestGlobalTaskAgeNanos() {
+        long nowNanos = System.nanoTime();
+        long oldestTaskNanos = Long.MAX_VALUE;
+        for (GlobalTask task : this.globalTasks) {
+            oldestTaskNanos = Math.min(oldestTaskNanos, task.enqueuedNanos());
+        }
+
+        if (oldestTaskNanos == Long.MAX_VALUE) {
+            return 0L;
+        }
+
+        return Math.max(0L, nowNanos - oldestTaskNanos);
+    }
+
+    public int lastDrainedGlobalTaskCount() {
+        return this.lastDrainedGlobalTaskCount;
+    }
+
+    public long lastGlobalDrainTimeNanos() {
+        return this.lastGlobalDrainTimeNanos;
+    }
+
+    public long lastLongestGlobalTaskNanos() {
+        return this.lastLongestGlobalTaskNanos;
+    }
+
+    public String lastLongestGlobalTaskLane() {
+        return this.lastLongestGlobalTaskLane;
+    }
+
+    public long activeGlobalTaskAgeNanos() {
+        long startNanos = this.activeGlobalTaskStartNanos;
+        return startNanos <= 0L ? 0L : Math.max(0L, System.nanoTime() - startNanos);
+    }
+
+    public String activeGlobalTaskLane() {
+        return this.activeGlobalTaskLane;
+    }
+
     public int workerCount() {
         return this.workerCount;
     }
 
     public void beginServerTick(long tick) {
         this.currentServerTick.set(tick);
+        this.promoteDelayedRegionTasks(tick);
+    }
+
+    private void promoteDelayedRegionTasks(long tick) {
+        for (Map.Entry<Long, ConcurrentLinkedQueue<DelayedRegionTask>> entry : this.delayedRegionTasks.entrySet()) {
+            long targetTick = entry.getKey();
+            if (targetTick > tick) {
+                continue;
+            }
+
+            ConcurrentLinkedQueue<DelayedRegionTask> tasks = entry.getValue();
+            if (!this.delayedRegionTasks.remove(targetTick, tasks)) {
+                continue;
+            }
+
+            DelayedRegionTask delayedTask;
+            while ((delayedTask = tasks.poll()) != null) {
+                this.queuedDelayedRegionTasks.decrementAndGet();
+                if (!this.tryExecuteTask(delayedTask.region(), delayedTask.task())) {
+                    this.cancelledRegionTasks.incrementAndGet();
+                }
+            }
+        }
+    }
+
+    private RegionKey canonicalRegion(RegionKey region) {
+        return RegionizedWorldGuard.ownerForFixedRegion(region);
+    }
+
+    private List<RegionKey> canonicalRegions(Collection<RegionKey> regions) {
+        LinkedHashSet<RegionKey> uniqueRegions = new LinkedHashSet<>();
+        for (RegionKey region : regions) {
+            uniqueRegions.add(this.canonicalRegion(region));
+        }
+        return new ArrayList<>(uniqueRegions);
+    }
+
+    private Map<RegionKey, Runnable> canonicalTaskMap(Map<RegionKey, ? extends Runnable> tasks) {
+        Map<RegionKey, Runnable> canonicalTasks = new LinkedHashMap<>();
+        tasks.forEach((region, task) -> canonicalTasks.merge(
+            this.canonicalRegion(region),
+            task,
+            RegionizedTaskDispatcher::combineTasks
+        ));
+        return canonicalTasks;
+    }
+
+    private static Runnable combineTasks(Runnable first, Runnable second) {
+        return () -> {
+            Throwable failure = null;
+            try {
+                first.run();
+            } catch (Throwable throwable) {
+                failure = throwable;
+            }
+
+            try {
+                second.run();
+            } catch (Throwable throwable) {
+                if (failure == null) {
+                    failure = throwable;
+                } else {
+                    failure.addSuppressed(throwable);
+                }
+            }
+
+            if (failure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+            if (failure != null) {
+                throw new IllegalStateException(failure);
+            }
+        };
     }
 
     public void replaceRegionStats(Map<RegionKey, RegionStatsSnapshot> stats) {
@@ -608,23 +855,38 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     public List<RegionPerformanceSnapshot> regionPerformanceSnapshots() {
         List<RegionPerformanceSnapshot> snapshots = new ArrayList<>();
         long nowNanos = System.nanoTime();
+        Map<RegionKey, DelayedRegionStats> delayedStats = this.collectDelayedRegionStats(nowNanos);
 
         HashSet<RegionKey> regions = new HashSet<>();
         regions.addAll(this.regionTimings.keySet());
         regions.addAll(this.regionQueues.keySet());
         regions.addAll(this.regionStats.keySet());
+        regions.addAll(delayedStats.keySet());
 
         for (RegionKey region : regions) {
             RegionTiming timing = this.regionTimings.get(region);
             RegionQueue queue = this.regionQueues.get(region);
             RegionStatsSnapshot stats = this.regionStats.getOrDefault(region, RegionStatsSnapshot.EMPTY);
+            DelayedRegionStats delayed = delayedStats.get(region);
             long queuedTasks = queue == null ? 0 : queue.taskCount();
             long oldestQueuedTaskAgeNanos = queue == null ? 0L : queue.oldestQueuedTaskAgeNanos(nowNanos);
+            long delayedTasks = delayed == null ? 0L : delayed.count();
+            long oldestDelayedTaskAgeNanos = delayed == null ? 0L : delayed.oldestAgeNanos();
             snapshots.add(timing == null
-                ? RegionTiming.emptySnapshot(region, stats, queuedTasks, oldestQueuedTaskAgeNanos)
-                : timing.snapshot(region, stats, queuedTasks, oldestQueuedTaskAgeNanos, nowNanos));
+                ? RegionTiming.emptySnapshot(region, stats, queuedTasks, oldestQueuedTaskAgeNanos, delayedTasks, oldestDelayedTaskAgeNanos)
+                : timing.snapshot(region, stats, queuedTasks, oldestQueuedTaskAgeNanos, delayedTasks, oldestDelayedTaskAgeNanos, nowNanos));
         }
         return snapshots;
+    }
+
+    private Map<RegionKey, DelayedRegionStats> collectDelayedRegionStats(long nowNanos) {
+        Map<RegionKey, DelayedRegionStats> stats = new HashMap<>();
+        for (ConcurrentLinkedQueue<DelayedRegionTask> tasks : this.delayedRegionTasks.values()) {
+            for (DelayedRegionTask delayedTask : tasks) {
+                stats.computeIfAbsent(delayedTask.region(), unused -> new DelayedRegionStats()).record(delayedTask.task(), nowNanos);
+            }
+        }
+        return stats;
     }
 
     public long submittedRegionTaskCount() {
@@ -677,6 +939,15 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         for (RegionQueue queue : this.regionQueues.values()) {
             this.cancelledRegionTasks.addAndGet(queue.cancelPendingTasks(closed));
         }
+        for (ConcurrentLinkedQueue<DelayedRegionTask> tasks : this.delayedRegionTasks.values()) {
+            DelayedRegionTask delayedTask;
+            while ((delayedTask = tasks.poll()) != null) {
+                delayedTask.task().cancel(closed);
+                this.cancelledRegionTasks.incrementAndGet();
+                this.queuedDelayedRegionTasks.decrementAndGet();
+            }
+        }
+        this.delayedRegionTasks.clear();
         this.readyRegions.clear();
         this.regionQueues.clear();
         this.coalescedRegionTasks.clear();
@@ -712,11 +983,15 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     }
 
     private void recordRegionTask(RegionKey region, String lane, long tickId, long elapsedNanos, boolean successful) {
-        this.regionTimings.computeIfAbsent(region, unused -> new RegionTiming()).record(lane, tickId, elapsedNanos, successful);
+        this.recordRegionTask(region, lane, tickId, elapsedNanos, 0L, successful);
     }
 
-    private void beginRegionTask(RegionKey region, String lane, long tickId, long startNanos) {
-        this.regionTimings.computeIfAbsent(region, unused -> new RegionTiming()).begin(lane, tickId, startNanos);
+    private void recordRegionTask(RegionKey region, String lane, long tickId, long elapsedNanos, long waitNanos, boolean successful) {
+        this.regionTimings.computeIfAbsent(region, unused -> new RegionTiming()).record(lane, tickId, elapsedNanos, waitNanos, successful);
+    }
+
+    private void beginRegionTask(RegionKey region, String lane, long tickId, long startNanos, long waitNanos) {
+        this.regionTimings.computeIfAbsent(region, unused -> new RegionTiming()).begin(lane, tickId, startNanos, waitNanos);
     }
 
     private static void awaitLatch(String description, CountDownLatch latch) {
@@ -772,13 +1047,23 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
     }
 
     private interface GlobalTask {
+        long enqueuedNanos();
+
+        String lane();
+
         void run();
 
         default void cancel(Throwable throwable) {
         }
     }
 
-    private record CoalescedRegionTaskKey(RegionKey region, String lane) {
+    private record CoalescedRegionTaskKey(RegionKey region, String lane, Object key) {
+    }
+
+    private record CoalescedGlobalTaskKey(String lane, Object key) {
+    }
+
+    private record DelayedRegionTask(RegionKey region, RegionTask task) {
     }
 
     public record RegionPerformanceSnapshot(
@@ -787,8 +1072,12 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         RegionTickReportData tickReport15s,
         long[] taskTimesNanos,
         int sampleCount,
+        double averageTaskWaitNanos,
+        long maxTaskWaitNanos,
         long queuedTasks,
         long oldestQueuedTaskAgeNanos,
+        long delayedTasks,
+        long oldestDelayedTaskAgeNanos,
         long completedTasks,
         long failedTasks,
         long lastCompletionNanos
@@ -818,9 +1107,10 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         int sampleCount,
         long totalTickTimeNanos,
         double averageTickTimeNanos,
-        long reportWindowNanos
+        long reportWindowNanos,
+        double averageTickLatencyNanos
     ) {
-        public static final RegionTickReportData EMPTY = new RegionTickReportData(0, 0L, 0.0D, MIN_REPORT_WINDOW_NANOS);
+        public static final RegionTickReportData EMPTY = new RegionTickReportData(0, 0L, 0.0D, MIN_REPORT_WINDOW_NANOS, 0.0D);
 
         public double utilisation() {
             return this.reportWindowNanos <= 0L ? 0.0D : (double)this.totalTickTimeNanos / (double)this.reportWindowNanos;
@@ -832,16 +1122,15 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             }
 
             double targetTickNanos = (double)TimeUnit.SECONDS.toNanos(1L) / maxTps;
-            if (this.averageTickTimeNanos <= targetTickNanos && this.utilisation() <= 1.0D) {
+            double effectiveTickTimeNanos = Math.max(this.averageTickTimeNanos, this.averageTickLatencyNanos);
+            if (effectiveTickTimeNanos <= targetTickNanos) {
                 return maxTps;
             }
 
-            double seconds = (double)this.reportWindowNanos / (double)TimeUnit.SECONDS.toNanos(1L);
-            double sampleRateTps = (double)this.sampleCount / seconds;
-            double processingRateTps = this.averageTickTimeNanos <= 0.0D
+            double processingRateTps = effectiveTickTimeNanos <= 0.0D
                 ? maxTps
-                : (double)TimeUnit.SECONDS.toNanos(1L) / this.averageTickTimeNanos;
-            return Math.min(maxTps, Math.min(sampleRateTps, processingRateTps));
+                : (double)TimeUnit.SECONDS.toNanos(1L) / effectiveTickTimeNanos;
+            return Math.min(maxTps, processingRateTps);
         }
     }
 
@@ -852,15 +1141,15 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         private long failedTasks;
         private long lastCompletionNanos;
 
-        private synchronized void begin(String lane, long tickId, long startNanos) {
-            this.aggregateTiming.begin(tickId, startNanos);
-            this.laneTimings.computeIfAbsent(lane, unused -> new LaneTiming()).begin(tickId, startNanos);
+        private synchronized void begin(String lane, long tickId, long startNanos, long waitNanos) {
+            this.aggregateTiming.begin(tickId, startNanos, waitNanos);
+            this.laneTimings.computeIfAbsent(lane, unused -> new LaneTiming()).begin(tickId, startNanos, waitNanos);
         }
 
-        private synchronized void record(String lane, long tickId, long elapsedNanos, boolean successful) {
+        private synchronized void record(String lane, long tickId, long elapsedNanos, long waitNanos, boolean successful) {
             long nowNanos = System.nanoTime();
-            this.aggregateTiming.record(tickId, elapsedNanos, nowNanos);
-            this.laneTimings.computeIfAbsent(lane, unused -> new LaneTiming()).record(tickId, elapsedNanos, nowNanos);
+            this.aggregateTiming.record(tickId, elapsedNanos, waitNanos, nowNanos);
+            this.laneTimings.computeIfAbsent(lane, unused -> new LaneTiming()).record(tickId, elapsedNanos, waitNanos, nowNanos);
             this.lastCompletionNanos = nowNanos;
             if (successful) {
                 this.completedTasks++;
@@ -873,7 +1162,9 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             RegionKey region,
             RegionStatsSnapshot stats,
             long queuedTasks,
-            long oldestQueuedTaskAgeNanos
+            long oldestQueuedTaskAgeNanos,
+            long delayedTasks,
+            long oldestDelayedTaskAgeNanos
         ) {
             return new RegionPerformanceSnapshot(
                 region,
@@ -881,8 +1172,12 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
                 RegionTickReportData.EMPTY,
                 new long[0],
                 0,
+                0.0D,
+                0L,
                 queuedTasks,
                 oldestQueuedTaskAgeNanos,
+                delayedTasks,
+                oldestDelayedTaskAgeNanos,
                 0,
                 0,
                 0
@@ -894,10 +1189,19 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             RegionStatsSnapshot stats,
             long queuedTasks,
             long oldestQueuedTaskAgeNanos,
+            long delayedTasks,
+            long oldestDelayedTaskAgeNanos,
             long nowNanos
         ) {
             LaneTiming reportTiming = this.reportTiming(stats);
-            long[] samples = reportTiming.taskSamples();
+            long[] samples = this.aggregateTiming.taskSamples();
+            long[] waitSamples = this.aggregateTiming.waitSamples();
+            long totalWaitNanos = 0L;
+            long maxWaitNanos = 0L;
+            for (long waitNanos : waitSamples) {
+                totalWaitNanos += waitNanos;
+                maxWaitNanos = Math.max(maxWaitNanos, waitNanos);
+            }
 
             return new RegionPerformanceSnapshot(
                 region,
@@ -905,8 +1209,12 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
                 reportTiming.tickReport(nowNanos),
                 samples,
                 samples.length,
+                waitSamples.length == 0 ? 0.0D : (double)totalWaitNanos / (double)waitSamples.length,
+                maxWaitNanos,
                 queuedTasks,
                 oldestQueuedTaskAgeNanos,
+                delayedTasks,
+                oldestDelayedTaskAgeNanos,
                 this.completedTasks,
                 this.failedTasks,
                 this.lastCompletionNanos
@@ -914,64 +1222,69 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         }
 
         private LaneTiming reportTiming(RegionStatsSnapshot stats) {
-            if (stats.entities() > 0) {
-                LaneTiming entityTiming = this.laneTimings.get("entity-ticks");
-                if (entityTiming != null && entityTiming.hasSamples()) {
-                    return entityTiming;
-                }
-            }
+            return this.aggregateTiming.hasSamples() ? this.aggregateTiming : LaneTiming.EMPTY;
+        }
+    }
 
-            LaneTiming chunkTiming = this.laneTimings.get("chunk-ticks");
-            if (chunkTiming != null && chunkTiming.hasSamples()) {
-                return chunkTiming;
-            }
+    private static final class DelayedRegionStats {
+        private long count;
+        private long oldestAgeNanos;
 
-            return this.aggregateTiming;
+        private void record(RegionTask task, long nowNanos) {
+            this.count++;
+            this.oldestAgeNanos = Math.max(this.oldestAgeNanos, Math.max(0L, nowNanos - task.enqueuedNanos()));
+        }
+
+        private long count() {
+            return this.count;
+        }
+
+        private long oldestAgeNanos() {
+            return this.oldestAgeNanos;
         }
     }
 
     private static final class LaneTiming {
+        private static final LaneTiming EMPTY = new LaneTiming();
+
         private final long[] taskTimesNanos = new long[REGION_TIMING_WINDOW];
+        private final long[] waitTimesNanos = new long[REGION_TIMING_WINDOW];
+        private final long[] tickIds = new long[REGION_TICK_REPORT_WINDOW];
         private final long[] tickTimesNanos = new long[REGION_TICK_REPORT_WINDOW];
+        private final long[] tickLatencyNanos = new long[REGION_TICK_REPORT_WINDOW];
         private final long[] tickCompletionNanos = new long[REGION_TICK_REPORT_WINDOW];
         private int nextIndex;
         private int nextTickIndex;
         private long recordedTasks;
-        private long currentTickId = Long.MIN_VALUE;
-        private long currentTickTimeNanos;
-        private long currentTickCompletionNanos;
         private long activeTickId = Long.MIN_VALUE;
         private long activeStartNanos;
+        private long activeWaitNanos;
 
-        private void begin(long tickId, long startNanos) {
-            if (this.currentTickId != tickId) {
-                this.flushCurrentTick();
-                this.currentTickId = tickId;
-            }
-
-            this.activeTickId = tickId;
-            this.activeStartNanos = startNanos;
+        private LaneTiming() {
+            Arrays.fill(this.tickIds, Long.MIN_VALUE);
         }
 
-        private void record(long tickId, long elapsedNanos, long nowNanos) {
-            if (this.currentTickId != tickId) {
-                this.flushCurrentTick();
-                this.currentTickId = tickId;
-            }
+        private void begin(long tickId, long startNanos, long waitNanos) {
+            this.activeTickId = tickId;
+            this.activeStartNanos = startNanos;
+            this.activeWaitNanos = Math.max(0L, waitNanos);
+        }
 
-            this.currentTickTimeNanos += Math.max(1L, elapsedNanos);
-            this.currentTickCompletionNanos = nowNanos;
+        private void record(long tickId, long elapsedNanos, long waitNanos, long nowNanos) {
+            this.recordTickTime(tickId, Math.max(1L, elapsedNanos), Math.max(0L, waitNanos), nowNanos);
             this.taskTimesNanos[this.nextIndex] = Math.max(1L, elapsedNanos);
+            this.waitTimesNanos[this.nextIndex] = Math.max(0L, waitNanos);
             this.nextIndex = (this.nextIndex + 1) % this.taskTimesNanos.length;
             this.recordedTasks++;
             if (this.activeTickId == tickId) {
                 this.activeTickId = Long.MIN_VALUE;
                 this.activeStartNanos = 0L;
+                this.activeWaitNanos = 0L;
             }
         }
 
         private boolean hasSamples() {
-            return this.recordedTasks > 0L || this.currentTickTimeNanos > 0L;
+            return this.recordedTasks > 0L || this.activeStartNanos > 0L;
         }
 
         private long[] taskSamples() {
@@ -984,43 +1297,69 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
             return samples;
         }
 
-        private void flushCurrentTick() {
-            if (this.currentTickTimeNanos <= 0L) {
-                return;
+        private long[] waitSamples() {
+            int sampleCount = (int) Math.min(this.recordedTasks, this.waitTimesNanos.length);
+            long[] samples = new long[sampleCount];
+            for (int i = 0; i < sampleCount; i++) {
+                int sourceIndex = Math.floorMod(this.nextIndex - sampleCount + i, this.waitTimesNanos.length);
+                samples[i] = this.waitTimesNanos[sourceIndex];
+            }
+            return samples;
+        }
+
+        private void recordTickTime(long tickId, long elapsedNanos, long waitNanos, long nowNanos) {
+            long latencyNanos = Math.max(1L, elapsedNanos + waitNanos);
+            for (int i = 0; i < this.tickIds.length; i++) {
+                if (this.tickIds[i] == tickId) {
+                    this.tickTimesNanos[i] += elapsedNanos;
+                    this.tickLatencyNanos[i] = Math.max(this.tickLatencyNanos[i], latencyNanos);
+                    this.tickCompletionNanos[i] = Math.max(this.tickCompletionNanos[i], nowNanos);
+                    return;
+                }
             }
 
-            this.tickTimesNanos[this.nextTickIndex] = this.currentTickTimeNanos;
-            this.tickCompletionNanos[this.nextTickIndex] = this.currentTickCompletionNanos;
+            this.tickIds[this.nextTickIndex] = tickId;
+            this.tickTimesNanos[this.nextTickIndex] = elapsedNanos;
+            this.tickLatencyNanos[this.nextTickIndex] = latencyNanos;
+            this.tickCompletionNanos[this.nextTickIndex] = nowNanos;
             this.nextTickIndex = (this.nextTickIndex + 1) % this.tickTimesNanos.length;
-            this.currentTickTimeNanos = 0L;
-            this.currentTickCompletionNanos = 0L;
         }
 
         private RegionTickReportData tickReport(long nowNanos) {
             long oldestIncludedNanos = nowNanos - REGION_TICK_REPORT_WINDOW_NANOS;
             int sampleCount = 0;
             long totalTickTimeNanos = 0L;
+            long totalTickLatencyNanos = 0L;
             long firstSampleNanos = Long.MAX_VALUE;
+            boolean activeTaskMerged = false;
+            long activeTickTimeNanos = this.activeStartNanos > 0L ? Math.max(1L, nowNanos - this.activeStartNanos) : 0L;
+            long activeTickLatencyNanos = activeTickTimeNanos > 0L ? Math.max(1L, activeTickTimeNanos + this.activeWaitNanos) : 0L;
 
             for (int i = 0; i < this.tickTimesNanos.length; i++) {
                 long tickTimeNanos = this.tickTimesNanos[i];
+                long tickLatencyNanos = this.tickLatencyNanos[i];
                 long completionNanos = this.tickCompletionNanos[i];
+                if (activeTickTimeNanos > 0L && this.tickIds[i] == this.activeTickId) {
+                    tickTimeNanos += activeTickTimeNanos;
+                    tickLatencyNanos = Math.max(tickLatencyNanos, activeTickLatencyNanos);
+                    completionNanos = nowNanos;
+                    activeTaskMerged = true;
+                }
                 if (tickTimeNanos <= 0L || completionNanos < oldestIncludedNanos) {
                     continue;
                 }
 
                 sampleCount++;
                 totalTickTimeNanos += tickTimeNanos;
+                totalTickLatencyNanos += Math.max(1L, tickLatencyNanos);
                 firstSampleNanos = Math.min(firstSampleNanos, completionNanos);
             }
 
-            long activeTickTimeNanos = this.activeStartNanos > 0L ? Math.max(1L, nowNanos - this.activeStartNanos) : 0L;
-            long liveCurrentTickTimeNanos = this.currentTickTimeNanos + activeTickTimeNanos;
-            long liveCurrentCompletionNanos = activeTickTimeNanos > 0L ? nowNanos : this.currentTickCompletionNanos;
-            if (liveCurrentTickTimeNanos > 0L && liveCurrentCompletionNanos >= oldestIncludedNanos) {
+            if (activeTickTimeNanos > 0L && !activeTaskMerged && nowNanos >= oldestIncludedNanos) {
                 sampleCount++;
-                totalTickTimeNanos += liveCurrentTickTimeNanos;
-                firstSampleNanos = Math.min(firstSampleNanos, liveCurrentCompletionNanos);
+                totalTickTimeNanos += activeTickTimeNanos;
+                totalTickLatencyNanos += Math.max(1L, activeTickLatencyNanos);
+                firstSampleNanos = Math.min(firstSampleNanos, nowNanos);
             }
 
             if (sampleCount == 0) {
@@ -1033,7 +1372,8 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
                 sampleCount,
                 totalTickTimeNanos,
                 (double)totalTickTimeNanos / (double)sampleCount,
-                reportWindowNanos
+                reportWindowNanos,
+                (double)totalTickLatencyNanos / (double)sampleCount
             );
         }
     }
@@ -1073,9 +1413,10 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         }
     }
 
-    private record RunnableGlobalTask(Runnable task) implements GlobalTask {
+    private record RunnableGlobalTask(Runnable task, String lane, long enqueuedNanos) implements GlobalTask {
         private RunnableGlobalTask {
             Objects.requireNonNull(task, "task");
+            Objects.requireNonNull(lane, "lane");
         }
 
         @Override
@@ -1084,10 +1425,11 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         }
     }
 
-    private record FutureGlobalTask<T>(Supplier<T> task, CompletableFuture<T> future) implements GlobalTask {
+    private record FutureGlobalTask<T>(Supplier<T> task, CompletableFuture<T> future, String lane, long enqueuedNanos) implements GlobalTask {
         private FutureGlobalTask {
             Objects.requireNonNull(task, "task");
             Objects.requireNonNull(future, "future");
+            Objects.requireNonNull(lane, "lane");
         }
 
         @Override
@@ -1124,19 +1466,32 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
         }
 
         private void runAvailableTasks() {
+            RegionKey canonicalRegion = RegionizedTaskDispatcher.this.canonicalRegion(this.region);
+            if (!canonicalRegion.equals(this.region)) {
+                this.redirectPendingTasks(canonicalRegion);
+                return;
+            }
+
+            int maxTasks = RegionizedServerSettings.regionTaskMaxTasksPerRun();
+            long maxTimeNanos = TimeUnit.MILLISECONDS.toNanos(RegionizedServerSettings.regionTaskMaxTimeMs());
+            long runStartNanos = System.nanoTime();
+            long deadlineNanos = maxTimeNanos <= 0L ? Long.MAX_VALUE : runStartNanos + maxTimeNanos;
+            int count = 0;
             try {
                 RegionTask task;
-                while (RegionizedTaskDispatcher.this.running.get() && (task = this.tasks.poll()) != null) {
+                while ((maxTasks <= 0 || count < maxTasks) && RegionizedTaskDispatcher.this.running.get() && (task = this.tasks.poll()) != null) {
                     RegionTask currentTask = task;
                     RegionizedTickContext.runInRegion(this.region, this.random, () -> {
                         long startNanos = System.nanoTime();
-                        RegionizedTaskDispatcher.this.beginRegionTask(this.region, currentTask.lane(), currentTask.tickId(), startNanos);
+                        long waitNanos = Math.max(0L, startNanos - currentTask.enqueuedNanos());
+                        RegionizedTaskDispatcher.this.beginRegionTask(this.region, currentTask.lane(), currentTask.tickId(), startNanos, waitNanos);
                         boolean successful = runSafely("region task " + this.region, currentTask::run);
                         RegionizedTaskDispatcher.this.recordRegionTask(
                             this.region,
                             currentTask.lane(),
                             currentTask.tickId(),
                             System.nanoTime() - startNanos,
+                            waitNanos,
                             successful
                         );
                         if (successful) {
@@ -1145,6 +1500,27 @@ public final class RegionizedTaskDispatcher implements AutoCloseable {
                             RegionizedTaskDispatcher.this.failedRegionTasks.incrementAndGet();
                         }
                     });
+                    count++;
+                    if (maxTimeNanos > 0L && System.nanoTime() >= deadlineNanos) {
+                        break;
+                    }
+                }
+            } finally {
+                this.scheduled.set(false);
+                if (RegionizedTaskDispatcher.this.running.get() && !this.tasks.isEmpty() && this.scheduled.compareAndSet(false, true)) {
+                    RegionizedTaskDispatcher.this.readyRegions.add(this);
+                }
+            }
+        }
+
+        private void redirectPendingTasks(RegionKey canonicalRegion) {
+            try {
+                RegionTask task;
+                while (RegionizedTaskDispatcher.this.running.get() && (task = this.tasks.poll()) != null) {
+                    if (!RegionizedTaskDispatcher.this.enqueueTask(canonicalRegion, task, false)) {
+                        task.cancel(new IllegalStateException("Region dispatcher is not running"));
+                        RegionizedTaskDispatcher.this.cancelledRegionTasks.incrementAndGet();
+                    }
                 }
             } finally {
                 this.scheduled.set(false);

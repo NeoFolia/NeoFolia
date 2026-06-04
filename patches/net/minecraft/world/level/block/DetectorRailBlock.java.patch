@@ -1,5 +1,13 @@
 --- a/net/minecraft/world/level/block/DetectorRailBlock.java
 +++ b/net/minecraft/world/level/block/DetectorRailBlock.java
+@@ -25,6 +_,7 @@
+ import net.minecraft.world.level.block.state.properties.Property;
+ import net.minecraft.world.level.block.state.properties.RailShape;
+ import net.minecraft.world.phys.AABB;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class DetectorRailBlock extends BaseRailBlock {
+     public static final MapCodec<DetectorRailBlock> CODEC = simpleCodec(DetectorRailBlock::new);
 @@ -39,6 +_,10 @@
  
      public DetectorRailBlock(BlockBehaviour.Properties properties) {
@@ -11,6 +19,17 @@
          this.registerDefaultState(this.stateDefinition.any().setValue(POWERED, false).setValue(SHAPE, RailShape.NORTH_SOUTH).setValue(WATERLOGGED, false));
      }
  
+@@ -116,6 +_,10 @@
+         RailState rail = new RailState(level, pos, state);
+ 
+         for (BlockPos connectionPos : rail.getConnections()) {
++            if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, connectionPos)) {
++                continue;
++            }
++
+             BlockState connectionState = level.getBlockState(connectionPos);
+             level.neighborChanged(connectionState, connectionPos, connectionState.getBlock(), null, false);
+         }
 @@ -183,6 +_,6 @@
  
      @Override

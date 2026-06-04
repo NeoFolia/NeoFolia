@@ -1,0 +1,16 @@
+--- a/net/minecraft/world/level/portal/PortalForcer.java
++++ b/net/minecraft/world/level/portal/PortalForcer.java
+@@ -41,7 +_,12 @@
+     public Optional<BlockPos> findClosestPortalPosition(BlockPos approximateExitPos, boolean toNether, WorldBorder worldBorder) {
+         PoiManager poiManager = this.level.getPoiManager();
+         int radius = toNether ? 16 : 128;
+-        poiManager.ensureLoadedAndValid(this.level, approximateExitPos, radius);
++        if (!this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            poiManager.ensureLoadedAndValid(this.level, approximateExitPos, radius);
++        } else if (radius > 16) {
++            radius = 16;
++        }
++
+         return poiManager.getInSquare(type -> type.is(PoiTypes.NETHER_PORTAL), approximateExitPos, radius, PoiManager.Occupancy.ANY)
+             .map(PoiRecord::getPos)
+             .filter(worldBorder::isWithinBounds)

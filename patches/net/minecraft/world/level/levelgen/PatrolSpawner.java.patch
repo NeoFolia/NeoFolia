@@ -7,31 +7,34 @@
  import net.minecraft.core.BlockPos;
  import net.minecraft.server.level.ServerLevel;
  import net.minecraft.util.RandomSource;
-@@ -12,6 +_,8 @@
+@@ -12,23 +_,27 @@
  import net.minecraft.world.level.NaturalSpawner;
  import net.minecraft.world.level.block.state.BlockState;
  import net.minecraft.world.level.gamerules.GameRules;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldData;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  
  public class PatrolSpawner implements CustomSpawner {
-     private int nextTick;
-@@ -20,15 +_,19 @@
+-    private int nextTick;
+ 
+     @Override
      public void tick(ServerLevel level, boolean spawnEnemies) {
          if (spawnEnemies) {
              if (level.getGameRules().get(GameRules.SPAWN_PATROLS)) {
 -                RandomSource random = level.getRandom();
+-                this.nextTick--;
+-                if (this.nextTick <= 0) {
+-                    this.nextTick = this.nextTick + 12000 + random.nextInt(1200);
 +                RandomSource random = patrolSpawnerRandom(level);
-                 this.nextTick--;
-                 if (this.nextTick <= 0) {
-                     this.nextTick = this.nextTick + 12000 + random.nextInt(1200);
++                RegionizedWorldData worldData = RegionizedWorldGuard.currentWorldData(level);
++                worldData.patrolSpawnerNextTick--;
++                if (worldData.patrolSpawnerNextTick <= 0) {
++                    worldData.patrolSpawnerNextTick = worldData.patrolSpawnerNextTick + 12000 + random.nextInt(1200);
                      if (level.isBrightOutside()) {
                          if (random.nextInt(5) == 0) {
 -                            int playerCount = level.players().size();
-+                            List<? extends Player> players = level.players()
-+                                .stream()
-+                                .filter(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null)
-+                                .toList();
++                            List<? extends Player> players = level.getLocalPlayers();
 +                            int playerCount = players.size();
                              if (playerCount >= 1) {
 -                                Player player = level.players().get(random.nextInt(playerCount));

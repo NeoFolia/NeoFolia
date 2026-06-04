@@ -63,7 +63,6 @@ class TPSCommand {
             return Command.SINGLE_SUCCESS;
         }
 
-        server.refreshRegionStats();
         TickRateManager tickRateManager = server.tickRateManager();
         List<RegionHealth> regions = dispatcher.regionPerformanceSnapshots().stream()
                 .map(snapshot -> RegionHealth.from(tickRateManager, snapshot))
@@ -75,24 +74,25 @@ class TPSCommand {
     }
 
     private static Component createServerHealthComponent(MinecraftServer server, RegionizedTaskDispatcher dispatcher, List<RegionHealth> regions, ChunkRates chunkRates) {
-        List<Double> sortedTps = regions.stream().map(RegionHealth::tps).sorted().toList();
+        List<RegionHealth> reportableRegions = regions.stream()
+                .filter(RegionHealth::hasRegionState)
+                .toList();
+        List<Double> sortedTps = reportableRegions.stream().map(RegionHealth::tps).sorted().toList();
         double lowestTps = sortedTps.isEmpty() ? targetTps(server.tickRateManager()) : sortedTps.get(0);
         double medianTps = sortedTps.isEmpty() ? targetTps(server.tickRateManager()) : median(sortedTps);
         double highestTps = sortedTps.isEmpty() ? targetTps(server.tickRateManager()) : sortedTps.get(sortedTps.size() - 1);
-        double totalUtilisation = regions.stream().mapToDouble(RegionHealth::utilisation).sum();
+        double totalUtilisation = reportableRegions.stream().mapToDouble(RegionHealth::utilisation).sum();
         double maxUtilisation = Math.max(1, dispatcher.workerCount());
 
-        List<RegionHealth> topRegions = regions.stream()
-                .filter(region -> region.snapshot().tickReport15s().sampleCount() > 0 || region.snapshot().queuedTasks() > 0 || !region.stats().isEmpty())
-                .sorted(Comparator.comparingDouble(RegionHealth::utilisation).reversed()
-                        .thenComparing(Comparator.comparingDouble(RegionHealth::mspt).reversed()))
+        List<RegionHealth> topRegions = reportableRegions.stream()
+                .sorted(Comparator.comparingDouble(RegionHealth::utilisation).reversed())
                 .limit(HIGHEST_UTILISATION_REGIONS)
                 .toList();
 
         MutableComponent component = Component.literal("Server Health Report\n")
                 .withColor(HEADER)
                 .append(reportLine("Online Players: ", Integer.toString(server.getPlayerList().getPlayerCount()) + "\n", INFORMATION))
-                .append(reportLine("Total regions: ", Integer.toString(regions.size()) + "\n", INFORMATION))
+                .append(reportLine("Total regions: ", Integer.toString(reportableRegions.size()) + "\n", INFORMATION))
                 .append(Component.literal(" - ").withColor(LIST))
                 .append(Component.literal("Utilisation: ").withColor(PRIMARY))
                 .append(Component.literal(ONE_DECIMAL.format(totalUtilisation * 100.0D)).withColor(utilisationColor(totalUtilisation / maxUtilisation)))
@@ -235,11 +235,14 @@ class TPSCommand {
             double mspt,
             double tps
     ) {
+        private boolean hasRegionState() {
+            return !this.stats.isEmpty();
+        }
+
         private static RegionHealth from(TickRateManager tickRateManager, RegionPerformanceSnapshot snapshot) {
             RegionTickReportData report = snapshot.tickReport15s();
             double mspt = report.sampleCount() == 0 ? 0.0D : nanosToMillis(report.averageTickTimeNanos());
-            double targetTps = targetTps(tickRateManager);
-            double tps = report.tps(targetTps);
+            double tps = report.tps(targetTps(tickRateManager));
             double utilisation = report.utilisation();
             return new RegionHealth(tickRateManager, snapshot, snapshot.stats(), utilisation, mspt, tps);
         }

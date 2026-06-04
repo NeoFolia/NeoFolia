@@ -1,5 +1,24 @@
 --- a/net/minecraft/world/level/chunk/ImposterProtoChunk.java
 +++ b/net/minecraft/world/level/chunk/ImposterProtoChunk.java
+@@ -27,6 +_,7 @@
+ import net.minecraft.world.level.material.FluidState;
+ import net.minecraft.world.ticks.BlackholeTickAccess;
+ import net.minecraft.world.ticks.TickContainerAccess;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ImposterProtoChunk extends ProtoChunk {
+@@ -41,6 +_,10 @@
+ 
+     @Override
+     public @Nullable BlockEntity getBlockEntity(BlockPos pos) {
++        if (!this.allowWrites && !RegionizedWorldGuard.isTickThread(this.wrapped.getLevel().getServer())) {
++            return null;
++        }
++
+         return this.wrapped.getBlockEntity(pos);
+     }
+ 
 @@ -211,6 +_,10 @@
      }
  

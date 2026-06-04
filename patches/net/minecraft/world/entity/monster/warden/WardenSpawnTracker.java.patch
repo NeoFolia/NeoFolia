@@ -8,7 +8,7 @@
  
  public class WardenSpawnTracker {
      public static final Codec<WardenSpawnTracker> CODEC = RecordCodecBuilder.create(
-@@ -94,12 +_,16 @@
+@@ -94,12 +_,15 @@
  
      private static boolean hasNearbyWarden(ServerLevel level, BlockPos pos) {
          AABB areaToCheck = AABB.ofSize(Vec3.atCenterOf(pos), 48.0, 48.0, 48.0);
@@ -20,8 +20,7 @@
      private static List<ServerPlayer> getNearbyPlayers(ServerLevel level, BlockPos pos) {
          Vec3 origin = Vec3.atCenterOf(pos);
 -        return level.getPlayers(player -> !player.isSpectator() && player.position().closerThan(origin, 16.0) && player.isAlive());
-+        return level.getPlayers(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null
-+            && !player.isSpectator()
++        return level.getPlayers(player -> !player.isSpectator()
 +            && player.position().closerThan(origin, 16.0)
 +            && player.isAlive());
      }

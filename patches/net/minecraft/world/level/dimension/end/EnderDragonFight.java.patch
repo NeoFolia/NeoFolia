@@ -189,7 +189,7 @@
          Set<ServerPlayer> newPlayers = Sets.newHashSet();
  
 -        for (ServerPlayer player : this.level.getPlayers(this.validPlayer)) {
-+        for (ServerPlayer player : this.level.getPlayers(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, player) != null && this.validPlayer.test(player))) {
++        for (ServerPlayer player : this.level.getPlayers(player -> this.validPlayer.test(player))) {
              this.dragonEvent.addPlayer(player);
              newPlayers.add(player);
          }

@@ -60,7 +60,7 @@
          if (this.keepAlivePending && packet.getId() == this.keepAliveChallenge) {
              int time = (int)(Util.getMillis() - this.keepAliveTime);
              this.latency = (this.latency * 3 + time) / 4;
-@@ -88,21 +_,52 @@
+@@ -88,22 +_,53 @@
      }
  
      @Override
@@ -73,6 +73,13 @@
 -
 -    @Override
 -    public void handleCustomClickAction(ServerboundCustomClickActionPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
+-        this.server.handleCustomClickAction(packet.id(), packet.payload());
+-    }
+-
+-    @Override
+-    public void handleResourcePackResponse(ServerboundResourcePackPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
 +    public synchronized void handlePong(ServerboundPongPacket serverboundPongPacket) {
 +    }
 +
@@ -108,22 +115,21 @@
 +
 +    @Override
 +    public synchronized void handleCustomClickAction(ServerboundCustomClickActionPacket packet) {
-         PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
--        this.server.handleCustomClickAction(packet.id(), packet.payload());
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.getPacketProcessor());
 +        if (this instanceof ServerGamePacketListenerImpl gamePacketListener) {
 +            var player = gamePacketListener.getPlayer();
 +            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> this.server.handleCustomClickAction(packet.id(), packet.payload(), player, this.playerProfile()));
 +        } else {
 +            this.server.handleCustomClickAction(packet.id(), packet.payload(), null, this.playerProfile());
 +        }
-     }
- 
-     @Override
--    public void handleResourcePackResponse(ServerboundResourcePackPacket packet) {
++    }
++
++    @Override
 +    public synchronized void handleResourcePackResponse(ServerboundResourcePackPacket packet) {
-         PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.getPacketProcessor());
          if (packet.action() == ServerboundResourcePackPacket.Action.DECLINED && this.server.isResourcePackRequired()) {
              LOGGER.info("Disconnecting {} due to resource pack {} rejection", this.playerProfile().name(), packet.id());
+             this.disconnect(Component.translatable("multiplayer.requiredTexturePrompt.disconnect"));
 @@ -111,11 +_,11 @@
      }
  
@@ -204,12 +210,21 @@
 -        boolean flush = !this.suspendFlushingOnServerThread || !this.server.isSameThread();
 +        boolean flush;
 +        synchronized (this.flushLock) {
-+            flush = !this.suspendFlushingOnServerThread || !this.server.isSameThread();
++            flush = !this.suspendFlushingOnServerThread || !this.isServerOrRegionTickThread();
 +        }
  
          try {
              this.connection.send(packet, listener, flush);
-@@ -179,27 +_,88 @@
+@@ -174,32 +_,97 @@
+         }
+     }
+ 
++    private boolean isServerOrRegionTickThread() {
++        return this.server.isSameThread() || RegionizedTickContext.isRegionThread();
++    }
++
+     public void disconnect(Component reason) {
+         this.disconnect(new DisconnectionDetails(reason));
      }
  
      public void disconnect(DisconnectionDetails details) {

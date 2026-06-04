@@ -1,18 +1,55 @@
 --- a/net/minecraft/network/PacketProcessor.java
 +++ b/net/minecraft/network/PacketProcessor.java
-@@ -11,7 +_,7 @@
+@@ -4,39 +_,144 @@
+ import com.mojang.logging.LogUtils;
+ import java.util.Queue;
+ import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.TimeUnit;
++import java.util.function.BooleanSupplier;
+ import net.minecraft.ReportedException;
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.network.protocol.PacketUtils;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.server.network.ServerGamePacketListenerImpl;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.slf4j.Logger;
  
  public class PacketProcessor implements AutoCloseable {
      private static final Logger LOGGER = LogUtils.getLogger();
 -    private final Queue<PacketProcessor.ListenerAndPacket<?>> packetsToBeHandled = Queues.newConcurrentLinkedQueue();
-+    private final Queue<net.neoforged.neoforge.network.handling.QueuedPacket> packetsToBeHandled = Queues.newConcurrentLinkedQueue();
-     private final Thread runningThread;
+-    private final Thread runningThread;
++    private final Queue<QueuedPacketEntry> packetsToBeHandled = Queues.newConcurrentLinkedQueue();
++    private final BooleanSupplier sameThreadChecker;
++    private volatile int lastProcessedPacketCount;
++    private volatile long lastProcessingTimeNanos;
++    private volatile long lastLongestPacketNanos;
++    private volatile String lastLongestPacketDescription = "";
++    private volatile long activePacketStartNanos;
++    private volatile String activePacketDescription = "";
      private boolean closed;
  
-@@ -28,6 +_,19 @@
+     public PacketProcessor(Thread runningThread) {
+-        this.runningThread = runningThread;
++        this(() -> Thread.currentThread() == runningThread);
++    }
++
++    public PacketProcessor(BooleanSupplier sameThreadChecker) {
++        this.sameThreadChecker = sameThreadChecker;
+     }
+ 
+     public boolean isSameThread() {
+-        return Thread.currentThread() == this.runningThread;
++        return this.sameThreadChecker.getAsBoolean();
+     }
+ 
+     public <T extends PacketListener> void scheduleIfPossible(T listener, Packet<T> packet) {
+         if (this.closed) {
              throw new RejectedExecutionException("Server already shutting down");
          } else {
-             this.packetsToBeHandled.add(new PacketProcessor.ListenerAndPacket<>(listener, packet));
+-            this.packetsToBeHandled.add(new PacketProcessor.ListenerAndPacket<>(listener, packet));
++            this.packetsToBeHandled.add(new QueuedPacketEntry(new PacketProcessor.ListenerAndPacket<>(listener, packet), System.nanoTime()));
 +        }
 +    }
 +
@@ -25,7 +62,137 @@
 +        if (this.closed) {
 +            throw new RejectedExecutionException("Server already shutting down");
 +        } else {
-+            this.packetsToBeHandled.add(new net.neoforged.neoforge.network.handling.QueuedPacket.CustomPayload(task));
++            this.packetsToBeHandled.add(new QueuedPacketEntry(new net.neoforged.neoforge.network.handling.QueuedPacket.CustomPayload(task), System.nanoTime()));
          }
      }
  
+     public void processQueuedPackets() {
+-        if (!this.closed) {
+-            while (!this.packetsToBeHandled.isEmpty()) {
+-                this.packetsToBeHandled.poll().handle();
+-            }
+-        }
++        this.processQueuedPackets(
++            RegionizedServerSettings.packetProcessorMaxPacketsPerTick(),
++            TimeUnit.MILLISECONDS.toNanos(RegionizedServerSettings.packetProcessorMaxTimeMs())
++        );
++    }
++
++    public void processQueuedPackets(int maxPackets, long maxTimeNanos) {
++        if (this.closed) {
++            return;
++        }
++
++        long startNanos = System.nanoTime();
++        long deadlineNanos = maxTimeNanos <= 0L ? Long.MAX_VALUE : startNanos + maxTimeNanos;
++        int processed = 0;
++        long longestPacketNanos = 0L;
++        String longestPacketDescription = "";
++        QueuedPacketEntry queuedPacket;
++        while ((maxPackets <= 0 || processed < maxPackets) && (queuedPacket = this.packetsToBeHandled.poll()) != null) {
++            long packetStartNanos = System.nanoTime();
++            String packetDescription = queuedPacket.packet().description();
++            this.activePacketStartNanos = packetStartNanos;
++            this.activePacketDescription = packetDescription;
++            queuedPacket.packet().handle();
++            long packetElapsedNanos = System.nanoTime() - packetStartNanos;
++            if (packetElapsedNanos > longestPacketNanos) {
++                longestPacketNanos = packetElapsedNanos;
++                longestPacketDescription = packetDescription;
++            }
++            this.activePacketStartNanos = 0L;
++            this.activePacketDescription = "";
++            processed++;
++            if (maxTimeNanos > 0L && System.nanoTime() >= deadlineNanos) {
++                break;
++            }
++        }
++
++        this.activePacketStartNanos = 0L;
++        this.activePacketDescription = "";
++        this.lastProcessedPacketCount = processed;
++        this.lastProcessingTimeNanos = System.nanoTime() - startNanos;
++        this.lastLongestPacketNanos = longestPacketNanos;
++        this.lastLongestPacketDescription = longestPacketDescription;
++    }
++
++    public boolean hasPackets() {
++        return !this.packetsToBeHandled.isEmpty();
++    }
++
++    public int queuedPacketCount() {
++        return this.packetsToBeHandled.size();
++    }
++
++    public long oldestQueuedPacketAgeNanos() {
++        QueuedPacketEntry queuedPacket = this.packetsToBeHandled.peek();
++        return queuedPacket == null ? 0L : Math.max(0L, System.nanoTime() - queuedPacket.enqueuedNanos());
++    }
++
++    public int lastProcessedPacketCount() {
++        return this.lastProcessedPacketCount;
++    }
++
++    public long lastProcessingTimeNanos() {
++        return this.lastProcessingTimeNanos;
++    }
++
++    public long lastLongestPacketNanos() {
++        return this.lastLongestPacketNanos;
++    }
++
++    public String lastLongestPacketDescription() {
++        return this.lastLongestPacketDescription;
++    }
++
++    public long activePacketAgeNanos() {
++        long startNanos = this.activePacketStartNanos;
++        return startNanos <= 0L ? 0L : Math.max(0L, System.nanoTime() - startNanos);
++    }
++
++    public String activePacketDescription() {
++        return this.activePacketDescription;
+     }
+ 
+     @Override
+@@ -45,7 +_,16 @@
+     }
+ 
+     private record ListenerAndPacket<T extends PacketListener>(T listener, Packet<T> packet) implements net.neoforged.neoforge.network.handling.QueuedPacket {
++        @Override
++        public String description() {
++            return this.packet.getClass().getSimpleName();
++        }
++
+         public void handle() {
++            if (this.scheduleGamePacketOnPlayerRegion()) {
++                return;
++            }
++
+             if (this.listener.shouldHandleMessage(this.packet)) {
+                 try {
+                     this.packet.handle(this.listener);
+@@ -60,5 +_,23 @@
+                 PacketProcessor.LOGGER.debug("Ignoring packet due to disconnection: {}", this.packet);
+             }
+         }
++
++        private boolean scheduleGamePacketOnPlayerRegion() {
++            if (!(this.listener instanceof ServerGamePacketListenerImpl gamePacketListener)) {
++                return false;
++            }
++
++            ServerPlayer player = gamePacketListener.getPlayer();
++            MinecraftServer server = player.level().getServer();
++            if (server == null || !server.regionizedTaskDispatcher().isRunning() || RegionizedWorldGuard.isOnPlayerRegion(player)) {
++                return false;
++            }
++
++            RegionizedWorldGuard.executeOnPlayerRegion(player, this::handle);
++            return true;
++        }
++    }
++
++    private record QueuedPacketEntry(net.neoforged.neoforge.network.handling.QueuedPacket packet, long enqueuedNanos) {
+     }
+ }

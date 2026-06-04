@@ -1,6 +1,26 @@
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
-@@ -66,21 +_,23 @@
+@@ -28,6 +_,7 @@
+ import java.util.Objects;
+ import java.util.Queue;
+ import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.atomic.AtomicBoolean;
+ import java.util.function.Consumer;
+ import javax.crypto.Cipher;
+ import net.minecraft.SharedConstants;
+@@ -47,9 +_,11 @@
+ import net.minecraft.network.protocol.status.StatusProtocols;
+ import net.minecraft.server.RunningOnDifferentThreadException;
+ import net.minecraft.server.network.EventLoopGroupHolder;
++import net.minecraft.server.network.ServerGamePacketListenerImpl;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.debugchart.LocalSampleLogger;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ import org.slf4j.Marker;
+@@ -66,21 +_,24 @@
      private final PacketFlow receiving;
      private volatile boolean sendLoginDisconnect = true;
      private final Queue<Consumer<Connection>> pendingActions = Queues.newConcurrentLinkedQueue();
@@ -15,7 +35,8 @@
 -    private boolean disconnectionHandled;
 +    private volatile @Nullable DisconnectionDetails disconnectionDetails;
 +    private volatile boolean encrypted;
-+    private volatile boolean disconnectionHandled;
++    private final AtomicBoolean disconnectionHandled = new AtomicBoolean();
++    private final AtomicBoolean flushingQueue = new AtomicBoolean();
      private int receivedPackets;
      private int sentPackets;
      private float averageReceivedPackets;
@@ -202,28 +223,29 @@
          String hostName, int port, ProtocolInfo<S> outbound, ProtocolInfo<C> inbound, C listener, ClientIntent intent
      ) {
          if (outbound.id() != inbound.id()) {
-@@ -279,16 +_,17 @@
+@@ -279,94 +_,119 @@
      }
  
      public void send(Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
 -        if (this.isConnected()) {
-+        Channel channel = this.channel;
-+        if (isConnected(channel)) {
-             this.flushQueue();
+-            this.flushQueue();
 -            this.sendPacket(packet, listener, flush);
-+            this.sendPacket(channel, packet, listener, flush);
-         } else {
-             this.pendingActions.add(connection -> connection.sendPacket(packet, listener, flush));
-         }
+-        } else {
+-            this.pendingActions.add(connection -> connection.sendPacket(packet, listener, flush));
+-        }
++        this.pendingActions.add(connection -> connection.sendPacket(packet, listener, flush));
++        this.flushQueue();
      }
  
      public void runOnceConnected(Consumer<Connection> action) {
 -        if (this.isConnected()) {
-+        if (isConnected(this.channel)) {
-             this.flushQueue();
-             action.accept(this);
-         } else {
-@@ -297,55 +_,76 @@
+-            this.flushQueue();
+-            action.accept(this);
+-        } else {
+-            this.pendingActions.add(action);
+-        }
++        this.pendingActions.add(action);
++        this.flushQueue();
      }
  
      private void sendPacket(Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
@@ -267,12 +289,11 @@
      public void flushChannel() {
 -        if (this.isConnected()) {
 -            this.flush();
-+        Channel channel = this.channel;
-+        if (isConnected(channel)) {
-+            this.flush(channel);
-         } else {
-             this.pendingActions.add(Connection::flush);
-         }
+-        } else {
+-            this.pendingActions.add(Connection::flush);
+-        }
++        this.pendingActions.add(Connection::flush);
++        this.flushQueue();
      }
  
      private void flush() {
@@ -300,12 +321,23 @@
 -                while ((pendingAction = this.pendingActions.poll()) != null) {
 -                    pendingAction.accept(this);
 -                }
-+        if (isConnected(this.channel)) {
++        if (!isConnected(this.channel) || !this.flushingQueue.compareAndSet(false, true)) {
++            return;
++        }
++
++        try {
 +            Consumer<Connection> pendingAction;
-+            while ((pendingAction = this.pendingActions.poll()) != null) {
++            while (isConnected(this.channel) && (pendingAction = this.pendingActions.poll()) != null) {
 +                pendingAction.accept(this);
              }
-         }
+-        }
++        } finally {
++            this.flushingQueue.set(false);
++        }
++
++        if (!this.pendingActions.isEmpty()) {
++            this.flushQueue();
++        }
 +    }
 +
 +    private static boolean isConnected(@Nullable Channel channel) {
@@ -320,14 +352,15 @@
              tickable.tick();
          }
  
-@@ -353,20 +_,22 @@
+-        if (!this.isConnected() && !this.disconnectionHandled) {
++        if (!this.isConnected()) {
              this.handleDisconnection();
          }
  
 -        if (this.channel != null) {
 -            this.channel.flush();
 +        Channel channel = this.channel;
-+        if (channel != null) {
++        if (channel != null && this.shouldFlushAfterTick(packetListener)) {
 +            channel.flush();
          }
  
@@ -344,6 +377,10 @@
      }
  
 -    protected void tickSecond() {
++    private boolean shouldFlushAfterTick(@Nullable PacketListener packetListener) {
++        return !(packetListener instanceof ServerGamePacketListenerImpl) || !RegionizedTickContext.isRegionThread();
++    }
++
 +    protected synchronized void tickSecond() {
          this.averageSentPackets = Mth.lerp(0.75F, (float)this.sentPackets, this.averageSentPackets);
          this.averageReceivedPackets = Mth.lerp(0.75F, (float)this.receivedPackets, this.averageReceivedPackets);
@@ -417,11 +454,13 @@
          if (threshold >= 0) {
              if (this.channel.pipeline().get("decompress") instanceof CompressionDecoder compressionDecoder) {
                  compressionDecoder.setThreshold(threshold, validateDecompressed);
-@@ -563,32 +_,52 @@
+@@ -563,32 +_,50 @@
      }
  
      public void handleDisconnection() {
 -        if (this.channel != null && !this.channel.isOpen()) {
+-            if (this.disconnectionHandled) {
+-                LOGGER.warn("handleDisconnection() called twice");
 +        PacketListener disconnectListener;
 +        DisconnectionDetails details;
 +        synchronized (this) {
@@ -429,11 +468,10 @@
 +                return;
 +            }
 +
-             if (this.disconnectionHandled) {
-                 LOGGER.warn("handleDisconnection() called twice");
++            if (!this.disconnectionHandled.compareAndSet(false, true)) {
 +                return;
              } else {
-                 this.disconnectionHandled = true;
+-                this.disconnectionHandled = true;
                  PacketListener packetListener = this.getPacketListener();
 -                PacketListener disconnectListener = packetListener != null ? packetListener : this.disconnectListener;
 -                if (disconnectListener != null) {

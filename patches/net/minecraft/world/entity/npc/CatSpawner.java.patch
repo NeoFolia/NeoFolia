@@ -1,16 +1,26 @@
 --- a/net/minecraft/world/entity/npc/CatSpawner.java
 +++ b/net/minecraft/world/entity/npc/CatSpawner.java
-@@ -14,6 +_,8 @@
+@@ -14,24 +_,30 @@
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.level.CustomSpawner;
  import net.minecraft.world.phys.AABB;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldData;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  
  public class CatSpawner implements CustomSpawner {
      private static final int TICK_DELAY = 1200;
-@@ -26,12 +_,15 @@
-             this.nextTick = 1200;
+-    private int nextTick;
+ 
+     @Override
+     public void tick(ServerLevel level, boolean spawnEnemies) {
+-        this.nextTick--;
+-        if (this.nextTick <= 0) {
+-            this.nextTick = 1200;
++        RegionizedWorldData worldData = RegionizedWorldGuard.currentWorldData(level);
++        worldData.catSpawnerNextTick--;
++        if (worldData.catSpawnerNextTick <= 0) {
++            worldData.catSpawnerNextTick = TICK_DELAY;
              Player player = level.getRandomPlayer();
              if (player != null) {
 -                RandomSource random = level.getRandom();

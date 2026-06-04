@@ -1,5 +1,84 @@
 --- a/net/minecraft/server/network/config/PrepareSpawnTask.java
 +++ b/net/minecraft/server/network/config/PrepareSpawnTask.java
+@@ -25,6 +_,7 @@
+ import net.minecraft.world.level.storage.ValueInput;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
++import net.neoforged.neoforge.server.region.RegionizedLoginLimiter;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -36,6 +_,7 @@
+     private final NameAndId nameAndId;
+     private final LevelLoadListener loadListener;
+     private PrepareSpawnTask.@Nullable State state;
++    private boolean loginSlotAcquired;
+ 
+     public PrepareSpawnTask(MinecraftServer server, NameAndId nameAndId) {
+         this.server = server;
+@@ -45,6 +_,11 @@
+ 
+     @Override
+     public void start(Consumer<Packet<?>> connection) {
++        RegionizedLoginLimiter.registerWaiting(this);
++        this.state = new PrepareSpawnTask.WaitingForLoginSlot();
++    }
++
++    private void startPreparing() {
+         try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(LOGGER)) {
+             Optional<ValueInput> loadedData = this.server
+                 .getPlayerList()
+@@ -65,10 +_,42 @@
+         }
+     }
+ 
++    private boolean tryAcquireLoginSlot() {
++        if (this.loginSlotAcquired) {
++            return true;
++        }
++
++        if (!RegionizedLoginLimiter.tryAcquire(this)) {
++            return false;
++        }
++
++        this.loginSlotAcquired = true;
++        return true;
++    }
++
++    private void releaseLoginSlot() {
++        RegionizedLoginLimiter.unregisterWaiting(this);
++        if (this.loginSlotAcquired) {
++            this.loginSlotAcquired = false;
++            RegionizedLoginLimiter.release();
++        }
++    }
++
+     @Override
+     public boolean tick() {
+         return switch (this.state) {
+             case null -> false;
++            case PrepareSpawnTask.WaitingForLoginSlot ignored -> {
++                if (this.tryAcquireLoginSlot()) {
++                    try {
++                        this.startPreparing();
++                    } catch (RuntimeException | Error ex) {
++                        this.releaseLoginSlot();
++                        throw ex;
++                    }
++                }
++                yield false;
++            }
+             case PrepareSpawnTask.Preparing preparing -> {
+                 PrepareSpawnTask.Ready ready = preparing.tick();
+                 if (ready != null) {
+@@ -102,6 +_,7 @@
+             preparing.cancel();
+         }
+ 
++        this.releaseLoginSlot();
+         this.state = null;
+     }
+ 
 @@ -187,6 +_,7 @@
                      .loadPlayerData(PrepareSpawnTask.this.nameAndId)
                      .map(tag -> TagValueInput.create(reporter, PrepareSpawnTask.this.server.registryAccess(), tag));
@@ -8,3 +87,22 @@
                  player.snapTo(this.spawnPosition, this.spawnAngle.x, this.spawnAngle.y);
                  PrepareSpawnTask.this.server.getPlayerList().placeNewPlayer(connection, player, cookie);
                  input.ifPresent(tag -> {
+@@ -194,12 +_,17 @@
+                     player.loadAndSpawnParentVehicle(tag);
+                 });
+                 var7 = player;
++            } finally {
++                PrepareSpawnTask.this.releaseLoginSlot();
+             }
+ 
+             return var7;
+         }
+     }
+ 
+-    private sealed interface State permits PrepareSpawnTask.Preparing, PrepareSpawnTask.Ready {
++    private final class WaitingForLoginSlot implements PrepareSpawnTask.State {
++    }
++
++    private sealed interface State permits PrepareSpawnTask.WaitingForLoginSlot, PrepareSpawnTask.Preparing, PrepareSpawnTask.Ready {
+     }
+ }

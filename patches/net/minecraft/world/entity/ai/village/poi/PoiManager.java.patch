@@ -8,11 +8,10 @@
  import net.minecraft.world.level.LevelHeightAccessor;
  import net.minecraft.world.level.LevelReader;
  import net.minecraft.world.level.block.state.BlockState;
-@@ -39,6 +_,9 @@
+@@ -39,6 +_,8 @@
  import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
  import net.minecraft.world.level.chunk.storage.SectionStorage;
  import net.minecraft.world.level.chunk.storage.SimpleRegionStorage;
-+import net.neoforged.neoforge.server.region.RegionKey;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  import org.jspecify.annotations.Nullable;
@@ -26,7 +25,7 @@
  
      public PoiManager(
          RegionStorageInfo info,
-@@ -67,75 +_,109 @@
+@@ -67,75 +_,108 @@
              levelHeightAccessor
          );
          this.distanceTracker = new PoiManager.DistanceTracker();
@@ -41,8 +40,7 @@
 +            return true;
 +        }
 +
-+        RegionKey expected = RegionKey.fromChunk(this.dimension, chunkPos.x(), chunkPos.z(), RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT);
-+        return RegionizedTickContext.currentRegion().map(expected::equals).orElse(false);
++        return RegionizedWorldGuard.isCurrentRegionFor(this.dimension, chunkPos.x(), chunkPos.z());
 +    }
 +
 +    private boolean isVisibleToCurrentRegion(SectionPos sectionPos) {
@@ -296,20 +294,33 @@
          pos.blocksInside()
              .forEach(
                  blockPos -> {
-@@ -246,13 +_,15 @@
-             );
+@@ -247,14 +_,23 @@
      }
  
--    public void ensureLoadedAndValid(LevelReader reader, BlockPos center, int radius) {
-+    public synchronized void ensureLoadedAndValid(LevelReader reader, BlockPos center, int radius) {
-         SectionPos.aroundChunk(
+     public void ensureLoadedAndValid(LevelReader reader, BlockPos center, int radius) {
+-        SectionPos.aroundChunk(
++        List<ChunkPos> chunksToLoad;
++        synchronized (this) {
++            chunksToLoad = SectionPos.aroundChunk(
                  ChunkPos.containing(center), Math.floorDiv(radius, 16), this.levelHeightAccessor.getMinSectionY(), this.levelHeightAccessor.getMaxSectionY()
              )
-             .map(pos -> Pair.of(pos, this.getOrLoad(pos.asLong())))
-             .filter(poiSection -> !poiSection.getSecond().map(PoiSection::isValid).orElse(false))
-             .map(p -> p.getFirst().chunk())
-+            .filter(this::isVisibleToCurrentRegion)
-+            .filter(pos -> !(reader instanceof Level level) || RegionizedWorldGuard.shouldLoadChunk(level, pos.x(), pos.z()))
-             .filter(pos -> this.loadedChunks.add(pos.pack()))
-             .forEach(pos -> reader.getChunk(pos.x(), pos.z(), ChunkStatus.EMPTY));
+-            .map(pos -> Pair.of(pos, this.getOrLoad(pos.asLong())))
+-            .filter(poiSection -> !poiSection.getSecond().map(PoiSection::isValid).orElse(false))
+-            .map(p -> p.getFirst().chunk())
+-            .filter(pos -> this.loadedChunks.add(pos.pack()))
+-            .forEach(pos -> reader.getChunk(pos.x(), pos.z(), ChunkStatus.EMPTY));
++                .map(pos -> Pair.of(pos, this.getOrLoad(pos.asLong())))
++                .filter(poiSection -> !poiSection.getSecond().map(PoiSection::isValid).orElse(false))
++                .map(p -> p.getFirst().chunk())
++                .filter(this::isVisibleToCurrentRegion)
++                .filter(pos -> !(reader instanceof Level level) || RegionizedWorldGuard.shouldLoadChunk(level, pos.x(), pos.z()))
++                .filter(pos -> this.loadedChunks.add(pos.pack()))
++                .toList();
++        }
++
++        for (ChunkPos pos : chunksToLoad) {
++            reader.getChunk(pos.x(), pos.z(), ChunkStatus.EMPTY);
++        }
      }
+ 
+     private final class DistanceTracker extends SectionTracker {

@@ -1,0 +1,19 @@
+--- a/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
++++ b/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
+@@ -28,6 +_,7 @@
+ import net.minecraft.world.level.levelgen.structure.StructureSet;
+ import net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement;
+ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
++import net.neoforged.neoforge.server.region.RegionizedChunkExecutors;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -141,7 +_,7 @@
+                                 return new ChunkPos(initialX, initialZ);
+                             }
+                         },
+-                        Util.backgroundExecutor().forName("structureRings")
++                        RegionizedChunkExecutors.chunkParseExecutor()
+                     )
+                 );
+                 angle += (Math.PI * 2) / spread;

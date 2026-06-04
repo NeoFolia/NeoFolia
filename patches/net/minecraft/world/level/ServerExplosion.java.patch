@@ -201,7 +201,7 @@
          if (this.interactsWithBlocks()) {
              ProfilerFiller profiler = Profiler.get();
              profiler.push("explosion_blocks");
-@@ -248,6 +_,110 @@
+@@ -248,6 +_,114 @@
          return toBlow.size();
      }
  
@@ -279,7 +279,11 @@
 +
 +        for (int regionX = minRegionX; regionX <= maxRegionX; regionX++) {
 +            for (int regionZ = minRegionZ; regionZ <= maxRegionZ; regionZ++) {
-+                regions.add(new RegionKey(this.level.dimension(), regionX, regionZ));
++                regions.add(RegionizedWorldGuard.regionFor(
++                    this.level,
++                    regionX << RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT,
++                    regionZ << RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT
++                ));
 +            }
 +        }
 +

@@ -386,7 +386,7 @@
          } else {
              boolean freeBottom = block.isPossibleToRespawnInThis(blockState);
              BlockState topState = level.getBlockState(pos.above());
-@@ -1086,21 +_,31 @@
+@@ -1086,21 +_,46 @@
      }
  
      public void showEndCredits() {
@@ -405,9 +405,24 @@
      }
  
      public @Nullable ServerPlayer teleport(TeleportTransition transition) {
-+        RegionCallResult<ServerPlayer> regionResult = this.callOnPlayerRegionAndWaitIfNeeded("player teleport", () -> this.teleport(transition));
-+        if (regionResult != null) {
-+            return regionResult.result();
++        boolean crossDimension = transition.newLevel().dimension() != this.level().dimension();
++        if (crossDimension && this.server.regionizedTaskDispatcher().isRunning()) {
++            if (RegionizedTickContext.isRegionThread()) {
++                if (this.server.regionizedTaskDispatcher().tryExecuteGlobal(() -> {
++                    if (!this.isRemoved()) {
++                        this.teleport(transition);
++                    }
++                })) {
++                    return null;
++                }
++
++                throw new IllegalStateException("Cannot execute player cross-dimension teleport from region worker while region dispatcher is not running");
++            }
++        } else {
++            RegionCallResult<ServerPlayer> regionResult = this.callOnPlayerRegionAndWaitIfNeeded("player teleport", () -> this.teleport(transition));
++            if (regionResult != null) {
++                return regionResult.result();
++            }
 +        }
 +
 +        if (!net.neoforged.neoforge.common.CommonHooks.onTravelToDimension(this, transition.newLevel().dimension())) return null;
@@ -877,6 +892,17 @@
              if (mode == GameType.SPECTATOR) {
                  this.removeEntitiesOnShoulder();
                  this.stopRiding();
+@@ -1784,6 +_,10 @@
+         );
+     }
+ 
++    public void queuePacketTask(Runnable task) {
++        RegionizedWorldGuard.executeOnPlayerRegion(this, task);
++    }
++
+     @Override
+     public void sendSystemMessage(Component message) {
+         this.sendSystemMessage(message, false);
 @@ -1803,6 +_,12 @@
      }
  

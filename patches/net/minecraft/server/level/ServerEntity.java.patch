@@ -35,7 +35,7 @@
  
      public ServerEntity(ServerLevel level, Entity entity, int updateInterval, boolean trackDelta, ServerEntity.Synchronizer synchronizer) {
          this.level = level;
-@@ -76,37 +_,50 @@
+@@ -76,37 +_,46 @@
          this.entity = entity;
          this.updateInterval = updateInterval;
          this.trackDelta = trackDelta;
@@ -82,11 +82,8 @@
 -                MapItemSavedData data = MapItem.getSavedData(id, this.level);
 +                MapItemSavedData data = MapItem.getSavedData(itemStack, this.level);
                  if (data != null) {
-                     for (ServerPlayer player : this.level.players()) {
-+                        if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.level, player) == null) {
-+                            continue;
-+                        }
-+
+-                    for (ServerPlayer player : this.level.players()) {
++                    for (ServerPlayer player : this.level.getLocalPlayers()) {
                          data.tickCarriedBy(player, itemStack, frame);
                          Packet<?> packet = data.getUpdatePacket(id, player);
                          if (packet != null) {

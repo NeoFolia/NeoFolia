@@ -275,7 +275,7 @@
          return this.activeActivities.contains(activity);
      }
  
-@@ -393,12 +_,12 @@
+@@ -393,19 +_,24 @@
      }
  
      private void tickSensors(ServerLevel level, E body) {
@@ -290,6 +290,19 @@
          this.memories.values().forEach(MemorySlot::tick);
      }
  
+     public void stopAll(ServerLevel level, E body) {
++        List<BehaviorControl<? super E>> behaviors = this.getRunningBehaviors();
++        if (behaviors.isEmpty()) {
++            return;
++        }
++
+         long timestamp = body.level().getGameTime();
+ 
+-        for (BehaviorControl<? super E> behavior : this.getRunningBehaviors()) {
++        for (BehaviorControl<? super E> behavior : behaviors) {
+             behavior.doStop(level, body, timestamp);
+         }
+     }
 @@ -413,16 +_,9 @@
      private void startEachNonRunningBehavior(ServerLevel level, E body) {
          long time = level.getGameTime();

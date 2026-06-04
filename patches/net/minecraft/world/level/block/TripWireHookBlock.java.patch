@@ -1,13 +1,25 @@
 --- a/net/minecraft/world/level/block/TripWireHookBlock.java
 +++ b/net/minecraft/world/level/block/TripWireHookBlock.java
-@@ -29,6 +_,7 @@
+@@ -29,6 +_,8 @@
  import net.minecraft.world.phys.shapes.CollisionContext;
  import net.minecraft.world.phys.shapes.Shapes;
  import net.minecraft.world.phys.shapes.VoxelShape;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  import org.jspecify.annotations.Nullable;
  
  public class TripWireHookBlock extends Block {
+@@ -121,6 +_,10 @@
+ 
+             for (int i = 1; i < 42; i++) {
+                 BlockPos testPos = pos.relative(direction, i);
++                if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, testPos)) {
++                    return;
++                }
++
+                 BlockState wireState = level.getBlockState(testPos);
+                 if (wireState.is(Blocks.TRIPWIRE_HOOK)) {
+                     if (wireState.getValue(FACING) == direction.getOpposite()) {
 @@ -203,9 +_,13 @@
              level.playSound(null, pos, SoundEvents.TRIPWIRE_ATTACH, SoundSource.BLOCKS, 0.4F, 0.7F);
              level.gameEvent(null, GameEvent.BLOCK_ATTACH, pos);

@@ -121,7 +121,7 @@
          return this.groupsSpawned;
      }
  
-@@ -214,9 +_,12 @@
+@@ -214,9 +_,10 @@
          };
      }
  
@@ -130,9 +130,7 @@
          Set<ServerPlayer> currentPlayersInRaid = Sets.newHashSet(this.raidEvent.getPlayers());
 -        List<ServerPlayer> newPlayersInRaid = level.getPlayers(this.validPlayer());
 +        Predicate<ServerPlayer> validPlayer = this.validPlayer();
-+        List<ServerPlayer> newPlayersInRaid = level.getPlayers(
-+            player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null && validPlayer.test(player)
-+        );
++        List<ServerPlayer> newPlayersInRaid = level.getPlayers(validPlayer);
  
          for (ServerPlayer player : newPlayersInRaid) {
              if (!currentPlayersInRaid.contains(player)) {

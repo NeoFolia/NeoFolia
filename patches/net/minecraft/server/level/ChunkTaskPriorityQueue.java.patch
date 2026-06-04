@@ -1,6 +1,29 @@
 --- a/net/minecraft/server/level/ChunkTaskPriorityQueue.java
 +++ b/net/minecraft/server/level/ChunkTaskPriorityQueue.java
-@@ -19,7 +_,7 @@
+@@ -1,8 +_,12 @@
+ package net.minecraft.server.level;
+ 
+ import com.google.common.collect.Lists;
++import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
++import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
++import it.unimi.dsi.fastutil.longs.LongIterator;
+ import java.util.List;
++import java.util.function.LongPredicate;
+ import java.util.stream.IntStream;
+ import net.minecraft.world.level.ChunkPos;
+ import org.jspecify.annotations.Nullable;
+@@ -12,6 +_,9 @@
+     private final List<Long2ObjectLinkedOpenHashMap<List<Runnable>>> queuesPerPriority = IntStream.range(0, PRIORITY_LEVEL_COUNT)
+         .mapToObj(priority -> new Long2ObjectLinkedOpenHashMap<List<Runnable>>())
+         .toList();
++    private final List<Long2LongOpenHashMap> queuedSincePerPriority = IntStream.range(0, PRIORITY_LEVEL_COUNT)
++        .mapToObj(priority -> new Long2LongOpenHashMap())
++        .toList();
+     private volatile int topPriorityQueueIndex = PRIORITY_LEVEL_COUNT;
+     private final String name;
+ 
+@@ -19,10 +_,12 @@
          this.name = name;
      }
  
@@ -8,32 +31,109 @@
 +    protected synchronized void resortChunkTasks(int oldPriority, ChunkPos pos, int newPriority) {
          if (oldPriority < PRIORITY_LEVEL_COUNT) {
              Long2ObjectLinkedOpenHashMap<List<Runnable>> oldQueue = this.queuesPerPriority.get(oldPriority);
++            Long2LongOpenHashMap oldQueuedSince = this.queuedSincePerPriority.get(oldPriority);
              List<Runnable> oldTasks = oldQueue.remove(pos.pack());
-@@ -36,12 +_,12 @@
++            long queuedSince = oldQueuedSince.remove(pos.pack());
+             if (oldPriority == this.topPriorityQueueIndex) {
+                 while (this.hasWork() && this.queuesPerPriority.get(this.topPriorityQueueIndex).isEmpty()) {
+                     this.topPriorityQueueIndex++;
+@@ -30,19 +_,43 @@
+             }
+ 
+             if (oldTasks != null && !oldTasks.isEmpty()) {
+-                this.queuesPerPriority.get(newPriority).computeIfAbsent(pos.pack(), k -> Lists.newArrayList()).addAll(oldTasks);
++                long packedPos = pos.pack();
++                Long2ObjectLinkedOpenHashMap<List<Runnable>> newQueue = this.queuesPerPriority.get(newPriority);
++                List<Runnable> newTasks = newQueue.get(packedPos);
++                if (newTasks == null) {
++                    newTasks = Lists.newArrayList();
++                    newQueue.put(packedPos, newTasks);
++                    this.queuedSincePerPriority.get(newPriority).put(packedPos, queuedSince == 0L ? System.nanoTime() : queuedSince);
++                } else if (queuedSince != 0L) {
++                    Long2LongOpenHashMap newQueuedSince = this.queuedSincePerPriority.get(newPriority);
++                    long existingQueuedSince = newQueuedSince.get(packedPos);
++                    if (existingQueuedSince == 0L || queuedSince < existingQueuedSince) {
++                        newQueuedSince.put(packedPos, queuedSince);
++                    }
++                }
++
++                newTasks.addAll(oldTasks);
+                 this.topPriorityQueueIndex = Math.min(this.topPriorityQueueIndex, newPriority);
+             }
          }
      }
  
 -    protected void submit(Runnable task, long chunkPos, int level) {
+-        this.queuesPerPriority.get(level).computeIfAbsent(chunkPos, p -> Lists.newArrayList()).add(task);
 +    protected synchronized void submit(Runnable task, long chunkPos, int level) {
-         this.queuesPerPriority.get(level).computeIfAbsent(chunkPos, p -> Lists.newArrayList()).add(task);
++        Long2ObjectLinkedOpenHashMap<List<Runnable>> queue = this.queuesPerPriority.get(level);
++        List<Runnable> tasks = queue.get(chunkPos);
++        if (tasks == null) {
++            tasks = Lists.newArrayList();
++            queue.put(chunkPos, tasks);
++            this.queuedSincePerPriority.get(level).put(chunkPos, System.nanoTime());
++        }
++
++        tasks.add(task);
          this.topPriorityQueueIndex = Math.min(this.topPriorityQueueIndex, level);
      }
  
 -    protected void release(long pos, boolean unschedule) {
+-        for (Long2ObjectLinkedOpenHashMap<List<Runnable>> queue : this.queuesPerPriority) {
 +    protected synchronized void release(long pos, boolean unschedule) {
-         for (Long2ObjectLinkedOpenHashMap<List<Runnable>> queue : this.queuesPerPriority) {
++        for (int priority = 0; priority < PRIORITY_LEVEL_COUNT; priority++) {
++            Long2ObjectLinkedOpenHashMap<List<Runnable>> queue = this.queuesPerPriority.get(priority);
              List<Runnable> tasks = queue.get(pos);
              if (tasks != null) {
-@@ -60,7 +_,7 @@
+                 if (unschedule) {
+@@ -51,6 +_,7 @@
+ 
+                 if (tasks.isEmpty()) {
+                     queue.remove(pos);
++                    this.queuedSincePerPriority.get(priority).remove(pos);
+                 }
+             }
+         }
+@@ -60,32 +_,92 @@
          }
      }
  
 -    public ChunkTaskPriorityQueue.@Nullable TasksForChunk pop() {
 +    public synchronized ChunkTaskPriorityQueue.@Nullable TasksForChunk pop() {
++        return this.pop(unused -> true);
++    }
++
++    public synchronized ChunkTaskPriorityQueue.@Nullable TasksForChunk pop(LongPredicate canRun) {
++        this.refreshTopPriorityQueueIndex();
          if (!this.hasWork()) {
              return null;
          } else {
-@@ -77,15 +_,18 @@
+-            int index = this.topPriorityQueueIndex;
+-            Long2ObjectLinkedOpenHashMap<List<Runnable>> queue = this.queuesPerPriority.get(index);
+-            long chunkPos = queue.firstLongKey();
+-            List<Runnable> tasks = queue.removeFirst();
++            for (int index = this.topPriorityQueueIndex; index < PRIORITY_LEVEL_COUNT; index++) {
++                Long2ObjectLinkedOpenHashMap<List<Runnable>> queue = this.queuesPerPriority.get(index);
++                var iterator = queue.long2ObjectEntrySet().fastIterator();
++                while (iterator.hasNext()) {
++                    Long2ObjectMap.Entry<List<Runnable>> entry = iterator.next();
++                    long chunkPos = entry.getLongKey();
++                    if (!canRun.test(chunkPos)) {
++                        continue;
++                    }
+ 
+-            while (this.hasWork() && this.queuesPerPriority.get(this.topPriorityQueueIndex).isEmpty()) {
+-                this.topPriorityQueueIndex++;
++                    List<Runnable> tasks = entry.getValue();
++                    iterator.remove();
++                    this.queuedSincePerPriority.get(index).remove(chunkPos);
++                    this.refreshTopPriorityQueueIndex();
++                    return new ChunkTaskPriorityQueue.TasksForChunk(chunkPos, tasks);
++                }
+             }
+ 
+-            return new ChunkTaskPriorityQueue.TasksForChunk(chunkPos, tasks);
++            return null;
          }
      }
  
@@ -42,6 +142,43 @@
          return this.topPriorityQueueIndex < PRIORITY_LEVEL_COUNT;
      }
  
++    public synchronized int queuedChunkCount() {
++        int count = 0;
++        for (Long2ObjectLinkedOpenHashMap<List<Runnable>> queue : this.queuesPerPriority) {
++            count += queue.size();
++        }
++        return count;
++    }
++
++    public synchronized int queuedTaskCount() {
++        int count = 0;
++        for (Long2ObjectLinkedOpenHashMap<List<Runnable>> queue : this.queuesPerPriority) {
++            for (List<Runnable> tasks : queue.values()) {
++                count += tasks.size();
++            }
++        }
++        return count;
++    }
++
++    public synchronized int topPriorityQueueIndex() {
++        return this.topPriorityQueueIndex;
++    }
++
++    public synchronized long oldestQueuedTaskAgeNanos() {
++        long oldestQueuedSince = Long.MAX_VALUE;
++        for (Long2LongOpenHashMap queuedSinceByChunk : this.queuedSincePerPriority) {
++            LongIterator iterator = queuedSinceByChunk.values().iterator();
++            while (iterator.hasNext()) {
++                long queuedSince = iterator.nextLong();
++                if (queuedSince != 0L && queuedSince < oldestQueuedSince) {
++                    oldestQueuedSince = queuedSince;
++                }
++            }
++        }
++
++        return oldestQueuedSince == Long.MAX_VALUE ? 0L : Math.max(0L, System.nanoTime() - oldestQueuedSince);
++    }
++
      @Override
 -    public String toString() {
 +    public synchronized String toString() {
@@ -51,6 +188,12 @@
      public record TasksForChunk(long chunkPos, List<Runnable> tasks) {
 +        public TasksForChunk {
 +            tasks = List.copyOf(tasks);
++        }
++    }
++
++    private void refreshTopPriorityQueueIndex() {
++        while (this.hasWork() && this.queuesPerPriority.get(this.topPriorityQueueIndex).isEmpty()) {
++            this.topPriorityQueueIndex++;
 +        }
      }
  }

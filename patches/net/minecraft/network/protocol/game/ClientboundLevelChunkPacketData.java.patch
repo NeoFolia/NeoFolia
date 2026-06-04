@@ -1,0 +1,44 @@
+--- a/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
++++ b/net/minecraft/network/protocol/game/ClientboundLevelChunkPacketData.java
+@@ -38,8 +_,19 @@
+             .stream()
+             .filter(entryx -> ((Heightmap.Types)entryx.getKey()).sendToClient())
+             .collect(Collectors.toMap(Entry::getKey, entryx -> (long[])((Heightmap)entryx.getValue()).getRawData().clone()));
+-        this.buffer = new byte[calculateChunkSize(levelChunk)];
+-        extractChunkData(new FriendlyByteBuf(this.getWriteBuffer()), levelChunk);
++        ByteBuf writeBuffer = Unpooled.buffer(calculateChunkSize(levelChunk));
++        try {
++            extractChunkData(new FriendlyByteBuf(writeBuffer), levelChunk);
++            int chunkDataSize = writeBuffer.writerIndex();
++            if (chunkDataSize > TWO_MEGABYTES) {
++                throw new RuntimeException("Chunk Packet trying to allocate too much memory on write.");
++            }
++
++            this.buffer = new byte[chunkDataSize];
++            writeBuffer.getBytes(0, this.buffer);
++        } finally {
++            writeBuffer.release();
++        }
+         this.blockEntitiesData = Lists.newArrayList();
+ 
+         for (Entry<BlockPos, BlockEntity> entry : levelChunk.getBlockEntities().entrySet()) {
+@@ -76,19 +_,9 @@
+         return total;
+     }
+ 
+-    private ByteBuf getWriteBuffer() {
+-        ByteBuf buffer = Unpooled.wrappedBuffer(this.buffer);
+-        buffer.writerIndex(0);
+-        return buffer;
+-    }
+-
+     public static void extractChunkData(FriendlyByteBuf buffer, LevelChunk chunk) {
+         for (LevelChunkSection section : chunk.getSections()) {
+             section.write(buffer);
+-        }
+-
+-        if (buffer.writerIndex() != buffer.capacity()) {
+-            throw new IllegalStateException("Didn't fill chunk buffer: expected " + buffer.capacity() + " bytes, got " + buffer.writerIndex());
+         }
+     }
+ 

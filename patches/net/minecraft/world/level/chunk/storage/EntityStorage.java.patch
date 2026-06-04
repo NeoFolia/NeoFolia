@@ -1,5 +1,22 @@
 --- a/net/minecraft/world/level/chunk/storage/EntityStorage.java
 +++ b/net/minecraft/world/level/chunk/storage/EntityStorage.java
+@@ -25,6 +_,7 @@
+ import net.minecraft.world.level.storage.TagValueInput;
+ import net.minecraft.world.level.storage.TagValueOutput;
+ import net.minecraft.world.level.storage.ValueInput;
++import net.neoforged.neoforge.server.region.RegionizedChunkExecutors;
+ import org.slf4j.Logger;
+ 
+ public class EntityStorage implements EntityPersistentStorage<Entity> {
+@@ -39,7 +_,7 @@
+     public EntityStorage(SimpleRegionStorage simpleRegionStorage, ServerLevel level, Executor mainThreadExecutor) {
+         this.simpleRegionStorage = simpleRegionStorage;
+         this.level = level;
+-        this.entityDeserializerQueue = new ConsecutiveExecutor(mainThreadExecutor, "entity-deserializer");
++        this.entityDeserializerQueue = new ConsecutiveExecutor(RegionizedChunkExecutors.chunkParseExecutor(), "entity-deserializer");
+     }
+ 
+     @Override
 @@ -97,9 +_,13 @@
                  ListTag entities = new ListTag();
                  chunk.getEntities().forEach(e -> {

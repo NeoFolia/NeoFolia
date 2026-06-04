@@ -1,5 +1,13 @@
 --- a/net/minecraft/world/entity/ai/behavior/SleepInBed.java
 +++ b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.world.entity.ai.behavior;
+ 
+ import com.google.common.collect.ImmutableMap;
++import java.util.HashSet;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.Set;
 @@ -15,6 +_,7 @@
  import net.minecraft.world.entity.schedule.Activity;
  import net.minecraft.world.level.block.BedBlock;
@@ -69,7 +77,7 @@
              Brain<?> brain = body.getBrain();
 -            if (brain.hasMemoryValue(MemoryModuleType.DOORS_TO_CLOSE)) {
 -                Set<GlobalPos> doors = brain.getMemory(MemoryModuleType.DOORS_TO_CLOSE).get();
-+            Optional<Set<GlobalPos>> doorsMemory = brain.getMemory(MemoryModuleType.DOORS_TO_CLOSE).map(Set::copyOf);
++            Optional<Set<GlobalPos>> doorsMemory = brain.getMemory(MemoryModuleType.DOORS_TO_CLOSE).map(HashSet::new);
 +            if (doorsMemory.isPresent()) {
 +                Set<GlobalPos> doors = doorsMemory.orElseThrow();
                  Optional<List<LivingEntity>> nearestEntities;

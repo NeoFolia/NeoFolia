@@ -1,6 +1,16 @@
 --- a/net/minecraft/server/network/EventLoopGroupHolder.java
 +++ b/net/minecraft/server/network/EventLoopGroupHolder.java
-@@ -52,6 +_,7 @@
+@@ -20,7 +_,9 @@
+ import io.netty.channel.nio.NioIoHandler;
+ import io.netty.channel.socket.nio.NioServerSocketChannel;
+ import io.netty.channel.socket.nio.NioSocketChannel;
++import java.util.Locale;
+ import java.util.concurrent.ThreadFactory;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
+ import org.jspecify.annotations.Nullable;
+ 
+ public abstract class EventLoopGroupHolder {
+@@ -52,14 +_,15 @@
      private final Class<? extends Channel> channelCls;
      private final Class<? extends ServerChannel> serverChannelCls;
      private volatile @Nullable EventLoopGroup group;
@@ -8,10 +18,42 @@
  
      public static EventLoopGroupHolder remote(boolean allowNativeTransport) {
          if (allowNativeTransport) {
-@@ -85,6 +_,23 @@
+-            if (KQueue.isAvailable()) {
++            if (isMacOrBsd() && KQueue.isAvailable()) {
+                 return KQUEUE;
+             }
+ 
+-            if (Epoll.isAvailable()) {
++            if (isLinux() && Epoll.isAvailable()) {
+                 return EPOLL;
+             }
+         }
+@@ -67,6 +_,19 @@
+         return NIO;
+     }
+ 
++    private static boolean isLinux() {
++        return osName().contains("linux");
++    }
++
++    private static boolean isMacOrBsd() {
++        String osName = osName();
++        return osName.contains("mac") || osName.contains("darwin") || osName.contains("bsd");
++    }
++
++    private static String osName() {
++        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
++    }
++
+     public static EventLoopGroupHolder local() {
+         return LOCAL;
+     }
+@@ -84,7 +_,24 @@
+     protected abstract IoHandlerFactory ioHandlerFactory();
  
      private EventLoopGroup createEventLoopGroup() {
-         return new MultiThreadIoEventLoopGroup(this.createThreadFactory(), this.ioHandlerFactory());
+-        return new MultiThreadIoEventLoopGroup(this.createThreadFactory(), this.ioHandlerFactory());
++        return new MultiThreadIoEventLoopGroup(RegionizedServerSettings.nettyIoThreadCount(), this.createThreadFactory(), this.ioHandlerFactory());
 +    }
 +
 +    // Neo: Use a separate event group for the server-side which allows us to identify server threads
@@ -22,7 +64,7 @@
 +                eventloopgroup = this.serverGroup;
 +                if (eventloopgroup == null) {
 +                    var threadFactory = new ThreadFactoryBuilder().setNameFormat("Netty " + this.type + " IO #%d").setThreadFactory(net.neoforged.fml.util.thread.SidedThreadGroups.SERVER).setDaemon(true).build();
-+                    eventloopgroup = new MultiThreadIoEventLoopGroup(threadFactory, this.ioHandlerFactory());
++                    eventloopgroup = new MultiThreadIoEventLoopGroup(RegionizedServerSettings.nettyIoThreadCount(), threadFactory, this.ioHandlerFactory());
 +                    this.serverGroup = eventloopgroup;
 +                }
 +            }

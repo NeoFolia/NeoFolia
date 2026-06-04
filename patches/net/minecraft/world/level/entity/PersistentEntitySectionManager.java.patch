@@ -301,7 +301,7 @@
          private long currentSectionKey;
          private EntitySection<T> currentSection;
  
-@@ -377,13 +_,25 @@
+@@ -377,27 +_,43 @@
              Objects.requireNonNull(PersistentEntitySectionManager.this);
              super();
              this.entity = entity;
@@ -311,13 +311,18 @@
          }
  
          @Override
--        public void onMove() {
-+        public synchronized void onMove() {
+         public void onMove() {
 +            if (this.realEntity != null && this.realEntity.isRemoved()) {
 +                return;
 +            }
 +
              BlockPos pos = this.entity.blockPosition();
+-            long newSectionPos = SectionPos.asLong(pos);
+-            if (newSectionPos != this.currentSectionKey) {
+-                Visibility previousStatus = this.currentSection.getStatus();
+-                if (!this.currentSection.remove(this.entity)) {
+-                    PersistentEntitySectionManager.LOGGER
+-                        .warn("Entity {} wasn't found in section {} (moving to {})", this.entity, SectionPos.of(this.currentSectionKey), newSectionPos);
 +            if (this.realEntity != null
 +                && RegionizedWorldGuard.scheduleAtRegionIfRegionizedOutsideRegion(
 +                    this.realEntity.level(), pos, "Cross-region entity section move", () -> this.onMove()
@@ -325,18 +330,31 @@
 +                return;
 +            }
 +
-             long newSectionPos = SectionPos.asLong(pos);
-             if (newSectionPos != this.currentSectionKey) {
-                 Visibility previousStatus = this.currentSection.getStatus();
-@@ -395,9 +_,11 @@
-                 PersistentEntitySectionManager.this.removeSectionIfEmpty(this.currentSectionKey, this.currentSection);
-                 EntitySection<T> newSection = PersistentEntitySectionManager.this.sectionStorage.getOrCreateSection(newSectionPos);
-                 newSection.add(this.entity);
-+                long oldSectionKey = currentSectionKey;
-                 this.currentSection = newSection;
-                 this.currentSectionKey = newSectionPos;
-                 this.updateStatus(previousStatus, newSection.getStatus());
-+                if (this.realEntity != null) net.neoforged.neoforge.common.CommonHooks.onEntityEnterSection(this.realEntity, oldSectionKey, newSectionPos);
++            synchronized (this) {
++                long newSectionPos = SectionPos.asLong(pos);
++                if (newSectionPos != this.currentSectionKey) {
++                    Visibility previousStatus = this.currentSection.getStatus();
++                    if (!this.currentSection.remove(this.entity)) {
++                        PersistentEntitySectionManager.LOGGER
++                            .warn("Entity {} wasn't found in section {} (moving to {})", this.entity, SectionPos.of(this.currentSectionKey), newSectionPos);
++                    }
++
++                    PersistentEntitySectionManager.this.removeSectionIfEmpty(this.currentSectionKey, this.currentSection);
++                    EntitySection<T> newSection = PersistentEntitySectionManager.this.sectionStorage.getOrCreateSection(newSectionPos);
++                    newSection.add(this.entity);
++                    long oldSectionKey = currentSectionKey;
++                    this.currentSection = newSection;
++                    this.currentSectionKey = newSectionPos;
++                    this.updateStatus(previousStatus, newSection.getStatus());
++                    if (this.realEntity != null) net.neoforged.neoforge.common.CommonHooks.onEntityEnterSection(this.realEntity, oldSectionKey, newSectionPos);
+                 }
+-
+-                PersistentEntitySectionManager.this.removeSectionIfEmpty(this.currentSectionKey, this.currentSection);
+-                EntitySection<T> newSection = PersistentEntitySectionManager.this.sectionStorage.getOrCreateSection(newSectionPos);
+-                newSection.add(this.entity);
+-                this.currentSection = newSection;
+-                this.currentSectionKey = newSectionPos;
+-                this.updateStatus(previousStatus, newSection.getStatus());
              }
          }
  

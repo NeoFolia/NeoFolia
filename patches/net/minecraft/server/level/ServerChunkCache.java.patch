@@ -22,7 +22,7 @@
  import org.jspecify.annotations.Nullable;
  import org.slf4j.Logger;
  
-@@ -65,15 +_,17 @@
+@@ -65,15 +_,18 @@
      private final SavedDataStorage savedDataStorage;
      private final TicketStorage ticketStorage;
      private long lastInhabitedUpdate;
@@ -34,6 +34,7 @@
      private final @Nullable ChunkAccess[] lastChunk = new ChunkAccess[4];
      private final List<LevelChunk> spawningChunks = new ObjectArrayList<>();
      private final Set<ChunkHolder> chunkHoldersToBroadcast = new ReferenceOpenHashSet<>();
++    private final Map<RegionKey, Set<ChunkHolder>> regionizedChunkHoldersToBroadcast = new LinkedHashMap<>();
 +    private final RollingRateCounter chunkLoadRate = new RollingRateCounter();
 +    private final RollingRateCounter chunkGenerationRate = new RollingRateCounter();
      @VisibleForDebug
@@ -130,20 +131,50 @@
          boolean isMainThread = Thread.currentThread() == this.mainThread;
          CompletableFuture<ChunkResult<ChunkAccess>> serverFuture;
          if (isMainThread) {
-@@ -354,15 +_,28 @@
+@@ -354,23 +_,79 @@
      private void broadcastChangedChunks(ProfilerFiller profiler) {
          profiler.push("broadcast");
  
 -        for (ChunkHolder chunkHolder : this.chunkHoldersToBroadcast) {
-+        for (ChunkHolder chunkHolder : this.drainChunkHoldersToBroadcast()) {
++        if (RegionizedServerSettings.regionizedChunkTicksEnabled() && this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
++            for (RegionKey region : this.pendingChunkBroadcastRegions()) {
++                tasksByRegion.put(region, () -> this.broadcastChangedChunksForRegion(region));
++            }
++            this.level.getServer().regionizedTaskDispatcher().executeCoalescedAll("chunk-broadcasts", tasksByRegion);
++        } else {
++            this.broadcastChangedChunkHolders(this.drainChunkHoldersToBroadcast());
++        }
++
++        profiler.pop();
++    }
++
++    private void broadcastChangedChunksForRegion(RegionKey region) {
++        RegionKey currentRegion = RegionizedTickContext.currentRegion().orElse(null);
++        RegionKey ownerRegion = RegionizedWorldGuard.ownerForFixedRegion(region);
++        if (currentRegion != null && !currentRegion.equals(region) && !currentRegion.equals(ownerRegion)) {
++            throw new IllegalStateException("Chunk broadcast for " + region + " running on " + currentRegion);
++        }
++
++        this.broadcastChangedChunkHolders(this.drainChunkHoldersToBroadcast(region));
++    }
++
++    private void broadcastChangedChunkHolders(List<ChunkHolder> holders) {
++        for (ChunkHolder chunkHolder : holders) {
              LevelChunk chunk = chunkHolder.getTickingChunk();
              if (chunk != null) {
                  chunkHolder.broadcastChanges(chunk);
              }
          }
- 
+-
 -        this.chunkHoldersToBroadcast.clear();
-         profiler.pop();
+-        profiler.pop();
++    }
++
++    private List<RegionKey> pendingChunkBroadcastRegions() {
++        synchronized (this.chunkHoldersToBroadcast) {
++            return List.copyOf(this.regionizedChunkHoldersToBroadcast.keySet());
++        }
 +    }
 +
 +    private List<ChunkHolder> drainChunkHoldersToBroadcast() {
@@ -154,13 +185,40 @@
 +        }
 +    }
 +
++    private List<ChunkHolder> drainChunkHoldersToBroadcast(RegionKey region) {
++        synchronized (this.chunkHoldersToBroadcast) {
++            Set<ChunkHolder> holders = this.regionizedChunkHoldersToBroadcast.remove(region);
++            return holders == null ? List.of() : List.copyOf(holders);
++        }
++    }
++
 +    private void addChunkHolderToBroadcast(ChunkHolder chunk) {
 +        synchronized (this.chunkHoldersToBroadcast) {
-+            this.chunkHoldersToBroadcast.add(chunk);
++            if (RegionizedServerSettings.regionizedChunkTicksEnabled() && this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++                RegionKey region = RegionizedWorldGuard.regionFor(this.level, chunk.getPos());
++                this.regionizedChunkHoldersToBroadcast.computeIfAbsent(region, unused -> new ReferenceOpenHashSet<>()).add(chunk);
++            } else {
++                this.chunkHoldersToBroadcast.add(chunk);
++            }
 +        }
      }
  
      private void tickChunks(ProfilerFiller profiler, long timeDiff) {
++        if (RegionizedServerSettings.regionizedChunkTicksEnabled() && this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            this.tickChunksRegionized(profiler, timeDiff);
++            return;
++        }
++
+         profiler.push("naturalSpawnCount");
+-        int chunkCount = this.distanceManager.getNaturalSpawnChunkCount();
+-        NaturalSpawner.SpawnState spawnCookie = NaturalSpawner.createState(
+-            chunkCount, this.level.getAllEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap)
+-        );
++        int chunkCount = this.chunkMap.getNaturalSpawnChunkCountForTick();
++        NaturalSpawner.SpawnState spawnCookie = NaturalSpawner.createState(chunkCount, this.level.getAllEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap));
+         this.lastSpawnState = spawnCookie;
+         boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS);
+         int tickSpeed = this.level.getGameRules().get(GameRules.RANDOM_TICK_SPEED);
 @@ -390,16 +_,13 @@
              profiler.popPush("shuffleSpawningChunks");
              Util.shuffle(spawningChunks, this.level.getRandom());
@@ -180,10 +238,72 @@
          if (doMobSpawning) {
              profiler.popPush("customSpawners");
              this.level.tickCustomSpawners(this.spawnEnemies);
-@@ -408,8 +_,56 @@
+@@ -408,8 +_,111 @@
          profiler.pop();
      }
  
++    private void tickChunksRegionized(ProfilerFiller profiler, long timeDiff) {
++        boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS);
++        int tickSpeed = this.level.getGameRules().get(GameRules.RANDOM_TICK_SPEED);
++        profiler.push("tickSpawningChunks");
++        this.tickSpawningChunksRegionized(timeDiff, doMobSpawning);
++        profiler.popPush("tickTickingChunks");
++        this.tickTickingChunks(tickSpeed);
++        if (doMobSpawning) {
++            profiler.popPush("customSpawners");
++            this.tickCustomSpawnersRegionized();
++        }
++
++        profiler.pop();
++    }
++
++    private void tickCustomSpawnersRegionized() {
++        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
++        for (RegionKey region : this.chunkMap.spawningOwnerRegions()) {
++            tasksByRegion.put(region, () -> {
++                if (!RegionizedWorldGuard.localPlayersForCurrentRegion(this.level).isEmpty()) {
++                    this.level.tickCustomSpawners(this.spawnEnemies);
++                }
++            });
++        }
++
++        this.level.getServer().regionizedTaskDispatcher().executeCoalescedAll("custom-spawners", tasksByRegion);
++    }
++
++    private void tickSpawningChunksRegionized(long timeDiff, boolean doMobSpawning) {
++        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
++        for (RegionKey region : this.chunkMap.spawningOwnerRegions()) {
++            tasksByRegion.put(region, () -> this.tickSpawningChunksForRegion(region, timeDiff, doMobSpawning));
++        }
++
++        this.level.getServer().regionizedTaskDispatcher().executeCoalescedAll("spawning-chunk-ticks", tasksByRegion);
++    }
++
++    private void tickSpawningChunksForRegion(RegionKey region, long timeDiff, boolean doMobSpawning) {
++        int chunkCount = this.chunkMap.getNaturalSpawnChunkCountForRegion(region);
++        NaturalSpawner.SpawnState spawnCookie = NaturalSpawner.createState(
++            chunkCount,
++            RegionizedWorldGuard.loadedEntitiesForCurrentRegion(this.level),
++            this::getFullChunk,
++            new LocalMobCapCalculator(this.chunkMap)
++        );
++        RegionizedWorldGuard.currentWorldData(this.level).lastSpawnState = spawnCookie;
++        List<MobCategory> spawningCategories;
++        if (doMobSpawning && !RegionizedWorldGuard.localPlayersForCurrentRegion(this.level).isEmpty()) {
++            boolean spawnPersistent = this.level.getGameTime() % 400L == 0L;
++            spawningCategories = NaturalSpawner.getFilteredSpawningCategories(spawnCookie, true, this.spawnEnemies, spawnPersistent);
++        } else {
++            spawningCategories = List.of();
++        }
++
++        List<LevelChunk> spawningChunks = new ObjectArrayList<>();
++        this.chunkMap.collectSpawningChunksForRegion(region, spawningChunks);
++        Util.shuffle(spawningChunks, RegionizedTickContext.currentRandom().orElse(this.level.getRandom()));
++        for (LevelChunk chunk : spawningChunks) {
++            this.tickSpawningChunk(chunk, timeDiff, spawningCategories, spawnCookie);
++        }
++    }
++
 +    private void tickSpawningChunks(
 +        List<LevelChunk> spawningChunks, long timeDiff, List<MobCategory> spawningCategories, NaturalSpawner.SpawnState spawnCookie
 +    ) {
@@ -214,17 +334,10 @@
 +            return;
 +        }
 +
-+        Map<RegionKey, List<LevelChunk>> chunksByRegion = new LinkedHashMap<>();
-+        this.chunkMap.forEachBlockTickingChunk(chunk -> chunksByRegion
-+            .computeIfAbsent(RegionizedWorldGuard.regionFor(this.level, chunk.getPos()), key -> new ObjectArrayList<>())
-+            .add(chunk));
-+
 +        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
-+        chunksByRegion.forEach((region, chunks) -> tasksByRegion.put(region, () -> {
-+            for (LevelChunk chunk : chunks) {
-+                this.level.tickChunkRegionized(chunk, tickSpeed);
-+            }
-+        }));
++        for (RegionKey region : this.chunkMap.blockTickingOwnerRegions()) {
++            tasksByRegion.put(region, () -> this.chunkMap.forEachBlockTickingChunkInRegion(region, chunk -> this.level.tickChunkRegionized(chunk, tickSpeed)));
++        }
 +        this.level.getServer().regionizedTaskDispatcher().executeCoalescedAll("chunk-ticks", tasksByRegion);
 +    }
 +
@@ -237,7 +350,7 @@
          chunk.incrementInhabitedTime(timeDiff);
          if (this.distanceManager.inEntityTickingRange(chunkPos.pack())) {
              this.level.tickThunder(chunk);
-@@ -456,12 +_,32 @@
+@@ -456,23 +_,66 @@
          return this.chunkMap.size();
      }
  
@@ -247,6 +360,14 @@
 +
 +    public Map<RegionKey, Integer> visibleChunkCountsByRegion() {
 +        return this.chunkMap.visibleChunkCountsByRegion();
++    }
++
++    public Map<RegionKey, Integer> fixedVisibleChunkCountsByRegion() {
++        return this.chunkMap.fixedVisibleChunkCountsByRegion();
++    }
++
++    public Map<RegionKey, Integer> fixedRegionizerChunkCountsByRegion() {
++        return this.chunkMap.fixedRegionizerChunkCountsByRegion();
 +    }
 +
 +    public void recordChunkGenerated() {
@@ -261,6 +382,14 @@
 +        return this.chunkGenerationRate.ratePerSecond();
 +    }
 +
++    public DistanceManager.PlayerTicketTaskStats playerTicketTaskStats() {
++        return this.distanceManager.playerTicketTaskStats();
++    }
++
++    public ChunkMap.ChunkTaskDispatcherStats chunkTaskDispatcherStats() {
++        return this.chunkMap.chunkTaskDispatcherStats();
++    }
++
      public void blockChanged(BlockPos pos) {
          int xc = SectionPos.blockToSectionCoord(pos.getX());
          int zc = SectionPos.blockToSectionCoord(pos.getZ());
@@ -271,16 +400,28 @@
          }
      }
  
-@@ -470,7 +_,7 @@
-         this.mainThreadProcessor.execute(() -> {
+     @Override
+     public void onLightUpdate(LightLayer layer, SectionPos pos) {
+-        this.mainThreadProcessor.execute(() -> {
++        Runnable updateLightSection = () -> {
              ChunkHolder chunk = this.getVisibleChunkIfPresent(pos.chunk().pack());
              if (chunk != null && chunk.sectionLightChanged(layer, pos.y())) {
 -                this.chunkHoldersToBroadcast.add(chunk);
 +                this.addChunkHolderToBroadcast(chunk);
              }
-         });
+-        });
++        };
++
++        if (RegionizedServerSettings.regionizedChunkTicksEnabled() && this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            this.chunkRegionExecutor(pos.chunk()).execute(updateLightSection);
++            return;
++        }
++
++        this.mainThreadProcessor.execute(updateLightSection);
      }
-@@ -480,10 +_,31 @@
+ 
+     public boolean hasActiveTickets() {
+@@ -480,10 +_,32 @@
      }
  
      public void addTicket(Ticket ticket, ChunkPos pos) {
@@ -295,6 +436,7 @@
 +        if (RegionizedTickContext.isRegionThread()) {
 +            CompletableFuture<Object> result = new CompletableFuture<>();
 +            if (!this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(
++                "player-spawn-chunk-load",
 +                () -> this.addTicketAndLoadWithRadius(type, pos, radius)
 +                    .whenComplete((value, throwable) -> {
 +                        if (throwable != null) {
@@ -312,7 +454,7 @@
          if (!type.doesLoad()) {
              throw new IllegalStateException("Ticket type " + type + " does not trigger chunk loading");
          } else if (type.canExpireIfUnloaded()) {
-@@ -498,24 +_,54 @@
+@@ -498,24 +_,57 @@
      }
  
      public void addTicketWithRadius(TicketType type, ChunkPos pos, int radius) {
@@ -345,7 +487,7 @@
 +            return false;
 +        }
 +
-+        if (this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(task)) {
++        if (this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal("chunk-ticket", task)) {
 +            return true;
 +        }
 +
@@ -359,11 +501,14 @@
  
      public void move(ServerPlayer player) {
 +        if (RegionizedTickContext.isRegionThread()) {
-+            if (this.level.getServer().regionizedTaskDispatcher().tryExecuteGlobal(() -> this.move(player))) {
-+                return;
-+            }
++            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> this.processPlayerChunkMove(player));
++            return;
 +        }
 +
++        this.processPlayerChunkMove(player);
++    }
++
++    private void processPlayerChunkMove(ServerPlayer player) {
          if (!player.isRemoved()) {
              this.chunkMap.move(player);
              if (player.isReceivingWaypoints()) {
@@ -394,6 +539,23 @@
 +        }
 +
          this.chunkMap.sendToTrackingPlayers(entity, packet);
+     }
+ 
+@@ -569,8 +_,16 @@
+         return this.chunkMap.chunkScanner();
+     }
+ 
++    public Executor chunkRegionExecutor(ChunkPos pos) {
++        return this.chunkMap.chunkRegionExecutor(pos);
++    }
++
+     @VisibleForDebug
+     public NaturalSpawner.@Nullable SpawnState getLastSpawnState() {
++        if (RegionizedTickContext.isRegionThread() && this.level.getServer().regionizedTaskDispatcher().isRunning()) {
++            return RegionizedWorldGuard.currentWorldData(this.level).lastSpawnState;
++        }
++
+         return this.lastSpawnState;
      }
  
 @@ -579,8 +_,9 @@

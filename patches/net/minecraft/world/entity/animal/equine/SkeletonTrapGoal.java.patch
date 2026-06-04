@@ -1,21 +1,37 @@
 --- a/net/minecraft/world/entity/animal/equine/SkeletonTrapGoal.java
 +++ b/net/minecraft/world/entity/animal/equine/SkeletonTrapGoal.java
-@@ -31,6 +_,10 @@
+@@ -14,6 +_,8 @@
+ import net.minecraft.world.item.enchantment.EnchantmentHelper;
+ import net.minecraft.world.item.enchantment.ItemEnchantments;
+ import net.minecraft.world.item.enchantment.providers.VanillaEnchantmentProviders;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class SkeletonTrapGoal extends Goal {
+@@ -31,6 +_,25 @@
      @Override
      public void tick() {
          ServerLevel level = (ServerLevel)this.horse.level();
 +        // Forge: Trigger the trap in a tick task to avoid crashes when mods add goals to skeleton horses
 +        // (MC-206338/Forge PR #7509)
-+        level.getServer().schedule(new net.minecraft.server.TickTask(level.getServer().getTickCount(), () -> {
++        Runnable triggerTrap = () -> this.triggerTrap(level);
++        if (level.getServer().regionizedTaskDispatcher().isRunning()) {
++            RegionKey region = RegionizedWorldGuard.regionFor(level, this.horse.blockPosition());
++            if (level.getServer().regionizedTaskDispatcher().tryExecuteNextTick(region, "skeleton-trap", triggerTrap)) {
++                return;
++            }
++        }
++
++        level.getServer().schedule(new net.minecraft.server.TickTask(level.getServer().getTickCount(), triggerTrap));
++    }
++
++    private void triggerTrap(ServerLevel level) {
++        if (RegionizedWorldGuard.scheduleEntityIfRegionizedOutsideRegion(level, this.horse, "Skeleton trap", () -> this.triggerTrap(level))) {
++            return;
++        }
++
 +        if (!this.horse.isAlive()) return;
          DifficultyInstance difficulty = level.getCurrentDifficultyAt(this.horse.blockPosition());
          this.horse.setTrap(false);
          this.horse.setTamed(true);
-@@ -58,6 +_,7 @@
-                 }
-             }
-         }
-+        }));
-     }
- 
-     private @Nullable AbstractHorse createHorse(DifficultyInstance difficulty) {

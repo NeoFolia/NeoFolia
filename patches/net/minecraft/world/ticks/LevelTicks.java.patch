@@ -1,6 +1,13 @@
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
-@@ -16,7 +_,9 @@
+@@ -10,13 +_,16 @@
+ import it.unimi.dsi.fastutil.objects.ObjectOpenCustomHashSet;
+ import java.util.ArrayDeque;
+ import java.util.ArrayList;
++import java.util.Collection;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.LongSummaryStatistics;
  import java.util.PriorityQueue;
  import java.util.Queue;
  import java.util.Set;
@@ -18,10 +25,12 @@
  
  public class LevelTicks<T> implements LevelTickAccess<T> {
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (o1, o2) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER.compare(o1.peek(), o2.peek());
-@@ -37,6 +_,7 @@
+@@ -37,6 +_,9 @@
      private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
      private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
      private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
++    private final List<ScheduledTick<T>> pendingRegionizedTicks = new ArrayList<>();
++    private final Set<ScheduledTick<?>> pendingRegionizedTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
 +    private final Queue<ScheduledTick<T>> pendingOffThreadSchedules = new ConcurrentLinkedQueue<>();
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (container, newTick) -> {
          if (newTick.equals(container.peek())) {
@@ -123,9 +132,30 @@
      private void sortContainersToTick(long currentTick) {
          ObjectIterator<Entry> it = Long2LongMaps.fastIterator(this.nextTickForContainer);
  
-@@ -199,13 +_,17 @@
+@@ -198,16 +_,41 @@
+         this.toRunThisTickSet.clear();
      }
  
++    public synchronized void markRegionizedTicksPending(Collection<ScheduledTick<T>> ticks) {
++        this.pendingRegionizedTicks.addAll(ticks);
++        this.pendingRegionizedTickSet.addAll(ticks);
++    }
++
++    public synchronized boolean isRegionizedTickPending(ScheduledTick<T> tick) {
++        return this.pendingRegionizedTickSet.contains(tick);
++    }
++
++    public synchronized void finishRegionizedTick(ScheduledTick<T> tick) {
++        this.pendingRegionizedTicks.remove(tick);
++        this.pendingRegionizedTickSet.remove(tick);
++    }
++
++    public synchronized void finishRegionizedTicks(Collection<ScheduledTick<T>> ticks) {
++        for (ScheduledTick<T> tick : ticks) {
++            this.finishRegionizedTick(tick);
++        }
++    }
++
      @Override
 -    public boolean hasScheduledTick(BlockPos pos, T block) {
 +    public synchronized boolean hasScheduledTick(BlockPos pos, T block) {
@@ -142,8 +172,12 @@
 -    public boolean willTickThisTick(BlockPos pos, T type) {
 +    public synchronized boolean willTickThisTick(BlockPos pos, T type) {
          this.calculateTickSetIfNeeded();
-         return this.toRunThisTickSet.contains(ScheduledTick.probe(type, pos));
+-        return this.toRunThisTickSet.contains(ScheduledTick.probe(type, pos));
++        ScheduledTick<T> probe = ScheduledTick.probe(type, pos);
++        return this.toRunThisTickSet.contains(probe) || this.pendingRegionizedTickSet.contains(probe);
      }
+ 
+     private void calculateTickSetIfNeeded() {
 @@ -233,7 +_,7 @@
          }
      }
@@ -153,10 +187,12 @@
          Predicate<ScheduledTick<T>> tickInsideBB = t -> area.isInside(t.pos());
          this.forContainersInArea(area, (pos, container) -> {
              ScheduledTick<T> previousTop = container.peek();
-@@ -249,18 +_,22 @@
+@@ -249,18 +_,25 @@
          });
          this.alreadyRunThisTick.removeIf(tickInsideBB);
          this.toRunThisTick.removeIf(tickInsideBB);
++        this.pendingRegionizedTicks.removeIf(tickInsideBB);
++        this.pendingRegionizedTickSet.removeIf(tick -> area.isInside(tick.pos()));
 +        this.pendingOffThreadSchedules.removeIf(tickInsideBB);
      }
  
@@ -175,6 +211,7 @@
 +        synchronized (source) {
 +            source.alreadyRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
 +            source.toRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++            source.pendingRegionizedTicks.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
 +            source.pendingOffThreadSchedules.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
 +            source.forContainersInArea(area, (pos, container) -> container.getAll().filter(tickInsideBB).forEach(ticksToAdd::add));
 +        }

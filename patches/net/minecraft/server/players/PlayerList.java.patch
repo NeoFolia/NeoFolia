@@ -615,7 +615,7 @@
              if (player != null) {
                  this.sendPlayerPermissionLevel(player);
              }
-@@ -569,97 +_,106 @@
+@@ -569,97 +_,123 @@
                  case ADMINS -> 27;
                  case OWNERS -> 28;
              };
@@ -717,6 +717,10 @@
      }
  
      public void sendLevelInfo(ServerPlayer player, ServerLevel level) {
++        if (this.runDimensionChangeSyncDirectly(player, () -> this.sendLevelInfoOnPlayerRegion(player, level))) {
++            return;
++        }
++
 +        this.executeOnPlayerRegionAndWait(player, "player level info sync", () -> this.sendLevelInfoOnPlayerRegion(player, level));
 +    }
 +
@@ -744,6 +748,10 @@
      }
  
      public void sendAllPlayerInfo(ServerPlayer player) {
++        if (this.runDimensionChangeSyncDirectly(player, () -> this.sendAllPlayerInfoOnPlayerRegion(player))) {
++            return;
++        }
++
 +        this.executeOnPlayerRegionAndWait(player, "all player info sync", () -> this.sendAllPlayerInfoOnPlayerRegion(player));
 +    }
 +
@@ -752,6 +760,15 @@
          player.resetSentInfo();
 -        player.connection.send(new ClientboundSetHeldSlotPacket(player.getInventory().getSelectedSlot()));
 +        RegionizedWorldGuard.sendToPlayer(player, new ClientboundSetHeldSlotPacket(player.getInventory().getSelectedSlot()));
++    }
++
++    private boolean runDimensionChangeSyncDirectly(ServerPlayer player, Runnable task) {
++        if (!this.server.regionizedTaskDispatcher().isRunning() || !RegionizedTickContext.isRegionThread() || !player.isChangingDimension()) {
++            return false;
++        }
++
++        task.run();
++        return true;
      }
  
      public int getPlayerCount() {

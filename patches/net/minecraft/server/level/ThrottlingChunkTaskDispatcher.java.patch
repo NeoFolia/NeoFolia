@@ -1,30 +1,131 @@
 --- a/net/minecraft/server/level/ThrottlingChunkTaskDispatcher.java
 +++ b/net/minecraft/server/level/ThrottlingChunkTaskDispatcher.java
-@@ -21,23 +_,23 @@
+@@ -1,46 +_,109 @@
+ package net.minecraft.server.level;
+ 
+ import com.google.common.annotations.VisibleForTesting;
+-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+-import it.unimi.dsi.fastutil.longs.LongSet;
++import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
++import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
++import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
++import it.unimi.dsi.fastutil.longs.LongIterator;
++import java.util.HashMap;
++import java.util.Map;
+ import java.util.concurrent.Executor;
+ import java.util.stream.Collectors;
++import java.util.function.LongFunction;
+ import net.minecraft.util.thread.TaskScheduler;
+ import net.minecraft.world.level.ChunkPos;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class ThrottlingChunkTaskDispatcher extends ChunkTaskDispatcher {
+-    private final LongSet chunkPositionsInExecution = new LongOpenHashSet();
++    private final Long2LongOpenHashMap chunkPositionsInExecutionSince = new Long2LongOpenHashMap();
++    private final Long2ObjectMap<Object> throttledChunkRegionsInExecution = new Long2ObjectOpenHashMap<>();
++    private final Map<Object, Integer> throttledChunksInExecutionByRegion = new HashMap<>();
+     private final int maxChunksInExecution;
++    private final int maxChunksInExecutionPerRegion;
+     private final String executorSchedulerName;
+ 
+     public ThrottlingChunkTaskDispatcher(TaskScheduler<Runnable> executor, Executor dispatcherExecutor, int maxChunksInExecution) {
+-        super(executor, dispatcherExecutor);
+-        this.maxChunksInExecution = maxChunksInExecution;
++        this(executor, dispatcherExecutor, maxChunksInExecution, null);
++    }
++
++    public ThrottlingChunkTaskDispatcher(
++        TaskScheduler<Runnable> executor,
++        Executor dispatcherExecutor,
++        int maxChunksInExecution,
++        @Nullable LongFunction<?> executionRegionSelector
++    ) {
++        super(executor, dispatcherExecutor, maxChunksInExecution, executionRegionSelector);
++        this.maxChunksInExecution = Math.max(1, maxChunksInExecution);
++        this.maxChunksInExecutionPerRegion = Math.max(1, this.maxChunksInExecution / 2);
+         this.executorSchedulerName = executor.name();
      }
  
      @Override
 -    protected void onRelease(long key) {
-+    protected synchronized void onRelease(long key) {
-         this.chunkPositionsInExecution.remove(key);
-     }
- 
-     @Override
+-        this.chunkPositionsInExecution.remove(key);
+-    }
+-
+-    @Override
 -    protected ChunkTaskPriorityQueue.@Nullable TasksForChunk popTasks() {
-+    protected synchronized ChunkTaskPriorityQueue.@Nullable TasksForChunk popTasks() {
-         return this.chunkPositionsInExecution.size() < this.maxChunksInExecution ? super.popTasks() : null;
-     }
- 
-     @Override
+-        return this.chunkPositionsInExecution.size() < this.maxChunksInExecution ? super.popTasks() : null;
+-    }
+-
+-    @Override
 -    protected void scheduleForExecution(ChunkTaskPriorityQueue.TasksForChunk tasksForChunk) {
+-        this.chunkPositionsInExecution.add(tasksForChunk.chunkPos());
++    protected synchronized void onRelease(long key) {
++        this.chunkPositionsInExecutionSince.remove(key);
++        Object region = this.throttledChunkRegionsInExecution.remove(key);
++        if (region != null) {
++            this.throttledChunksInExecutionByRegion.computeIfPresent(region, (unused, count) -> count <= 1 ? null : count - 1);
++        }
++    }
++
++    @Override
++    protected synchronized ChunkTaskPriorityQueue.@Nullable TasksForChunk popTasks() {
++        return this.chunkPositionsInExecutionSince.size() < this.maxChunksInExecution ? super.popTasks() : null;
++    }
++
++    @Override
++    protected synchronized boolean canRunChunk(long chunkPos) {
++        if (!super.canRunChunk(chunkPos)) {
++            return false;
++        }
++
++        Object region = this.executionRegionForChunk(chunkPos);
++        return region == null || this.throttledChunksInExecutionByRegion.getOrDefault(region, 0) < this.maxChunksInExecutionPerRegion;
++    }
++
++    @Override
 +    protected synchronized void scheduleForExecution(ChunkTaskPriorityQueue.TasksForChunk tasksForChunk) {
-         this.chunkPositionsInExecution.add(tasksForChunk.chunkPos());
++        long chunkPos = tasksForChunk.chunkPos();
++        if (!this.chunkPositionsInExecutionSince.containsKey(chunkPos)) {
++            this.chunkPositionsInExecutionSince.put(chunkPos, System.nanoTime());
++            Object region = this.executionRegionForChunk(chunkPos);
++            if (region != null) {
++                this.throttledChunkRegionsInExecution.put(chunkPos, region);
++                this.throttledChunksInExecutionByRegion.merge(region, 1, Integer::sum);
++            }
++        }
++
          super.scheduleForExecution(tasksForChunk);
      }
  
      @VisibleForTesting
 -    public String getDebugStatus() {
++    public synchronized int chunksInExecution() {
++        return this.chunkPositionsInExecutionSince.size();
++    }
++
++    public int maxChunksInExecution() {
++        return this.maxChunksInExecution;
++    }
++
++    public synchronized long oldestInExecutionAgeNanos() {
++        long oldestStartedAt = Long.MAX_VALUE;
++        LongIterator iterator = this.chunkPositionsInExecutionSince.values().iterator();
++        while (iterator.hasNext()) {
++            long startedAt = iterator.nextLong();
++            if (startedAt != 0L && startedAt < oldestStartedAt) {
++                oldestStartedAt = startedAt;
++            }
++        }
++
++        return oldestStartedAt == Long.MAX_VALUE ? 0L : Math.max(0L, System.nanoTime() - oldestStartedAt);
++    }
++
++    @VisibleForTesting
 +    public synchronized String getDebugStatus() {
          return this.executorSchedulerName
              + "=["
-             + this.chunkPositionsInExecution.longStream().mapToObj(key -> key + ":" + ChunkPos.unpack(key)).collect(Collectors.joining(","))
+-            + this.chunkPositionsInExecution.longStream().mapToObj(key -> key + ":" + ChunkPos.unpack(key)).collect(Collectors.joining(","))
++            + this.chunkPositionsInExecutionSince.keySet().longStream().mapToObj(key -> key + ":" + ChunkPos.unpack(key)).collect(Collectors.joining(","))
+             + "], s="
+             + this.sleeping;
+     }

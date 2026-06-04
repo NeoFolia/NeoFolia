@@ -137,6 +137,23 @@
          this.ticketLevel = ticketLevel;
      }
  
+@@ -260,7 +_,15 @@
+     ) {
+         this.pendingFullStateConfirmation.cancel(false);
+         CompletableFuture<Void> confirmation = new CompletableFuture<>();
+-        confirmation.thenRunAsync(() -> scheduler.onFullChunkStatusChange(this.pos, status), mainThreadExecutor);
++        confirmation.thenRunAsync(() -> {
++            synchronized (this) {
++                if (!ChunkLevel.fullStatus(this.ticketLevel).isOrAfter(status)) {
++                    return;
++                }
++            }
++
++            scheduler.onFullChunkStatusChange(this.pos, status);
++        }, scheduler.chunkRegionExecutor(this.pos));
+         this.pendingFullStateConfirmation = confirmation;
+         task.thenAccept(r -> r.ifSuccess(l -> confirmation.complete(null)));
+     }
 @@ -270,7 +_,7 @@
          scheduler.onFullChunkStatusChange(this.pos, status);
      }

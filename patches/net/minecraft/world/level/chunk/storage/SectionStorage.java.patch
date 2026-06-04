@@ -1,5 +1,13 @@
 --- a/net/minecraft/world/level/chunk/storage/SectionStorage.java
 +++ b/net/minecraft/world/level/chunk/storage/SectionStorage.java
+@@ -37,6 +_,7 @@
+ import net.minecraft.util.Util;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.LevelHeightAccessor;
++import net.neoforged.neoforge.server.region.RegionizedChunkExecutors;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
 @@ -77,7 +_,7 @@
          this.levelHeightAccessor = levelHeightAccessor;
      }
@@ -60,15 +68,6 @@
          if (this.outsideStoredRange(sectionPos)) {
              throw (IllegalArgumentException)Util.pauseInIde(new IllegalArgumentException("sectionPos out of bounds"));
          } else {
-@@ -160,7 +_,7 @@
-         }
-     }
- 
--    public CompletableFuture<?> prefetch(ChunkPos chunkPos) {
-+    public synchronized CompletableFuture<?> prefetch(ChunkPos chunkPos) {
-         synchronized (this.loadLock) {
-             long chunkKey = chunkPos.pack();
-             return this.loadedChunks.contains(chunkKey)
 @@ -169,7 +_,7 @@
          }
      }
@@ -78,6 +77,15 @@
          long chunkKey = chunkPos.pack();
          CompletableFuture<Optional<SectionStorage.PackedChunk<P>>> future;
          synchronized (this.loadLock) {
+@@ -192,7 +_,7 @@
+             .read(chunkPos)
+             .thenApplyAsync(
+                 result -> result.map(tag -> SectionStorage.PackedChunk.parse(this.codec, registryOps, tag, this.simpleRegionStorage, this.levelHeightAccessor)),
+-                Util.backgroundExecutor().forName("parseSection")
++                RegionizedChunkExecutors.chunkParseExecutor()
+             )
+             .exceptionally(throwable -> {
+                 if (throwable instanceof CompletionException) {
 @@ -209,7 +_,7 @@
              });
      }

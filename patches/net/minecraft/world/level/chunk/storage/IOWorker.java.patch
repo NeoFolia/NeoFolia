@@ -1,0 +1,32 @@
+--- a/net/minecraft/world/level/chunk/storage/IOWorker.java
++++ b/net/minecraft/world/level/chunk/storage/IOWorker.java
+@@ -19,10 +_,10 @@
+ import net.minecraft.nbt.visitors.CollectFields;
+ import net.minecraft.nbt.visitors.FieldSelector;
+ import net.minecraft.util.Unit;
+-import net.minecraft.util.Util;
+ import net.minecraft.util.thread.PriorityConsecutiveExecutor;
+ import net.minecraft.util.thread.StrictQueue;
+ import net.minecraft.world.level.ChunkPos;
++import net.neoforged.neoforge.server.region.RegionizedChunkExecutors;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -38,7 +_,7 @@
+ 
+     protected IOWorker(RegionStorageInfo info, Path dir, boolean sync) {
+         this.storage = new RegionFileStorage(info, dir, sync);
+-        this.consecutiveExecutor = new PriorityConsecutiveExecutor(IOWorker.Priority.values().length, Util.ioPool(), "IOWorker-" + info.type());
++        this.consecutiveExecutor = new PriorityConsecutiveExecutor(IOWorker.Priority.values().length, RegionizedChunkExecutors.chunkIoExecutor(), "IOWorker-" + info.type());
+     }
+ 
+     public boolean isOldChunkAround(ChunkPos pos, int range) {
+@@ -114,7 +_,7 @@
+                     );
+                 return resultSet;
+             },
+-            Util.backgroundExecutor()
++            RegionizedChunkExecutors.chunkParseExecutor()
+         );
+     }
+ 

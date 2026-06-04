@@ -59,7 +59,65 @@ class RegionizedTaskDispatcherTest {
     }
 
     @Test
-    void runsNestedSubmitForCurrentRegionInline() {
+    void executeAllDoesNotWaitForBlockedRegion() throws Exception {
+        try (RegionizedTaskDispatcher dispatcher = startedDispatcher(2)) {
+            CountDownLatch firstStarted = new CountDownLatch(1);
+            CountDownLatch releaseFirst = new CountDownLatch(1);
+            CountDownLatch otherRegionRan = new CountDownLatch(1);
+            CompletableFuture<Void> first = dispatcher.submit(REGION_A, () -> {
+                firstStarted.countDown();
+                try {
+                    releaseFirst.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
+
+            Map<RegionKey, Runnable> tasks = new LinkedHashMap<>();
+            tasks.put(REGION_A, () -> {
+            });
+            tasks.put(REGION_B, otherRegionRan::countDown);
+
+            CompletableFuture<Integer> submitted = CompletableFuture.supplyAsync(() -> dispatcher.executeAll("scheduled-ticks", tasks));
+
+            assertEquals(2, submitted.get(1, TimeUnit.SECONDS));
+            assertTrue(otherRegionRan.await(5, TimeUnit.SECONDS));
+
+            releaseFirst.countDown();
+            first.join();
+        }
+    }
+
+    @Test
+    void executeAllDoesNotCoalesceRepeatedLaneTasks() throws Exception {
+        try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
+            ConcurrentLinkedQueue<Integer> order = new ConcurrentLinkedQueue<>();
+            CountDownLatch ran = new CountDownLatch(2);
+
+            Map<RegionKey, Runnable> first = new LinkedHashMap<>();
+            first.put(REGION_A, () -> {
+                order.add(1);
+                ran.countDown();
+            });
+            Map<RegionKey, Runnable> second = new LinkedHashMap<>();
+            second.put(REGION_A, () -> {
+                order.add(2);
+                ran.countDown();
+            });
+
+            assertEquals(1, dispatcher.executeAll("scheduled-ticks", first));
+            assertEquals(1, dispatcher.executeAll("scheduled-ticks", second));
+
+            assertTrue(ran.await(5, TimeUnit.SECONDS));
+            assertEquals(1, order.poll());
+            assertEquals(2, order.poll());
+            assertTrue(order.isEmpty());
+        }
+    }
+
+    @Test
+    void runsNestedSubmitForCurrentRegionInline() throws Exception {
         try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
             RegionKey observed = dispatcher.submit(REGION_A, () -> dispatcher.submit(REGION_A, () -> {
                 assertEquals(0, dispatcher.queuedRegionTaskCount());
@@ -68,6 +126,7 @@ class RegionizedTaskDispatcherTest {
 
             assertEquals(REGION_A, observed);
             assertEquals(1, dispatcher.submittedRegionTaskCount());
+            awaitCompletedRegionTasks(dispatcher, 1);
             assertEquals(1, dispatcher.completedRegionTaskCount());
             assertEquals(0, dispatcher.queuedRegionTaskCount());
         }
@@ -294,6 +353,23 @@ class RegionizedTaskDispatcherTest {
     }
 
     @Test
+    void coalescesGlobalTasksByLaneAndKey() {
+        try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
+            AtomicInteger runs = new AtomicInteger();
+
+            assertTrue(dispatcher.tryExecuteGlobalCoalesced("player-chunk-move", "player-a", runs::incrementAndGet));
+            assertTrue(dispatcher.tryExecuteGlobalCoalesced("player-chunk-move", "player-a", runs::incrementAndGet));
+            assertTrue(dispatcher.tryExecuteGlobalCoalesced("player-chunk-move", "player-b", runs::incrementAndGet));
+
+            assertEquals(2, dispatcher.queuedGlobalTaskCount());
+            assertEquals(2, dispatcher.drainGlobalTasks());
+            assertEquals(2, runs.get());
+            assertEquals(2, dispatcher.submittedGlobalTaskCount());
+            assertEquals(2, dispatcher.completedGlobalTaskCount());
+        }
+    }
+
+    @Test
     void submitsGlobalTasksAsFutureOutsideRegionContext() {
         try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
             CompletableFuture<String> future = dispatcher.submitGlobal(() -> "global:" + RegionizedTickContext.isRegionThread());
@@ -318,6 +394,31 @@ class RegionizedTaskDispatcherTest {
             assertEquals(1, dispatcher.completedRegionTaskCount());
             assertEquals(1, dispatcher.submittedGlobalTaskCount());
             assertEquals(1, dispatcher.completedGlobalTaskCount());
+        }
+    }
+
+    @Test
+    void promotesNextTickRegionTasksWhenServerTickBegins() throws Exception {
+        try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
+            AtomicInteger runs = new AtomicInteger();
+            dispatcher.beginServerTick(100);
+
+            assertTrue(dispatcher.tryExecuteNextTick(REGION_A, "next-tick-test", () -> {
+                assertEquals(REGION_A, RegionizedTickContext.currentRegion().orElseThrow());
+                runs.incrementAndGet();
+            }));
+            assertEquals(1, dispatcher.queuedDelayedRegionTaskCount());
+            assertEquals(0, dispatcher.queuedRegionTaskCount());
+            assertEquals(0, dispatcher.submittedRegionTaskCount());
+            assertEquals(0, runs.get());
+
+            dispatcher.beginServerTick(101);
+            awaitCompletedRegionTasks(dispatcher, 1);
+
+            assertEquals(1, runs.get());
+            assertEquals(0, dispatcher.queuedDelayedRegionTaskCount());
+            assertEquals(1, dispatcher.submittedRegionTaskCount());
+            assertEquals(1, dispatcher.completedRegionTaskCount());
         }
     }
 
@@ -411,6 +512,95 @@ class RegionizedTaskDispatcherTest {
             assertTrue(snapshot.averageTaskTimeNanos() > 0.0D);
             assertTrue(snapshot.lastCompletionNanos() > 0L);
         }
+    }
+
+    @Test
+    void regionTasksCreateTickReportSamples() throws Exception {
+        try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
+            dispatcher.submit(REGION_A, () -> {
+            }).join();
+            awaitCompletedRegionTasks(dispatcher, 1);
+
+            RegionizedTaskDispatcher.RegionPerformanceSnapshot snapshot = dispatcher.regionPerformanceSnapshots().stream()
+                    .filter(candidate -> REGION_A.equals(candidate.region()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(1, snapshot.sampleCount());
+            assertEquals(1, snapshot.tickReport15s().sampleCount());
+            assertEquals(20.0D, snapshot.tickReport15s().tps(20.0D), 0.0001D);
+        }
+    }
+
+    @Test
+    void tickRegionTasksCreateTickReportSamples() throws Exception {
+        try (RegionizedTaskDispatcher dispatcher = startedDispatcher(1)) {
+            Map<RegionKey, Runnable> tasks = new LinkedHashMap<>();
+            tasks.put(REGION_A, () -> {
+            });
+
+            dispatcher.executeCoalescedAll("entity-ticks", tasks);
+            awaitCompletedRegionTasks(dispatcher, 1);
+
+            RegionizedTaskDispatcher.RegionPerformanceSnapshot snapshot = dispatcher.regionPerformanceSnapshots().stream()
+                    .filter(candidate -> REGION_A.equals(candidate.region()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(1, snapshot.tickReport15s().sampleCount());
+        }
+    }
+
+    @Test
+    void sparseFastRegionSamplesReportTargetTps() {
+        RegionizedTaskDispatcher.RegionTickReportData report = new RegionizedTaskDispatcher.RegionTickReportData(
+            1,
+            TimeUnit.MILLISECONDS.toNanos(4),
+            TimeUnit.MILLISECONDS.toNanos(4),
+            TimeUnit.SECONDS.toNanos(4),
+            TimeUnit.MILLISECONDS.toNanos(4)
+        );
+
+        assertEquals(20.0D, report.tps(20.0D), 0.0001D);
+    }
+
+    @Test
+    void activeFastRegionSamplesReportTargetTps() {
+        RegionizedTaskDispatcher.RegionTickReportData report = new RegionizedTaskDispatcher.RegionTickReportData(
+            30,
+            TimeUnit.MILLISECONDS.toNanos(510),
+            TimeUnit.MILLISECONDS.toNanos(17),
+            TimeUnit.SECONDS.toNanos(3),
+            TimeUnit.MILLISECONDS.toNanos(17)
+        );
+
+        assertEquals(20.0D, report.tps(20.0D), 0.0001D);
+    }
+
+    @Test
+    void slowRegionSamplesReportProcessingRate() {
+        RegionizedTaskDispatcher.RegionTickReportData report = new RegionizedTaskDispatcher.RegionTickReportData(
+            1,
+            TimeUnit.SECONDS.toNanos(4),
+            TimeUnit.SECONDS.toNanos(4),
+            TimeUnit.SECONDS.toNanos(4),
+            TimeUnit.SECONDS.toNanos(4)
+        );
+
+        assertEquals(0.25D, report.tps(20.0D), 0.0001D);
+    }
+
+    @Test
+    void queuedRegionSamplesReportScheduleDelay() {
+        RegionizedTaskDispatcher.RegionTickReportData report = new RegionizedTaskDispatcher.RegionTickReportData(
+            1,
+            TimeUnit.MILLISECONDS.toNanos(4),
+            TimeUnit.MILLISECONDS.toNanos(4),
+            TimeUnit.SECONDS.toNanos(4),
+            TimeUnit.SECONDS.toNanos(2)
+        );
+
+        assertEquals(0.5D, report.tps(20.0D), 0.0001D);
     }
 
     @Test

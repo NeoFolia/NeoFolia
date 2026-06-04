@@ -42,7 +42,7 @@
              @Override
              public List<ServerPlayer> getPlayers(ServerLevel level, Predicate<? super Player> selector) {
 -                return level.getPlayers(selector);
-+                return level.getPlayers(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null && selector.test(player));
++                return level.getPlayers(selector::test);
              }
  
              @Override

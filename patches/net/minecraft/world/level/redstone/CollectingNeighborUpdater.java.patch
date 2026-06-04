@@ -95,6 +95,17 @@
              this.stack.clear();
              this.addedThisLayer.clear();
              this.count = 0;
+@@ -106,6 +_,10 @@
+         implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(Level level) {
++            if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, this.pos)) {
++                return false;
++            }
++
+             NeighborUpdater.executeUpdate(level, this.state, this.pos, this.block, this.orientation, this.movedByPiston);
+             return false;
+         }
 @@ -137,7 +_,6 @@
          public boolean runNext(Level level) {
              Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
@@ -103,7 +114,7 @@
              Orientation orientation = null;
              if (level.enabledFeatures().contains(FeatureFlags.REDSTONE_EXPERIMENTS)) {
                  if (this.orientation == null) {
-@@ -149,12 +_,26 @@
+@@ -149,14 +_,37 @@
                  orientation = this.orientation.withFront(direction);
              }
  
@@ -111,8 +122,17 @@
 +            if (RegionizedWorldGuard.scheduleIfRegionizedOutsideRegion(
 +                level,
 +                neighborPos,
-+                () -> NeighborUpdater.executeUpdate(level, level.getBlockState(neighborPos), neighborPos, this.sourceBlock, finalOrientation, false)
++                () -> {
++                    if (RegionizedWorldGuard.isRegionOwnedAndLoaded(level, neighborPos)) {
++                        NeighborUpdater.executeUpdate(level, level.getBlockState(neighborPos), neighborPos, this.sourceBlock, finalOrientation, false);
++                    }
++                }
 +            )) {
++                this.skipSkippedDirection();
++                return this.idx < NeighborUpdater.UPDATE_ORDER.length;
++            }
++
++            if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, neighborPos)) {
 +                this.skipSkippedDirection();
 +                return this.idx < NeighborUpdater.UPDATE_ORDER.length;
 +            }
@@ -125,12 +145,36 @@
 -
 +            this.skipSkippedDirection();
              return this.idx < NeighborUpdater.UPDATE_ORDER.length;
-+        }
-+
+         }
+ 
 +        private void skipSkippedDirection() {
 +            if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
 +                this.idx++;
 +            }
-         }
- 
++        }
++
          @Override
+         public void forEachUpdatedPos(Consumer<BlockPos> output) {
+             for (Direction direction : NeighborUpdater.UPDATE_ORDER) {
+@@ -179,6 +_,10 @@
+     ) implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(Level level) {
++            if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, this.pos)) {
++                return false;
++            }
++
+             NeighborUpdater.executeShapeUpdate(level, this.direction, this.pos, this.neighborPos, this.neighborState, this.updateFlags, this.updateLimit);
+             return false;
+         }
+@@ -192,6 +_,10 @@
+     record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(Level level) {
++            if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, this.pos)) {
++                return false;
++            }
++
+             BlockState state = level.getBlockState(this.pos);
+             NeighborUpdater.executeUpdate(level, state, this.pos, this.block, this.orientation, false);
+             return false;

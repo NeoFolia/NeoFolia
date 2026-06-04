@@ -1,0 +1,35 @@
+--- a/net/minecraft/network/protocol/PacketUtils.java
++++ b/net/minecraft/network/protocol/PacketUtils.java
+@@ -1,6 +_,5 @@
+ package net.minecraft.network.protocol;
+ 
+-import com.mojang.logging.LogUtils;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+ import net.minecraft.ReportedException;
+@@ -8,13 +_,22 @@
+ import net.minecraft.network.PacketProcessor;
+ import net.minecraft.server.RunningOnDifferentThreadException;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.network.ServerGamePacketListenerImpl;
+ import org.jspecify.annotations.Nullable;
+-import org.slf4j.Logger;
+ 
+ public class PacketUtils {
+-    private static final Logger LOGGER = LogUtils.getLogger();
+-
+     public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T listener, ServerLevel level) throws RunningOnDifferentThreadException {
++        if (listener instanceof ServerGamePacketListenerImpl gamePacketListener
++            && level.getServer().regionizedTaskDispatcher().isRunning()) {
++            PacketProcessor packetProcessor = gamePacketListener.getPacketProcessor();
++            if (packetProcessor.isSameThread()) {
++                return;
++            }
++
++            packetProcessor.scheduleIfPossible(listener, packet);
++            throw RunningOnDifferentThreadException.RUNNING_ON_DIFFERENT_THREAD;
++        }
++
+         ensureRunningOnSameThread(packet, listener, level.getServer().packetProcessor());
+     }
+ 

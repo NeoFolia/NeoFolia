@@ -1,29 +1,32 @@
 --- a/net/minecraft/world/level/levelgen/PhantomSpawner.java
 +++ b/net/minecraft/world/level/levelgen/PhantomSpawner.java
-@@ -17,6 +_,8 @@
+@@ -17,29 +_,34 @@
  import net.minecraft.world.level.block.state.BlockState;
  import net.minecraft.world.level.gamerules.GameRules;
  import net.minecraft.world.level.material.FluidState;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldData;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  
  public class PhantomSpawner implements CustomSpawner {
-     private int nextTick;
-@@ -25,21 +_,27 @@
+-    private int nextTick;
+ 
+     @Override
      public void tick(ServerLevel level, boolean spawnEnemies) {
          if (spawnEnemies) {
              if (level.getGameRules().get(GameRules.SPAWN_PHANTOMS)) {
 -                RandomSource random = level.getRandom();
+-                this.nextTick--;
+-                if (this.nextTick <= 0) {
+-                    this.nextTick = this.nextTick + (60 + random.nextInt(60)) * 20;
 +                RandomSource random = phantomSpawnerRandom(level);
-                 this.nextTick--;
-                 if (this.nextTick <= 0) {
-                     this.nextTick = this.nextTick + (60 + random.nextInt(60)) * 20;
++                RegionizedWorldData worldData = RegionizedWorldGuard.currentWorldData(level);
++                worldData.phantomSpawnerNextTick--;
++                if (worldData.phantomSpawnerNextTick <= 0) {
++                    worldData.phantomSpawnerNextTick = worldData.phantomSpawnerNextTick + (60 + random.nextInt(60)) * 20;
                      if (level.getSkyDarken() >= 5 || !level.dimensionType().hasSkyLight()) {
-                         for (ServerPlayer player : level.players()) {
-+                            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) == null) {
-+                                continue;
-+                            }
-+
+-                        for (ServerPlayer player : level.players()) {
++                        for (ServerPlayer player : level.getLocalPlayers()) {
                              if (!player.isSpectator()) {
                                  BlockPos playerPos = player.blockPosition();
 -                                if (!level.dimensionType().hasSkyLight() || playerPos.getY() >= level.getSeaLevel() && level.canSeeSky(playerPos)) {

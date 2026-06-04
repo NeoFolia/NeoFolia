@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/network/ServerConnectionListener.java
 +++ b/net/minecraft/server/network/ServerConnectionListener.java
-@@ -23,6 +_,8 @@
+@@ -23,11 +_,14 @@
  import java.util.Iterator;
  import java.util.List;
  import java.util.Objects;
@@ -9,7 +9,13 @@
  import java.util.concurrent.TimeUnit;
  import net.minecraft.CrashReport;
  import net.minecraft.ReportedException;
-@@ -39,6 +_,7 @@
+ import net.minecraft.SharedConstants;
+ import net.minecraft.network.Connection;
++import net.minecraft.network.PacketListener;
+ import net.minecraft.network.PacketSendListener;
+ import net.minecraft.network.RateKickingConnection;
+ import net.minecraft.network.chat.Component;
+@@ -39,17 +_,21 @@
  
  public class ServerConnectionListener {
      private static final Logger LOGGER = LogUtils.getLogger();
@@ -17,7 +23,11 @@
      private final MinecraftServer server;
      public volatile boolean running;
      private final List<ChannelFuture> channels = Collections.synchronizedList(Lists.newArrayList());
-@@ -49,7 +_,9 @@
+     private final List<Connection> connections = Collections.synchronizedList(Lists.newArrayList());
++    private final List<Connection> connectionsToTick = Collections.synchronizedList(Lists.newArrayList());
+ 
+     public ServerConnectionListener(MinecraftServer server) {
+         this.server = server;
          this.running = true;
      }
  
@@ -37,6 +47,14 @@
                                      if (ServerConnectionListener.this.server.repliesToStatus()) {
                                          pipeline.addLast("legacy_query", new LegacyQueryHandler(ServerConnectionListener.this.getServer()));
                                      }
+@@ -80,6 +_,7 @@
+                                         ? new RateKickingConnection(rateLimitPacketsPerSecond)
+                                         : new Connection(PacketFlow.SERVERBOUND));
+                                     ServerConnectionListener.this.connections.add(connection);
++                                    ServerConnectionListener.this.connectionsToTick.add(connection);
+                                     connection.configurePacketHandler(pipeline);
+                                     connection.setListenerForServerboundHandshake(
+                                         new ServerHandshakePacketListenerImpl(ServerConnectionListener.this.server, connection)
 @@ -87,7 +_,7 @@
                                  }
                              }
@@ -55,6 +73,14 @@
          ChannelFuture newChannel;
          synchronized (this.channels) {
              newChannel = new ServerBootstrap()
+@@ -113,6 +_,7 @@
+                                 new MemoryServerHandshakePacketListenerImpl(ServerConnectionListener.this.server, connection)
+                             );
+                             ServerConnectionListener.this.connections.add(connection);
++                            ServerConnectionListener.this.connectionsToTick.add(connection);
+                             ChannelPipeline pipeline = channel.pipeline();
+                             Connection.configureInMemoryPipeline(pipeline, PacketFlow.SERVERBOUND);
+                             if (SharedConstants.DEBUG_FAKE_LATENCY_MS > 0) {
 @@ -126,7 +_,7 @@
                          }
                      }
@@ -64,7 +90,7 @@
                  .localAddress(LocalAddress.ANY)
                  .bind()
                  .syncUninterruptibly();
-@@ -136,42 +_,46 @@
+@@ -136,43 +_,98 @@
          return newChannel.channel().localAddress();
      }
  
@@ -89,8 +115,7 @@
      }
  
      public void tick() {
-+        List<Connection> connectionSnapshot;
-         synchronized (this.connections) {
+-        synchronized (this.connections) {
 -            Iterator<Connection> iterator = this.connections.iterator();
 -
 -            while (iterator.hasNext()) {
@@ -108,36 +133,92 @@
 -                            Component component = Component.literal("Internal server error");
 -                            connection.send(new ClientboundDisconnectPacket(component), PacketSendListener.thenRun(() -> connection.disconnect(component)));
 -                            connection.setReadOnly();
-+            connectionSnapshot = List.copyOf(this.connections);
-+        }
-+
-+        for (Connection connection : connectionSnapshot) {
-+            if (!connection.isConnecting()) {
-+                if (connection.isConnected()) {
-+                    try {
-+                        connection.tick();
-+                    } catch (Exception var7) {
-+                        if (connection.isMemoryConnection()) {
-+                            throw new ReportedException(CrashReport.forThrowable(var7, "Ticking memory connection"));
-                         }
+-                        }
 -                    } else {
 -                        iterator.remove();
 -                        connection.handleDisconnection();
 -                    }
+-                }
++        List<Connection> connectionSnapshot;
++        synchronized (this.connectionsToTick) {
++            connectionSnapshot = List.copyOf(this.connectionsToTick);
++        }
 +
-+                        LOGGER.warn("Failed to handle packet for {}", connection.getLoggableAddress(this.server.logIPs()), var7);
-+                        Component component = Component.literal("Internal server error");
-+                        connection.send(new ClientboundDisconnectPacket(component), PacketSendListener.thenRun(() -> connection.disconnect(component)));
-+                        connection.setReadOnly();
-+                    }
-+                } else {
-+                    synchronized (this.connections) {
-+                        this.connections.remove(connection);
-+                    }
-+                    connection.handleDisconnection();
-                 }
++        for (Connection connection : connectionSnapshot) {
++            if (!connection.isConnecting()) {
++                if (!connection.isConnected()) {
++                    this.removeConnection(connection);
++                    continue;
++                }
++
++                if (this.scheduleGameConnectionTickOnRegion(connection)) {
++                    continue;
++                }
++
++                this.tickConnection(connection);
++            }
++        }
++    }
++
++    private boolean scheduleGameConnectionTickOnRegion(Connection connection) {
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            return false;
++        }
++
++        PacketListener packetListener = connection.getPacketListener();
++        return packetListener instanceof ServerGamePacketListenerImpl gamePacketListener
++            && !gamePacketListener.isWaitingForSwitchToConfig()
++            && gamePacketListener.ensureRegionizedConnectionTicker(() -> this.tickConnection(connection));
++    }
++
++    private void tickConnection(Connection connection) {
++        try {
++            connection.tick();
++        } catch (Exception exception) {
++            if (connection.isMemoryConnection()) {
++                throw new ReportedException(CrashReport.forThrowable(exception, "Ticking memory connection"));
++            }
++
++            LOGGER.warn("Failed to handle packet for {}", connection.getLoggableAddress(this.server.logIPs()), exception);
++            Component component = Component.literal("Internal server error");
++            connection.send(new ClientboundDisconnectPacket(component), PacketSendListener.thenRun(() -> connection.disconnect(component)));
++            connection.setReadOnly();
++        }
++
++        if (!connection.isConnected()) {
++            this.removeConnection(connection);
++        }
++    }
++
++    private void removeConnection(Connection connection) {
++        synchronized (this.connections) {
++            this.connections.remove(connection);
++        }
++        synchronized (this.connectionsToTick) {
++            this.connectionsToTick.remove(connection);
++        }
++        connection.handleDisconnection();
++    }
++
++    public void markConnectionRegionized(Connection connection) {
++        synchronized (this.connectionsToTick) {
++            this.connectionsToTick.remove(connection);
++        }
++    }
++
++    public void markConnectionGlobalTick(Connection connection) {
++        synchronized (this.connections) {
++            if (!this.connections.contains(connection)) {
++                return;
++            }
++        }
++
++        synchronized (this.connectionsToTick) {
++            if (!this.connectionsToTick.contains(connection)) {
++                this.connectionsToTick.add(connection);
              }
          }
+     }
 @@ -182,14 +_,16 @@
      }
  

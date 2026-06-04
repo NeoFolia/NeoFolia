@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
 +++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
-@@ -16,10 +_,12 @@
+@@ -16,10 +_,14 @@
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.level.BlockGetter;
  import net.minecraft.world.level.CustomSpawner;
@@ -9,14 +9,102 @@
  import net.minecraft.world.level.gamerules.GameRules;
  import net.minecraft.world.level.saveddata.WanderingTraderData;
  import net.minecraft.world.level.storage.SavedDataStorage;
++import net.neoforged.neoforge.server.region.RegionizedTickContext;
++import net.neoforged.neoforge.server.region.RegionizedWorldData;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  import org.jspecify.annotations.Nullable;
  
  public class WanderingTraderSpawner implements CustomSpawner {
-@@ -124,6 +_,10 @@
+@@ -30,23 +_,17 @@
+     private static final int SPAWN_CHANCE_INCREASE = 25;
+     private static final int SPAWN_ONE_IN_X_CHANCE = 10;
+     private static final int NUMBER_OF_SPAWN_ATTEMPTS = 10;
+-    private final RandomSource random = RandomSource.create();
+-    private final SavedDataStorage savedDataStorage;
+-    private int tickDelay;
+-    private @Nullable WanderingTraderData traderData;
+ 
+     public WanderingTraderSpawner(SavedDataStorage savedDataStorage) {
+-        this.savedDataStorage = savedDataStorage;
+-        this.tickDelay = 1200;
+-        this.traderData = null;
+     }
+ 
+     @Override
+     public void tick(ServerLevel level, boolean spawnEnemies) {
++        RegionizedWorldData worldData = RegionizedWorldGuard.currentWorldData(level);
++        WanderingTraderData data = worldData.wanderingTraderData;
+         if (level.getGameRules().get(GameRules.SPAWN_WANDERING_TRADERS)) {
+-            if (--this.tickDelay <= 0) {
+-                this.tickDelay = 1200;
+-                WanderingTraderData data = this.getTraderData();
++            if (--worldData.wanderingTraderTickDelay <= 0) {
++                worldData.wanderingTraderTickDelay = DEFAULT_TICK_DELAY;
+                 int spawnDelay = data.spawnDelay() - 1200;
+                 data.setSpawnDelay(spawnDelay);
+                 if (spawnDelay <= 0) {
+@@ -54,7 +_,7 @@
+                     int chanceToSpawn = data.spawnChance();
+                     int newSpawnChance = Mth.clamp(chanceToSpawn + 25, 25, 75);
+                     data.setSpawnChance(newSpawnChance);
+-                    if (this.random.nextInt(100) <= chanceToSpawn) {
++                    if (random(level).nextInt(100) <= chanceToSpawn) {
+                         if (this.spawn(level)) {
+                             data.setSpawnChance(25);
+                         }
+@@ -64,19 +_,11 @@
+         }
+     }
+ 
+-    private WanderingTraderData getTraderData() {
+-        if (this.traderData == null) {
+-            this.traderData = this.savedDataStorage.computeIfAbsent(WanderingTraderData.TYPE);
+-        }
+-
+-        return this.traderData;
+-    }
+-
+     private boolean spawn(ServerLevel level) {
+         Player player = level.getRandomPlayer();
+         if (player == null) {
+             return true;
+-        } else if (this.random.nextInt(10) != 0) {
++        } else if (random(level).nextInt(10) != 0) {
+             return false;
+         } else {
+             BlockPos playerPos = player.blockPosition();
+@@ -84,7 +_,7 @@
+             PoiManager poiManager = level.getPoiManager();
+             Optional<BlockPos> poiPos = poiManager.find(p -> p.is(PoiTypes.MEETING), p -> true, playerPos, 48, PoiManager.Occupancy.ANY);
+             BlockPos referencePos = poiPos.orElse(playerPos);
+-            BlockPos spawnPosition = this.findSpawnPositionNear(level, referencePos, 48);
++            BlockPos spawnPosition = this.findSpawnPositionNear(level, referencePos, 48, random(level));
+             if (spawnPosition != null && this.hasEnoughSpace(level, spawnPosition)) {
+                 if (level.getBiome(spawnPosition).is(BiomeTags.WITHOUT_WANDERING_TRADER_SPAWNS)) {
+                     return false;
+@@ -108,7 +_,7 @@
+     }
+ 
+     private void tryToSpawnLlamaFor(ServerLevel level, WanderingTrader trader, int radius) {
+-        BlockPos spawnPosition = this.findSpawnPositionNear(level, trader.blockPosition(), radius);
++        BlockPos spawnPosition = this.findSpawnPositionNear(level, trader.blockPosition(), radius, random(level));
+         if (spawnPosition != null) {
+             TraderLlama llama = EntityType.TRADER_LLAMA.spawn(level, spawnPosition, EntitySpawnReason.EVENT);
+             if (llama != null) {
+@@ -117,13 +_,17 @@
+         }
+     }
+ 
+-    private @Nullable BlockPos findSpawnPositionNear(LevelReader level, BlockPos referencePosition, int radius) {
++    private @Nullable BlockPos findSpawnPositionNear(LevelReader level, BlockPos referencePosition, int radius, RandomSource random) {
+         BlockPos spawnPosition = null;
+         SpawnPlacementType wanderingTraderSpawnType = SpawnPlacements.getPlacementType(EntityType.WANDERING_TRADER);
+ 
          for (int i = 0; i < 10; i++) {
-             int xPosition = referencePosition.getX() + this.random.nextInt(radius * 2) - radius;
-             int zPosition = referencePosition.getZ() + this.random.nextInt(radius * 2) - radius;
+-            int xPosition = referencePosition.getX() + this.random.nextInt(radius * 2) - radius;
+-            int zPosition = referencePosition.getZ() + this.random.nextInt(radius * 2) - radius;
++            int xPosition = referencePosition.getX() + random.nextInt(radius * 2) - radius;
++            int zPosition = referencePosition.getZ() + random.nextInt(radius * 2) - radius;
 +            if (!canReadChunk(level, xPosition >> 4, zPosition >> 4)) {
 +                continue;
 +            }
@@ -24,7 +112,7 @@
              int yPosition = level.getHeight(SpawnPlacements.getHeightmapType(EntityType.WANDERING_TRADER), xPosition, zPosition);
              BlockPos spawnPos = new BlockPos(xPosition, yPosition, zPosition);
              if (wanderingTraderSpawnType.isSpawnPositionOk(level, spawnPos, EntityType.WANDERING_TRADER)) {
-@@ -137,11 +_,23 @@
+@@ -137,11 +_,27 @@
  
      private boolean hasEnoughSpace(BlockGetter level, BlockPos spawnPos) {
          for (BlockPos pos : BlockPos.betweenClosed(spawnPos, spawnPos.offset(1, 2, 1))) {
@@ -46,5 +134,9 @@
 +
 +    private static boolean canReadChunk(BlockGetter level, int chunkX, int chunkZ) {
 +        return !(level instanceof Level levelInstance) || RegionizedWorldGuard.shouldLoadChunk(levelInstance, chunkX, chunkZ);
++    }
++
++    private static RandomSource random(ServerLevel level) {
++        return RegionizedTickContext.currentRandom().orElse(level.getRandom());
      }
  }

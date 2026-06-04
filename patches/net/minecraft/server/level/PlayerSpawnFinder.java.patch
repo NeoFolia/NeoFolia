@@ -1,9 +1,10 @@
 --- a/net/minecraft/server/level/PlayerSpawnFinder.java
 +++ b/net/minecraft/server/level/PlayerSpawnFinder.java
-@@ -19,10 +_,13 @@
+@@ -19,10 +_,14 @@
  import net.minecraft.world.level.GameType;
  import net.minecraft.world.level.block.Block;
  import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.border.WorldBorder;
 +import net.minecraft.world.level.chunk.ChunkAccess;
  import net.minecraft.world.level.chunk.LevelChunk;
 +import net.minecraft.world.level.chunk.status.ChunkStatus;
@@ -14,6 +15,110 @@
  import org.jspecify.annotations.Nullable;
  
  public class PlayerSpawnFinder {
+@@ -32,8 +_,14 @@
+     private final BlockPos spawnSuggestion;
+     private final int radius;
+     private final int candidateCount;
++    private final int minCandidateX;
++    private final int minCandidateZ;
++    private final int candidateWidth;
++    private final int candidateHeight;
++    private final boolean exhaustiveSearch;
+     private final int coprime;
+     private final int offset;
++    private final RandomSource random = RandomSource.createThreadLocalInstance();
+     private int nextCandidateIndex;
+     private final CompletableFuture<Vec3> finishedFuture = new CompletableFuture<>();
+ 
+@@ -41,24 +_,38 @@
+         this.level = level;
+         this.spawnSuggestion = spawnSuggestion;
+         this.radius = radius;
+-        long squareSide = radius * 2L + 1L;
+-        this.candidateCount = (int)Math.min(1024L, squareSide * squareSide);
+-        this.coprime = getCoprime(this.candidateCount);
+-        this.offset = RandomSource.createThreadLocalInstance().nextInt(this.candidateCount);
++        WorldBorder worldBorder = level.getWorldBorder();
++        double spawnX = (double)spawnSuggestion.getX() + 0.5;
++        double spawnZ = (double)spawnSuggestion.getZ() + 0.5;
++        double minX = Math.max(worldBorder.getMinX() + 1.0, spawnX - radius);
++        double minZ = Math.max(worldBorder.getMinZ() + 1.0, spawnZ - radius);
++        double maxX = Math.min(worldBorder.getMaxX() - 1.0, spawnX + radius);
++        double maxZ = Math.min(worldBorder.getMaxZ() - 1.0, spawnZ + radius);
++        int minBlockX = Mth.floor(minX);
++        int minBlockZ = Mth.floor(minZ);
++        int maxBlockX = Mth.floor(maxX);
++        int maxBlockZ = Mth.floor(maxZ);
++        if (maxBlockX < minBlockX) {
++            minBlockX = maxBlockX = Mth.floor(worldBorder.getCenterX());
++        }
++        if (maxBlockZ < minBlockZ) {
++            minBlockZ = maxBlockZ = Mth.floor(worldBorder.getCenterZ());
++        }
++
++        this.minCandidateX = minBlockX;
++        this.minCandidateZ = minBlockZ;
++        this.candidateWidth = maxBlockX - minBlockX + 1;
++        this.candidateHeight = maxBlockZ - minBlockZ + 1;
++        long candidateArea = (long)this.candidateWidth * (long)this.candidateHeight;
++        this.candidateCount = (int)Math.min((long)ABSOLUTE_MAX_ATTEMPTS, candidateArea);
++        this.exhaustiveSearch = candidateArea <= (long)ABSOLUTE_MAX_ATTEMPTS;
++        this.coprime = this.exhaustiveSearch ? getCoprime(this.candidateCount) : 1;
++        this.offset = this.random.nextInt(this.candidateCount);
+     }
+ 
+     public static CompletableFuture<Vec3> findSpawn(ServerLevel level, BlockPos spawnSuggestion) {
+         if (level.dimensionType().hasSkyLight() && level.getServer().getWorldData().getGameType() != GameType.ADVENTURE) {
+             int radius = Math.max(0, level.getGameRules().get(GameRules.RESPAWN_RADIUS));
+-            int distToBorder = Mth.floor(level.getWorldBorder().getDistanceToBorder(spawnSuggestion.getX(), spawnSuggestion.getZ()));
+-            if (distToBorder < radius) {
+-                radius = distToBorder;
+-            }
+-
+-            if (distToBorder <= 1) {
+-                radius = 1;
+-            }
+-
+             PlayerSpawnFinder finder = new PlayerSpawnFinder(level, spawnSuggestion, radius);
+             finder.scheduleNext();
+             return finder.finishedFuture;
+@@ -70,11 +_,9 @@
+     private void scheduleNext() {
+         int candidateIndex = this.nextCandidateIndex++;
+         if (candidateIndex < this.candidateCount) {
+-            int value = (this.offset + this.coprime * candidateIndex) % this.candidateCount;
+-            int deltaX = value % (this.radius * 2 + 1);
+-            int deltaZ = value / (this.radius * 2 + 1);
+-            int targetX = this.spawnSuggestion.getX() + deltaX - this.radius;
+-            int targetZ = this.spawnSuggestion.getZ() + deltaZ - this.radius;
++            BlockPos target = this.selectCandidate(candidateIndex);
++            int targetX = target.getX();
++            int targetZ = target.getZ();
+             this.scheduleCandidate(targetX, targetZ, candidateIndex, () -> {
+                 BlockPos spawnPos = getOverworldRespawnPos(this.level, targetX, targetZ);
+                 return spawnPos != null && noCollisionNoLiquid(this.level, spawnPos) ? Optional.of(Vec3.atBottomCenterOf(spawnPos)) : Optional.empty();
+@@ -86,6 +_,21 @@
+         }
+     }
+ 
++    private BlockPos selectCandidate(int candidateIndex) {
++        if (this.exhaustiveSearch) {
++            int value = (this.offset + this.coprime * candidateIndex) % this.candidateCount;
++            int deltaX = value % this.candidateWidth;
++            int deltaZ = value / this.candidateWidth;
++            return new BlockPos(this.minCandidateX + deltaX, 0, this.minCandidateZ + deltaZ);
++        }
++
++        return new BlockPos(
++            this.minCandidateX + this.random.nextInt(this.candidateWidth),
++            0,
++            this.minCandidateZ + this.random.nextInt(this.candidateHeight)
++        );
++    }
++
+     private static Vec3 fixupSpawnHeight(CollisionGetter level, BlockPos spawnPos) {
+         BlockPos.MutableBlockPos mutablePos = spawnPos.mutable();
+ 
 @@ -147,7 +_,13 @@
  
      protected static @Nullable BlockPos getOverworldRespawnPos(ServerLevel level, int x, int z) {

@@ -1,37 +1,76 @@
 --- a/net/minecraft/server/network/PlayerChunkSender.java
 +++ b/net/minecraft/server/network/PlayerChunkSender.java
-@@ -18,6 +_,8 @@
+@@ -2,12 +_,19 @@
+ 
+ import com.google.common.collect.Comparators;
+ import com.mojang.logging.LogUtils;
++import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
++import it.unimi.dsi.fastutil.longs.LongIterator;
+ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+ import it.unimi.dsi.fastutil.longs.LongSet;
++import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.Comparator;
++import java.util.LinkedHashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Objects;
+ import net.minecraft.SharedConstants;
++import net.minecraft.network.protocol.Packet;
+ import net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket;
+ import net.minecraft.network.protocol.game.ClientboundChunkBatchStartPacket;
+ import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
+@@ -18,6 +_,11 @@
  import net.minecraft.util.Mth;
  import net.minecraft.world.level.ChunkPos;
  import net.minecraft.world.level.chunk.LevelChunk;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
++import org.jspecify.annotations.Nullable;
  import org.slf4j.Logger;
  
  public class PlayerChunkSender {
-@@ -37,53 +_,81 @@
+@@ -27,91 +_,331 @@
+     private static final float START_CHUNKS_PER_TICK = 9.0F;
+     private static final int MAX_UNACKNOWLEDGED_BATCHES = 10;
+     private final LongSet pendingChunks = new LongOpenHashSet();
++    private final LongSet inFlightChunks = new LongOpenHashSet();
++    private final LongSet deferredForgetChunks = new LongOpenHashSet();
++    private final Long2LongOpenHashMap pendingChunkEnqueuedNanos = new Long2LongOpenHashMap();
+     private final boolean memoryConnection;
+     private float desiredChunksPerTick = 9.0F;
+     private float batchQuota;
+     private int unacknowledgedBatches;
+     private int maxUnacknowledgedBatches = 1;
++    private int lastQuotaRefillTick = Integer.MIN_VALUE;
+ 
+     public PlayerChunkSender(boolean memoryConnection) {
          this.memoryConnection = memoryConnection;
      }
  
 -    public void markChunkPendingToSend(LevelChunk chunk) {
+-        this.pendingChunks.add(chunk.getPos().pack());
 +    public synchronized void markChunkPendingToSend(LevelChunk chunk) {
-         this.pendingChunks.add(chunk.getPos().pack());
++        long chunkPos = chunk.getPos().pack();
++        if (this.inFlightChunks.contains(chunkPos)) {
++            this.deferredForgetChunks.remove(chunkPos);
++            return;
++        }
++
++        if (this.pendingChunks.add(chunkPos)) {
++            this.pendingChunkEnqueuedNanos.put(chunkPos, System.nanoTime());
++        }
      }
  
      public void dropChunk(ServerPlayer player, ChunkPos pos) {
 -        if (!this.pendingChunks.remove(pos.pack()) && player.isAlive()) {
 -            player.connection.send(new ClientboundForgetLevelChunkPacket(pos));
-+        boolean shouldSendForget;
-+        synchronized (this) {
-+            shouldSendForget = !this.pendingChunks.remove(pos.pack()) && player.isAlive();
-+        }
-+
-+        if (shouldSendForget) {
-+            RegionizedWorldGuard.sendToPlayer(player, new ClientboundForgetLevelChunkPacket(pos));
-         }
-     }
- 
-     public void sendNextChunks(ServerPlayer player) {
+-        }
+-    }
+-
+-    public void sendNextChunks(ServerPlayer player) {
 -        if (this.unacknowledgedBatches < this.maxUnacknowledgedBatches) {
 -            float maxBatchSize = Math.max(1.0F, this.desiredChunksPerTick);
 -            this.batchQuota = Math.min(this.batchQuota + this.desiredChunksPerTick, maxBatchSize);
@@ -52,87 +91,366 @@
 -                        connection.send(new ClientboundChunkBatchFinishedPacket(chunksToSend.size()));
 -                        this.batchQuota = this.batchQuota - chunksToSend.size();
 -                    }
--                }
-+        if (player.level().getServer().regionizedTaskDispatcher().isRunning()
-+            && !RegionizedTickContext.currentRegion().map(RegionizedWorldGuard.regionFor(player.level(), player.blockPosition())::equals).orElse(false)) {
-+            RegionizedWorldGuard.executeOnPlayerRegion(player, () -> this.sendNextChunks(player));
++        boolean shouldSendForget;
++        synchronized (this) {
++            long chunkPos = pos.pack();
++            boolean removedPending = this.pendingChunks.remove(chunkPos);
++            if (!removedPending && this.inFlightChunks.contains(chunkPos)) {
++                if (player.isAlive()) {
++                    this.deferredForgetChunks.add(chunkPos);
+                 }
+-            }
+-        }
++                shouldSendForget = false;
++            } else {
++                shouldSendForget = !removedPending && player.isAlive();
++            }
++            this.pendingChunkEnqueuedNanos.remove(chunkPos);
++        }
++
++        if (shouldSendForget) {
++            RegionizedWorldGuard.sendToPlayer(player, new ClientboundForgetLevelChunkPacket(pos));
++        }
++    }
++
++    public void sendNextChunks(ServerPlayer player) {
++        ServerLevel level = player.level();
++        if (!level.getServer().regionizedTaskDispatcher().isRunning()) {
++            this.sendNextChunksOnRegion(player, null);
++            return;
++        }
++
++        if (RegionizedTickContext.isRegionThread()) {
++            RegionizedTickContext.currentRegion().ifPresent(region -> {
++                this.sendNextChunksOnRegion(player, region);
++                int additionalRegionSends = Math.max(0, RegionizedServerSettings.playerChunkSendRegionFanout() - 1);
++                this.scheduleAdditionalReadyChunkRegions(player, level, region, additionalRegionSends);
++            });
++            return;
++        }
++
++        for (RegionKey region : this.collectPendingChunkRegions(
++            level,
++            level.getChunkSource().chunkMap,
++            player.chunkPosition(),
++            null,
++            RegionizedServerSettings.playerChunkSendRegionFanout()
++        )) {
++            this.scheduleChunkSendOnRegion(player, level, region);
++        }
++    }
++
++    private void scheduleAdditionalReadyChunkRegions(ServerPlayer player, ServerLevel level, RegionKey alreadyHandledRegion, int maxRegions) {
++        if (maxRegions <= 0) {
++            return;
++        }
++
++        for (RegionKey region : this.collectPendingChunkRegions(
++            level,
++            level.getChunkSource().chunkMap,
++            player.chunkPosition(),
++            alreadyHandledRegion,
++            maxRegions
++        )) {
++            this.scheduleChunkSendOnRegion(player, level, region);
++        }
++    }
++
++    private void sendNextChunksOnRegion(ServerPlayer player, @Nullable RegionKey owningRegion) {
++        if (player.isRemoved()) {
 +            return;
 +        }
 +
 +        ServerLevel level = player.level();
-+        List<LevelChunk> chunksToSend;
-+        synchronized (this) {
-+            chunksToSend = this.collectNextChunksToSend(level.getChunkSource().chunkMap, player.chunkPosition());
++        if (owningRegion != null && !owningRegion.level().equals(level.dimension())) {
++            return;
 +        }
 +
-+        if (!chunksToSend.isEmpty()) {
-+            ServerGamePacketListenerImpl connection = player.connection;
-+            RegionizedWorldGuard.sendToPlayer(player, ClientboundChunkBatchStartPacket.INSTANCE);
++        if (owningRegion != null && !RegionizedTickContext.currentRegion().map(owningRegion::equals).orElse(false)) {
++            this.scheduleChunkSendOnRegion(player, level, owningRegion);
++            return;
++        }
++
++        List<LevelChunk> chunksToSend = this.collectNextChunksToSend(level, level.getChunkSource().chunkMap, player.chunkPosition(), owningRegion);
++        if (chunksToSend.isEmpty()) {
++            return;
++        }
++
++        ServerGamePacketListenerImpl connection = player.connection;
++        List<ChunkPos> deferredForgetChunks = List.of();
++        try {
++            RegionizedWorldGuard.sendPreparedPacketToPlayer(player, ClientboundChunkBatchStartPacket.INSTANCE, false);
 +
 +            for (LevelChunk chunk : chunksToSend) {
 +                sendChunk(connection, level, chunk);
-             }
--        }
++            }
 +
-+            RegionizedWorldGuard.sendToPlayer(player, new ClientboundChunkBatchFinishedPacket(chunksToSend.size()));
++            RegionizedWorldGuard.sendPreparedPacketToPlayer(player, new ClientboundChunkBatchFinishedPacket(chunksToSend.size()), true);
++        } finally {
++            deferredForgetChunks = this.finishChunkSend(chunksToSend);
++        }
++
++        for (ChunkPos pos : deferredForgetChunks) {
++            RegionizedWorldGuard.sendPreparedPacketToPlayer(player, new ClientboundForgetLevelChunkPacket(pos), true);
 +        }
 +    }
 +
-+    private synchronized List<LevelChunk> collectNextChunksToSend(ChunkMap chunkMap, ChunkPos playerPos) {
-+        if (this.unacknowledgedBatches >= this.maxUnacknowledgedBatches) {
++    private boolean scheduleChunkSendOnRegion(ServerPlayer player, ServerLevel level, RegionKey region) {
++        return level.getServer().regionizedTaskDispatcher().tryExecuteCoalesced(
++            region,
++            "player-chunk-send",
++            player.getUUID(),
++            () -> this.sendNextChunksOnRegion(player, region)
++        );
++    }
++
++    private List<RegionKey> collectPendingChunkRegions(
++        ServerLevel level,
++        ChunkMap chunkMap,
++        ChunkPos playerPos,
++        @Nullable RegionKey excludedRegion,
++        int maxRegions
++    ) {
++        long[] pendingChunks = this.pendingChunkSnapshotIfReady();
++        if (pendingChunks.length == 0) {
 +            return List.of();
 +        }
 +
++        Map<RegionKey, Integer> closestDistanceByRegion = new LinkedHashMap<>();
++        for (long pendingChunk : pendingChunks) {
++            if (chunkMap.getChunkToSend(pendingChunk) == null) {
++                continue;
++            }
++
++            RegionKey region = RegionizedWorldGuard.regionFor(level, ChunkPos.unpack(pendingChunk));
++            if (region.equals(excludedRegion)) {
++                continue;
++            }
++
++            int distance = playerPos.distanceSquared(ChunkPos.unpack(pendingChunk));
++            closestDistanceByRegion.merge(region, distance, Math::min);
++        }
++
++        if (closestDistanceByRegion.isEmpty()) {
++            return List.of();
++        }
++
++        return closestDistanceByRegion.entrySet()
++            .stream()
++            .sorted(Map.Entry.comparingByValue())
++            .limit(maxRegions)
++            .map(Map.Entry::getKey)
++            .toList();
++    }
++
++    private List<LevelChunk> collectNextChunksToSend(
++        ServerLevel level,
++        ChunkMap chunkMap,
++        ChunkPos playerPos,
++        @Nullable RegionKey owningRegion
++    ) {
++        PendingChunkSelection selection = this.pendingChunkSelectionSnapshot(level);
++        if (selection.pendingChunks().length == 0) {
++            return List.of();
++        }
++
++        List<LevelChunk> candidates = this.collectChunksToSend(level, chunkMap, playerPos, owningRegion, selection);
++        return this.claimChunksToSend(candidates);
++    }
++
++    private void refillBatchQuota(ServerLevel level) {
++        int currentTick = level.getServer().getTickCount();
++        if (this.lastQuotaRefillTick == currentTick) {
++            return;
++        }
++
++        this.lastQuotaRefillTick = currentTick;
 +        float maxBatchSize = Math.max(1.0F, this.desiredChunksPerTick);
 +        this.batchQuota = Math.min(this.batchQuota + this.desiredChunksPerTick, maxBatchSize);
-+        if (this.batchQuota < 1.0F || this.pendingChunks.isEmpty()) {
-+            return List.of();
-+        }
-+
-+        List<LevelChunk> chunksToSend = this.collectChunksToSend(chunkMap, playerPos);
-+        if (!chunksToSend.isEmpty()) {
-+            this.unacknowledgedBatches++;
-+            this.batchQuota = this.batchQuota - chunksToSend.size();
-+        }
-+
-+        return chunksToSend;
      }
  
      private static void sendChunk(ServerGamePacketListenerImpl connection, ServerLevel level, LevelChunk chunk) {
 -        connection.send(new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null));
-+        RegionizedWorldGuard.sendToPlayer(
-+            connection.player,
-+            chunk.getAuxLightManager(chunk.getPos()).sendLightDataTo(new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null))
-+        );
++        Packet<?> packet = chunk.getAuxLightManager(chunk.getPos())
++            .sendLightDataTo(new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null));
++        RegionizedWorldGuard.sendPreparedPacketToPlayer(connection.player, packet, false);
          ChunkPos pos = chunk.getPos();
          if (SharedConstants.DEBUG_VERBOSE_SERVER_EVENTS) {
              LOGGER.debug("SEN {}", pos);
          }
  
          level.debugSynchronizers().startTrackingChunk(connection.player, chunk.getPos());
-+        net.neoforged.neoforge.event.EventHooks.fireChunkSent(connection.player, chunk, level);
-     }
- 
+-    }
+-
 -    private List<LevelChunk> collectChunksToSend(ChunkMap chunkMap, ChunkPos playerPos) {
-+    private synchronized List<LevelChunk> collectChunksToSend(ChunkMap chunkMap, ChunkPos playerPos) {
++        net.neoforged.neoforge.event.EventHooks.fireChunkSent(connection.player, chunk, level);
++    }
++
++    private synchronized long[] pendingChunkSnapshotIfReady() {
++        if (this.unacknowledgedBatches >= this.maxUnacknowledgedBatches || this.pendingChunks.isEmpty()) {
++            return new long[0];
++        }
++
++        return this.pendingChunkSnapshot();
++    }
++
++    private synchronized PendingChunkSelection pendingChunkSelectionSnapshot(ServerLevel level) {
++        if (this.unacknowledgedBatches >= this.maxUnacknowledgedBatches) {
++            return PendingChunkSelection.EMPTY;
++        }
++
++        this.refillBatchQuota(level);
++        if (this.batchQuota < 1.0F || this.pendingChunks.isEmpty()) {
++            return PendingChunkSelection.EMPTY;
++        }
++
          int maxBatchSize = Mth.floor(this.batchQuota);
-         List<LevelChunk> chunks;
-         if (!this.memoryConnection && this.pendingChunks.size() > maxBatchSize) {
-@@ -111,7 +_,7 @@
+-        List<LevelChunk> chunks;
+-        if (!this.memoryConnection && this.pendingChunks.size() > maxBatchSize) {
+-            chunks = this.pendingChunks
+-                .stream()
+-                .collect(Comparators.least(maxBatchSize, Comparator.comparingInt(playerPos::distanceSquared)))
+-                .stream()
+-                .mapToLong(Long::longValue)
+-                .mapToObj(chunkMap::getChunkToSend)
+-                .filter(Objects::nonNull)
+-                .toList();
+-        } else {
+-            chunks = this.pendingChunks
+-                .longStream()
+-                .mapToObj(chunkMap::getChunkToSend)
+-                .filter(Objects::nonNull)
+-                .sorted(Comparator.comparingInt(chunkx -> playerPos.distanceSquared(chunkx.getPos())))
+-                .toList();
+-        }
+-
+-        for (LevelChunk chunk : chunks) {
+-            this.pendingChunks.remove(chunk.getPos().pack());
++        boolean limitToNearestReadyChunks = !this.memoryConnection && this.pendingChunks.size() > maxBatchSize;
++        return new PendingChunkSelection(this.pendingChunkSnapshot(), maxBatchSize, limitToNearestReadyChunks);
++    }
++
++    private long[] pendingChunkSnapshot() {
++        long[] snapshot = new long[this.pendingChunks.size()];
++        LongIterator iterator = this.pendingChunks.iterator();
++        int index = 0;
++        while (iterator.hasNext()) {
++            snapshot[index++] = iterator.nextLong();
++        }
++
++        return index == snapshot.length ? snapshot : Arrays.copyOf(snapshot, index);
++    }
++
++    private List<LevelChunk> collectChunksToSend(
++        ServerLevel level,
++        ChunkMap chunkMap,
++        ChunkPos playerPos,
++        @Nullable RegionKey owningRegion,
++        PendingChunkSelection selection
++    ) {
++        if (selection.limitToNearestReadyChunks()) {
++            return Arrays.stream(selection.pendingChunks())
++                .filter(pos -> this.isPendingChunkOwnedBy(level, pos, owningRegion))
++                .mapToObj(chunkMap::getChunkToSend)
++                .filter(Objects::nonNull)
++                .collect(Comparators.least(selection.maxBatchSize(), Comparator.comparingInt(chunkx -> playerPos.distanceSquared(chunkx.getPos()))))
++                .stream()
++                .toList();
++        }
++
++        return Arrays.stream(selection.pendingChunks())
++            .filter(pos -> this.isPendingChunkOwnedBy(level, pos, owningRegion))
++            .mapToObj(chunkMap::getChunkToSend)
++            .filter(Objects::nonNull)
++            .sorted(Comparator.comparingInt(chunkx -> playerPos.distanceSquared(chunkx.getPos())))
++            .toList();
++    }
++
++    private synchronized List<LevelChunk> claimChunksToSend(List<LevelChunk> candidates) {
++        if (candidates.isEmpty() || this.unacknowledgedBatches >= this.maxUnacknowledgedBatches || this.batchQuota < 1.0F) {
++            return List.of();
++        }
++
++        int maxBatchSize = Math.min(Mth.floor(this.batchQuota), candidates.size());
++        List<LevelChunk> chunks = new ArrayList<>(maxBatchSize);
++        for (LevelChunk chunk : candidates) {
++            if (chunks.size() >= maxBatchSize) {
++                break;
++            }
++
++            long chunkPos = chunk.getPos().pack();
++            if (this.pendingChunks.remove(chunkPos)) {
++                this.pendingChunkEnqueuedNanos.remove(chunkPos);
++                this.inFlightChunks.add(chunkPos);
++                chunks.add(chunk);
++            }
++        }
++
++        if (!chunks.isEmpty()) {
++            this.unacknowledgedBatches++;
++            this.batchQuota = this.batchQuota - chunks.size();
+         }
+ 
          return chunks;
      }
  
 -    public void onChunkBatchReceivedByClient(float desiredChunksPerTick) {
++    private synchronized List<ChunkPos> finishChunkSend(List<LevelChunk> chunks) {
++        if (chunks.isEmpty()) {
++            return List.of();
++        }
++
++        List<ChunkPos> deferredForgetChunks = new ArrayList<>();
++        for (LevelChunk chunk : chunks) {
++            long chunkPos = chunk.getPos().pack();
++            this.inFlightChunks.remove(chunkPos);
++            if (this.deferredForgetChunks.remove(chunkPos)) {
++                deferredForgetChunks.add(chunk.getPos());
++            }
++        }
++
++        return deferredForgetChunks;
++    }
++
++    private boolean isPendingChunkOwnedBy(ServerLevel level, long pos, @Nullable RegionKey owningRegion) {
++        return owningRegion == null || RegionizedWorldGuard.regionFor(level, ChunkPos.unpack(pos)).equals(owningRegion);
++    }
++
 +    public synchronized void onChunkBatchReceivedByClient(float desiredChunksPerTick) {
          this.unacknowledgedBatches--;
          this.desiredChunksPerTick = Double.isNaN(desiredChunksPerTick) ? 0.01F : Mth.clamp(desiredChunksPerTick, 0.01F, 64.0F);
          if (this.unacknowledgedBatches == 0) {
-@@ -121,7 +_,7 @@
+@@ -121,7 +_,32 @@
          this.maxUnacknowledgedBatches = 10;
      }
  
 -    public boolean isPending(long pos) {
 +    public synchronized boolean isPending(long pos) {
          return this.pendingChunks.contains(pos);
++    }
++
++    public synchronized int pendingChunkCount() {
++        return this.pendingChunks.size();
++    }
++
++    public synchronized int unacknowledgedBatchCount() {
++        return this.unacknowledgedBatches;
++    }
++
++    public synchronized long oldestPendingChunkAgeNanos() {
++        if (this.pendingChunkEnqueuedNanos.isEmpty()) {
++            return 0L;
++        }
++
++        long oldestNanos = Long.MAX_VALUE;
++        for (long enqueuedNanos : this.pendingChunkEnqueuedNanos.values()) {
++            oldestNanos = Math.min(oldestNanos, enqueuedNanos);
++        }
++
++        return oldestNanos == Long.MAX_VALUE ? 0L : Math.max(0L, System.nanoTime() - oldestNanos);
++    }
++
++    private record PendingChunkSelection(long[] pendingChunks, int maxBatchSize, boolean limitToNearestReadyChunks) {
++        private static final PendingChunkSelection EMPTY = new PendingChunkSelection(new long[0], 0, false);
      }
  }

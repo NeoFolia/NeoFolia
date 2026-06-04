@@ -1,5 +1,14 @@
 --- a/net/minecraft/world/level/chunk/LevelChunkSection.java
 +++ b/net/minecraft/world/level/chunk/LevelChunkSection.java
+@@ -62,7 +_,7 @@
+         return this.setBlockState(sectionX, sectionY, sectionZ, state, true);
+     }
+ 
+-    public BlockState setBlockState(int sectionX, int sectionY, int sectionZ, BlockState state, boolean checkThreading) {
++    public synchronized BlockState setBlockState(int sectionX, int sectionY, int sectionZ, BlockState state, boolean checkThreading) {
+         BlockState previous;
+         if (checkThreading) {
+             previous = this.states.getAndSet(sectionX, sectionY, sectionZ, state);
 @@ -70,7 +_,7 @@
              previous = this.states.getAndSetUnchecked(sectionX, sectionY, sectionZ, state);
          }
@@ -18,6 +27,15 @@
              this.nonEmptyBlockCount++;
              if (state.isRandomlyTicking()) {
                  this.tickingBlockCount++;
+@@ -123,7 +_,7 @@
+         return this.tickingFluidCount > 0;
+     }
+ 
+-    public void recalcBlockCounts() {
++    public synchronized void recalcBlockCounts() {
+         class BlockCounter implements PalettedContainer.CountConsumer<BlockState> {
+             public int nonEmptyBlockCount;
+             public int fluidCount;
 @@ -136,7 +_,7 @@
              }
  
@@ -27,3 +45,46 @@
                      this.nonEmptyBlockCount += count;
                      if (state.isRandomlyTicking()) {
                          this.tickingBlockCount += count;
+@@ -169,7 +_,7 @@
+         return this.biomes;
+     }
+ 
+-    public void read(FriendlyByteBuf buffer) {
++    public synchronized void read(FriendlyByteBuf buffer) {
+         this.nonEmptyBlockCount = buffer.readShort();
+         this.fluidCount = buffer.readShort();
+         this.states.read(buffer);
+@@ -178,13 +_,13 @@
+         this.biomes = biomes;
+     }
+ 
+-    public void readBiomes(FriendlyByteBuf buffer) {
++    public synchronized void readBiomes(FriendlyByteBuf buffer) {
+         PalettedContainer<Holder<Biome>> biomes = this.biomes.recreate();
+         biomes.read(buffer);
+         this.biomes = biomes;
+     }
+ 
+-    public void write(FriendlyByteBuf buffer) {
++    public synchronized void write(FriendlyByteBuf buffer) {
+         buffer.writeShort(this.nonEmptyBlockCount);
+         buffer.writeShort(this.fluidCount);
+         this.states.write(buffer);
+@@ -203,7 +_,7 @@
+         return this.biomes.get(quartX, quartY, quartZ);
+     }
+ 
+-    public void fillBiomesFromNoise(BiomeResolver biomeResolver, Climate.Sampler sampler, int quartMinX, int quartMinY, int quartMinZ) {
++    public synchronized void fillBiomesFromNoise(BiomeResolver biomeResolver, Climate.Sampler sampler, int quartMinX, int quartMinY, int quartMinZ) {
+         PalettedContainer<Holder<Biome>> newBiomes = this.biomes.recreate();
+         int size = 4;
+ 
+@@ -218,7 +_,7 @@
+         this.biomes = newBiomes;
+     }
+ 
+-    public LevelChunkSection copy() {
++    public synchronized LevelChunkSection copy() {
+         return new LevelChunkSection(this);
+     }
+ }

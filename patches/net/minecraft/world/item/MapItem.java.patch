@@ -1,5 +1,13 @@
 --- a/net/minecraft/world/item/MapItem.java
 +++ b/net/minecraft/world/item/MapItem.java
+@@ -30,6 +_,7 @@
+ import net.minecraft.world.level.material.MapColor;
+ import net.minecraft.world.level.saveddata.maps.MapId;
+ import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MapItem extends Item {
 @@ -52,6 +_,16 @@
      }
  
@@ -17,3 +25,74 @@
          MapId id = itemStack.get(DataComponents.MAP_ID);
          return getSavedData(id, level);
      }
+@@ -66,6 +_,7 @@
+     }
+ 
+     public void update(Level level, Entity player, MapItemSavedData data) {
++        synchronized (data) {
+         if (level.dimension() == data.dimension && player instanceof Player) {
+             int scale = 1 << data.scale;
+             int centerX = data.centerX;
+@@ -95,10 +_,14 @@
+                             int averagingAreaMinX = (centerX / scale + imgX - 64) * scale;
+                             int averagingAreaMinZ = (centerZ / scale + imgY - 64) * scale;
+                             Multiset<MapColor> colorCount = LinkedHashMultiset.create();
+-                            LevelChunk chunk = level.getChunk(
++                            LevelChunk chunk = level.getChunkSource().getChunkNow(
+                                 SectionPos.blockToSectionCoord(averagingAreaMinX), SectionPos.blockToSectionCoord(averagingAreaMinZ)
+                             );
+-                            if (!chunk.isEmpty()) {
++                            if (chunk != null
++                                && !chunk.isEmpty()
++                                && (!(level instanceof ServerLevel serverLevel)
++                                    || !serverLevel.getServer().regionizedTaskDispatcher().isRunning()
++                                    || RegionizedWorldGuard.isRegionThreadFor(serverLevel, chunk.getPos()))) {
+                                 int waterDepth = 0;
+                                 double averageAreaHeight = 0.0;
+                                 if (level.dimensionType().hasCeiling()) {
+@@ -180,6 +_,7 @@
+                 }
+             }
+         }
++        }
+     }
+ 
+     private BlockState getCorrectStateForFluidBlock(Level level, BlockState state, BlockPos pos) {
+@@ -194,6 +_,7 @@
+     public static void renderBiomePreviewMap(ServerLevel level, ItemStack mapItemStack) {
+         MapItemSavedData data = getSavedData(mapItemStack, level);
+         if (data != null) {
++            synchronized (data) {
+             if (level.dimension() == data.dimension) {
+                 int scale = 1 << data.scale;
+                 int centerX = data.centerX;
+@@ -263,6 +_,7 @@
+                     }
+                 }
+             }
++            }
+         }
+     }
+ 
+@@ -270,6 +_,7 @@
+     public void inventoryTick(ItemStack itemStack, ServerLevel level, Entity owner, @Nullable EquipmentSlot slot) {
+         MapItemSavedData data = getSavedData(itemStack, level);
+         if (data != null) {
++            synchronized (data) {
+             if (owner instanceof Player player) {
+                 data.tickCarriedBy(player, itemStack, null);
+             }
+@@ -277,6 +_,7 @@
+             if (!data.locked && slot != null && slot.getType() == EquipmentSlot.Type.HAND) {
+                 this.update(level, owner, data);
+             }
++            }
+         }
+     }
+ 
+@@ -331,4 +_,5 @@
+             return super.useOn(context);
+         }
+     }
++
+ }

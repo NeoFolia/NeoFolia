@@ -1,11 +1,200 @@
 --- a/net/minecraft/server/level/ChunkTaskDispatcher.java
 +++ b/net/minecraft/server/level/ChunkTaskDispatcher.java
-@@ -20,7 +_,7 @@
+@@ -1,16 +_,27 @@
+ package net.minecraft.server.level;
+ 
+ import com.mojang.logging.LogUtils;
++import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
++import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
++import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
++import it.unimi.dsi.fastutil.longs.LongSet;
++import java.util.HashMap;
++import java.util.Map;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.Executor;
++import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.function.IntConsumer;
+ import java.util.function.IntSupplier;
++import java.util.function.LongFunction;
+ import net.minecraft.SharedConstants;
+ import net.minecraft.util.Unit;
+ import net.minecraft.util.thread.PriorityConsecutiveExecutor;
+ import net.minecraft.util.thread.StrictQueue;
+ import net.minecraft.util.thread.TaskScheduler;
+ import net.minecraft.world.level.ChunkPos;
++import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -20,17 +_,74 @@
      private final ChunkTaskPriorityQueue queue;
      private final TaskScheduler<Runnable> executor;
      private final PriorityConsecutiveExecutor dispatcher;
 -    protected boolean sleeping;
++    private final int maxTaskBatchesInExecution;
++    private final int maxTaskBatchesInExecutionPerRegion;
++    private final @Nullable LongFunction<?> executionRegionSelector;
++    private final AtomicInteger taskBatchesInExecution = new AtomicInteger();
++    private final LongSet chunkPositionsInExecution = new LongOpenHashSet();
++    private final Long2ObjectMap<Object> chunkRegionsInExecution = new Long2ObjectOpenHashMap<>();
++    private final Map<Object, Integer> taskBatchesInExecutionByRegion = new HashMap<>();
 +    protected volatile boolean sleeping;
  
      public ChunkTaskDispatcher(TaskScheduler<Runnable> executor, Executor dispatcherExecutor) {
++        this(executor, dispatcherExecutor, 1);
++    }
++
++    public ChunkTaskDispatcher(TaskScheduler<Runnable> executor, Executor dispatcherExecutor, int maxTaskBatchesInExecution) {
++        this(executor, dispatcherExecutor, maxTaskBatchesInExecution, null);
++    }
++
++    public ChunkTaskDispatcher(
++        ServerLevel level,
++        TaskScheduler<Runnable> executor,
++        Executor dispatcherExecutor,
++        int maxTaskBatchesInExecution
++    ) {
++        this(executor, dispatcherExecutor, maxTaskBatchesInExecution, chunkPos -> executionRegionFor(level, chunkPos));
++    }
++
++    public ChunkTaskDispatcher(
++        TaskScheduler<Runnable> executor,
++        Executor dispatcherExecutor,
++        int maxTaskBatchesInExecution,
++        @Nullable LongFunction<?> executionRegionSelector
++    ) {
          this.queue = new ChunkTaskPriorityQueue(executor.name() + "_queue");
+         this.executor = executor;
+         this.dispatcher = new PriorityConsecutiveExecutor(4, dispatcherExecutor, "dispatcher");
++        this.maxTaskBatchesInExecution = Math.max(1, maxTaskBatchesInExecution);
++        this.maxTaskBatchesInExecutionPerRegion = Math.max(1, this.maxTaskBatchesInExecution / 2);
++        this.executionRegionSelector = executionRegionSelector;
+         this.sleeping = true;
+     }
+ 
++    static @Nullable RegionKey executionRegionFor(ServerLevel level, long chunkPos) {
++        if (!RegionizedServerSettings.regionizedChunkTicksEnabled() || !level.getServer().regionizedTaskDispatcher().isRunning()) {
++            return null;
++        }
++
++        RegionKey fixedRegion = RegionKey.fromChunk(level.dimension(), ChunkPos.unpack(chunkPos), RegionizedWorldGuard.DEFAULT_REGION_CHUNK_SHIFT);
++        return RegionizedWorldGuard.ownerForFixedRegion(level, fixedRegion);
++    }
++
+     public boolean hasWork() {
+-        return this.dispatcher.hasWork() || this.queue.hasWork();
++        return this.dispatcher.hasWork() || this.queue.hasWork() || this.taskBatchesInExecution.get() > 0;
++    }
++
++    public int queuedChunkCount() {
++        return this.queue.queuedChunkCount();
++    }
++
++    public int queuedTaskCount() {
++        return this.queue.queuedTaskCount();
++    }
++
++    public int topPriorityQueueIndex() {
++        return this.queue.topPriorityQueueIndex();
++    }
++
++    public long oldestQueuedTaskAgeNanos() {
++        return this.queue.oldestQueuedTaskAgeNanos();
+     }
+ 
+     @Override
+@@ -76,27 +_,83 @@
+ 
+     protected void pollTask() {
+         this.dispatcher.schedule(new StrictQueue.RunnableWithPriority(3, () -> {
+-            ChunkTaskPriorityQueue.TasksForChunk tasksForChunk = this.popTasks();
+-            if (tasksForChunk == null) {
+-                this.sleeping = true;
+-            } else {
++            while (this.taskBatchesInExecution.get() < this.maxTaskBatchesInExecution) {
++                ChunkTaskPriorityQueue.TasksForChunk tasksForChunk = this.popTasks();
++                if (tasksForChunk == null) {
++                    break;
++                }
++
++                this.taskBatchesInExecution.incrementAndGet();
++                this.markChunkInExecution(tasksForChunk.chunkPos());
+                 this.scheduleForExecution(tasksForChunk);
+             }
++
++            this.sleeping = true;
+         }));
+     }
+ 
+     protected void scheduleForExecution(ChunkTaskPriorityQueue.TasksForChunk tasksForChunk) {
+-        CompletableFuture.allOf(tasksForChunk.tasks().stream().map(message -> this.executor.scheduleWithResult(future -> {
+-            message.run();
+-            future.complete(Unit.INSTANCE);
+-        })).toArray(CompletableFuture[]::new)).thenAccept(r -> this.pollTask());
++        this.executor.scheduleWithResult(future -> {
++            try {
++                for (Runnable message : tasksForChunk.tasks()) {
++                    message.run();
++                }
++
++                future.complete(Unit.INSTANCE);
++            } catch (Throwable throwable) {
++                future.completeExceptionally(throwable);
++                LOGGER.error("Failed to execute chunk task batch for {}", ChunkPos.unpack(tasksForChunk.chunkPos()), throwable);
++            }
++        }).whenComplete((ignored, throwable) -> {
++            this.clearChunkInExecution(tasksForChunk.chunkPos());
++            this.taskBatchesInExecution.decrementAndGet();
++            if (throwable != null) {
++                LOGGER.error("Chunk task batch completed exceptionally for {}", ChunkPos.unpack(tasksForChunk.chunkPos()), throwable);
++            }
++
++            this.pollTask();
++        });
+     }
+ 
+     protected void onRelease(long key) {
+     }
+ 
+     protected ChunkTaskPriorityQueue.@Nullable TasksForChunk popTasks() {
+-        return this.queue.pop();
++        return this.queue.pop(this::canRunChunk);
++    }
++
++    protected synchronized boolean canRunChunk(long chunkPos) {
++        if (this.chunkPositionsInExecution.contains(chunkPos)) {
++            return false;
++        }
++
++        Object region = this.executionRegionForChunk(chunkPos);
++        return region == null || this.taskBatchesInExecutionByRegion.getOrDefault(region, 0) < this.maxTaskBatchesInExecutionPerRegion;
++    }
++
++    private synchronized void markChunkInExecution(long chunkPos) {
++        if (!this.chunkPositionsInExecution.add(chunkPos)) {
++            throw new IllegalStateException("Chunk task batch already executing for " + ChunkPos.unpack(chunkPos));
++        }
++
++        Object region = this.executionRegionForChunk(chunkPos);
++        if (region != null) {
++            this.chunkRegionsInExecution.put(chunkPos, region);
++            this.taskBatchesInExecutionByRegion.merge(region, 1, Integer::sum);
++        }
++    }
++
++    private synchronized void clearChunkInExecution(long chunkPos) {
++        this.chunkPositionsInExecution.remove(chunkPos);
++        Object region = this.chunkRegionsInExecution.remove(chunkPos);
++        if (region != null) {
++            this.taskBatchesInExecutionByRegion.computeIfPresent(region, (unused, count) -> count <= 1 ? null : count - 1);
++        }
++    }
++
++    protected @Nullable Object executionRegionForChunk(long chunkPos) {
++        LongFunction<?> selector = this.executionRegionSelector;
++        return selector == null ? null : selector.apply(chunkPos);
+     }
+ 
+     @Override

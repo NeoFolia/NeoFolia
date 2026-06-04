@@ -1,5 +1,13 @@
 --- a/net/minecraft/world/level/block/PoweredRailBlock.java
 +++ b/net/minecraft/world/level/block/PoweredRailBlock.java
+@@ -11,6 +_,7 @@
+ import net.minecraft.world.level.block.state.properties.EnumProperty;
+ import net.minecraft.world.level.block.state.properties.Property;
+ import net.minecraft.world.level.block.state.properties.RailShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class PoweredRailBlock extends BaseRailBlock {
+     public static final MapCodec<PoweredRailBlock> CODEC = simpleCodec(PoweredRailBlock::new);
 @@ -22,8 +_,19 @@
          return CODEC;
      }
@@ -29,9 +37,14 @@
              switch (shape) {
                  case NORTH_SOUTH:
                      if (forward) {
-@@ -104,17 +_,17 @@
+@@ -103,18 +_,22 @@
+     }
  
      protected boolean isSameRailWithPower(Level level, BlockPos pos, boolean forward, int searchDepth, RailShape dir) {
++        if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, pos)) {
++            return false;
++        }
++
          BlockState state = level.getBlockState(pos);
 -        if (!state.is(this)) {
 +        if (!(state.getBlock() instanceof PoweredRailBlock other)) {

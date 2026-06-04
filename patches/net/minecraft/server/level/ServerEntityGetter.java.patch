@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ServerEntityGetter.java
 +++ b/net/minecraft/server/level/ServerEntityGetter.java
-@@ -9,6 +_,7 @@
+@@ -9,21 +_,22 @@
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.level.EntityGetter;
  import net.minecraft.world.phys.AABB;
@@ -8,6 +8,24 @@
  import org.jspecify.annotations.Nullable;
  
  public interface ServerEntityGetter extends EntityGetter {
+     ServerLevel getLevel();
+ 
+     default @Nullable Player getNearestPlayer(TargetingConditions targetConditions, LivingEntity source) {
+-        return this.getNearestEntity(this.players(), targetConditions, source, source.getX(), source.getY(), source.getZ());
++        return this.getNearestEntity(this.getLocalPlayers(), targetConditions, source, source.getX(), source.getY(), source.getZ());
+     }
+ 
+     default @Nullable Player getNearestPlayer(TargetingConditions targetConditions, LivingEntity source, double x, double y, double z) {
+-        return this.getNearestEntity(this.players(), targetConditions, source, x, y, z);
++        return this.getNearestEntity(this.getLocalPlayers(), targetConditions, source, x, y, z);
+     }
+ 
+     default @Nullable Player getNearestPlayer(TargetingConditions targetConditions, double x, double y, double z) {
+-        return this.getNearestEntity(this.players(), targetConditions, null, x, y, z);
++        return this.getNearestEntity(this.getLocalPlayers(), targetConditions, null, x, y, z);
+     }
+ 
+     default <T extends LivingEntity> @Nullable T getNearestEntity(
 @@ -39,6 +_,10 @@
          LivingEntity nearestEntity = null;
  
@@ -30,14 +48,12 @@
              if (targetConditions.test(this.getLevel(), source, entity)) {
                  double dist = entity.distanceToSqr(x, y, z);
                  if (best == -1.0 || dist < best) {
-@@ -74,6 +_,10 @@
+@@ -73,7 +_,7 @@
+     default List<Player> getNearbyPlayers(TargetingConditions targetConditions, LivingEntity source, AABB bb) {
          List<Player> foundPlayers = new ArrayList<>();
  
-         for (Player player : this.players()) {
-+            if (RegionizedWorldGuard.restrictEntityToCurrentRegion(this.getLevel(), player) == null) {
-+                continue;
-+            }
-+
+-        for (Player player : this.players()) {
++        for (Player player : this.getLocalPlayers()) {
              if (bb.contains(player.getX(), player.getY(), player.getZ()) && targetConditions.test(this.getLevel(), source, player)) {
                  foundPlayers.add(player);
              }

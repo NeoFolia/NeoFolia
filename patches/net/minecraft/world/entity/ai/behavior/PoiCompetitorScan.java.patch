@@ -1,7 +1,10 @@
 --- a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
 +++ b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
-@@ -12,7 +_,7 @@
+@@ -10,19 +_,26 @@
+ import net.minecraft.world.entity.ai.village.poi.PoiType;
+ import net.minecraft.world.entity.npc.villager.Villager;
  import net.minecraft.world.entity.npc.villager.VillagerProfession;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  
  public class PoiCompetitorScan {
 -    public static BehaviorControl<Villager> create() {
@@ -9,7 +12,15 @@
          return BehaviorBuilder.create(
              i -> i.group(i.present(MemoryModuleType.JOB_SITE), i.present(MemoryModuleType.NEAREST_LIVING_ENTITIES))
                  .apply(
-@@ -22,7 +_,7 @@
+                     i,
+                     (jobSite, nearestEntities) -> (level, body, timestamp) -> {
+                         GlobalPos pos = i.get(jobSite);
++                        if (pos.dimension() != level.dimension()
++                            || level.getServer().regionizedTaskDispatcher().isRunning()
++                                && !RegionizedWorldGuard.isRegionThreadFor(level, pos.pos())) {
++                            return true;
++                        }
++
                          level.getPoiManager()
                              .getType(pos.pos())
                              .ifPresent(

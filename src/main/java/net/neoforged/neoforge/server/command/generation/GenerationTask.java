@@ -161,7 +161,7 @@ public class GenerationTask {
                     LOGGER.warn("Encountered unexpected error while generating chunk", throwable);
                     this.acceptChunkResult(chunkLongPos, ChunkHolder.UNLOADED_CHUNK);
                 }
-            }, runnable -> chunkMap.scheduleOnMainThreadMailbox(runnable));
+            }, runnable -> chunkMap.scheduleOnMainThreadMailbox(ChunkPos.unpack(chunkLongPos), runnable));
         }
     }
 

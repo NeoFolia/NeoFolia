@@ -8,6 +8,14 @@
  import java.util.stream.Collectors;
  import java.util.stream.Stream;
  import net.minecraft.ChatFormatting;
+@@ -47,6 +_,7 @@
+ import net.minecraft.network.Connection;
+ import net.minecraft.network.DisconnectionDetails;
+ import net.minecraft.network.HashedStack;
++import net.minecraft.network.PacketProcessor;
+ import net.minecraft.network.TickablePacketListener;
+ import net.minecraft.network.chat.ChatType;
+ import net.minecraft.network.chat.Component;
 @@ -177,7 +_,9 @@
  import net.minecraft.world.entity.player.ProfilePublicKey;
  import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
@@ -18,17 +26,26 @@
  import net.minecraft.world.inventory.BeaconMenu;
  import net.minecraft.world.inventory.CrafterMenu;
  import net.minecraft.world.inventory.MerchantMenu;
-@@ -218,6 +_,9 @@
+@@ -218,6 +_,10 @@
  import net.minecraft.world.phys.shapes.BooleanOp;
  import net.minecraft.world.phys.shapes.Shapes;
  import net.minecraft.world.phys.shapes.VoxelShape;
 +import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedServerSettings;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
  import org.jspecify.annotations.Nullable;
  import org.slf4j.Logger;
  
-@@ -271,9 +_,10 @@
+@@ -238,6 +_,7 @@
+     private static final int MAX_COMMAND_SUGGESTIONS = 1000;
+     public ServerPlayer player;
+     public final PlayerChunkSender chunkSender;
++    private final PacketProcessor packetProcessor;
+     private int tickCount;
+     private int ackBlockChangesUpTo = -1;
+     private final TickThrottler chatSpamThrottler = new TickThrottler(20, 200);
+@@ -271,15 +_,18 @@
      private int nextChatIndex;
      private final MessageSignatureCache messageSignatureCache = MessageSignatureCache.createDefault();
      private final FutureChain chatMessageChain;
@@ -37,24 +54,170 @@
      private boolean waitingForRespawn;
      private int clientLoadedTimeoutTimer;
 +    private boolean regionizedTickQueued;
++    private boolean regionizedConnectionTickerActive;
  
      public ServerGamePacketListenerImpl(MinecraftServer server, Connection connection, ServerPlayer player, CommonListenerCookie cookie) {
          super(server, connection, cookie);
-@@ -288,9 +_,45 @@
+         this.restartClientLoadTimerAfterRespawn();
+         this.chunkSender = new PlayerChunkSender(connection.isMemoryConnection());
+         this.player = player;
++        this.packetProcessor = new PacketProcessor(() -> this.isPacketProcessorThread());
+         player.connection = this;
+         player.getTextFilter().join();
+         this.signedMessageDecoder = SignedMessageChain.Decoder.unsigned(player.getUUID(), server::enforceSecureProfile);
+@@ -288,22 +_,182 @@
  
      @Override
      public void tick() {
 -        if (this.ackBlockChangesUpTo > -1) {
 -            this.send(new ClientboundBlockChangedAckPacket(this.ackBlockChangesUpTo));
 -            this.ackBlockChangesUpTo = -1;
-+        if (this.scheduleTickOnPlayerRegion()) {
+-        }
+-
+-        if (this.server.isPaused() || !this.tickPlayer()) {
+-            this.keepConnectionAlive();
+-            this.chatSpamThrottler.tick();
+-            this.dropSpamThrottler.tick();
+-            if (this.player.getLastActionTime() > 0L
+-                && this.server.playerIdleTimeout() > 0
+-                && Util.getMillis() - this.player.getLastActionTime() > TimeUnit.MINUTES.toMillis(this.server.playerIdleTimeout())
+-                && !this.player.wonGame) {
+-                this.disconnect(Component.translatable("multiplayer.disconnect.idling"));
+-            }
+-        }
++        if (this.scheduleOnPlayerRegion(this::tick)) {
 +            return;
 +        }
 +
 +        this.tickOnPlayerRegion();
 +    }
 +
-+    private boolean scheduleTickOnPlayerRegion() {
++    private void tickOnPlayerRegion() {
++        boolean suspendFlushing = this.shouldSuspendFlushingForRegionTick();
++        if (suspendFlushing) {
++            this.suspendFlushing();
++        }
++
++        try {
++            this.processQueuedGameplayPackets();
++
++            int ackBlockChangesUpTo = this.takeAckBlockChangesUpTo();
++            if (ackBlockChangesUpTo > -1) {
++                this.send(new ClientboundBlockChangedAckPacket(ackBlockChangesUpTo));
++            }
++
++            if (this.server.isPaused() || !this.tickPlayer()) {
++                this.keepConnectionAlive();
++                this.chatSpamThrottler.tick();
++                this.dropSpamThrottler.tick();
++                if (this.player.getLastActionTime() > 0L
++                    && this.server.playerIdleTimeout() > 0
++                    && Util.getMillis() - this.player.getLastActionTime() > TimeUnit.MINUTES.toMillis(this.server.playerIdleTimeout())
++                    && !this.player.wonGame) {
++                    this.disconnect(Component.translatable("multiplayer.disconnect.idling"));
++                }
++            }
++
++            if (this.connection.isConnected() && !this.waitingForSwitchToConfig && !this.player.isRemoved()) {
++                this.chunkSender.sendNextChunks(this.player);
++            }
++        } finally {
++            if (suspendFlushing) {
++                this.resumeFlushing();
++            }
++        }
++    }
++
++    private boolean shouldSuspendFlushingForRegionTick() {
++        return this.server.regionizedTaskDispatcher().isRunning() && RegionizedTickContext.isRegionThread();
++    }
++
++    private boolean isPacketProcessorThread() {
++        if (!this.server.regionizedTaskDispatcher().isRunning()) {
++            return this.server.isSameThread();
++        }
++
++        return this.player != null && RegionizedWorldGuard.isOnPlayerRegion(this.player);
++    }
++
++    private void processQueuedGameplayPackets() {
++        this.packetProcessor.processQueuedPackets(
++            RegionizedServerSettings.playerPacketProcessorMaxPacketsPerTick(),
++            TimeUnit.MILLISECONDS.toNanos(RegionizedServerSettings.playerPacketProcessorMaxTimeMs())
++        );
++    }
++
++    boolean isWaitingForSwitchToConfig() {
++        return this.waitingForSwitchToConfig;
++    }
++
++    boolean ensureRegionizedConnectionTicker(Runnable connectionTick) {
++        if (!this.shouldUseRegionizedConnectionTicker()) {
++            this.clearRegionizedConnectionTickerActive();
++            return false;
++        }
++
++        synchronized (this) {
++            if (this.regionizedConnectionTickerActive) {
++                return true;
++            }
++
++            this.regionizedConnectionTickerActive = true;
++        }
++
++        this.server.getConnection().markConnectionRegionized(this.connection);
++        if (!this.scheduleOnPlayerRegion(() -> this.runRegionizedConnectionTick(connectionTick))) {
++            this.clearRegionizedConnectionTickerActive();
++            return false;
++        }
++
++        return true;
++    }
++
++    private void runRegionizedConnectionTick(Runnable connectionTick) {
++        if (!this.shouldUseRegionizedConnectionTicker()) {
++            this.clearRegionizedConnectionTickerActive();
++            return;
++        }
++
++        if (!RegionizedWorldGuard.isOnPlayerRegion(this.player)) {
++            if (!this.scheduleOnPlayerRegion(() -> this.runRegionizedConnectionTick(connectionTick))) {
++                this.clearRegionizedConnectionTickerActive();
++            }
++            return;
++        }
++
++        connectionTick.run();
++        if (!this.shouldUseRegionizedConnectionTicker()) {
++            this.clearRegionizedConnectionTickerActive();
++            return;
++        }
++
++        RegionKey region = RegionizedWorldGuard.regionFor(this.player.level(), this.player.blockPosition());
++        if (!this.server.regionizedTaskDispatcher().tryExecuteNextTick(region, "connection-tick", () -> this.runRegionizedConnectionTick(connectionTick))) {
++            this.clearRegionizedConnectionTickerActive();
++        }
++    }
++
++    private boolean shouldUseRegionizedConnectionTicker() {
++        return this.server.regionizedTaskDispatcher().isRunning()
++            && this.connection.isConnected()
++            && !this.waitingForSwitchToConfig
++            && !this.player.isRemoved();
++    }
++
++    private void clearRegionizedConnectionTickerActive() {
++        boolean wasActive;
++        synchronized (this) {
++            wasActive = this.regionizedConnectionTickerActive;
++            this.regionizedConnectionTickerActive = false;
++        }
++        if (wasActive) {
++            this.server.getConnection().markConnectionGlobalTick(this.connection);
++        }
++    }
++
++    private boolean scheduleOnPlayerRegion(Runnable task) {
 +        if (!this.server.regionizedTaskDispatcher().isRunning()) {
 +            return false;
 +        }
@@ -64,44 +227,43 @@
 +            return false;
 +        }
 +
-+        if (this.regionizedTickQueued) {
-+            return true;
++        synchronized (this) {
++            if (this.regionizedTickQueued) {
++                return true;
++            }
++
++            this.regionizedTickQueued = true;
 +        }
 +
-+        this.regionizedTickQueued = true;
 +        if (!this.server.regionizedTaskDispatcher().tryExecute(region, () -> {
-+            synchronized (this) {
-+                this.regionizedTickQueued = false;
++            RegionKey currentRegion = RegionizedWorldGuard.regionFor(this.player.level(), this.player.blockPosition());
++            if (!RegionizedTickContext.currentRegion().map(currentRegion::equals).orElse(false)) {
++                this.clearRegionizedTickQueued();
++                this.scheduleOnPlayerRegion(task);
++                return;
 +            }
-+            this.tick();
++
++            this.clearRegionizedTickQueued();
++            task.run();
 +        })) {
-+            this.regionizedTickQueued = false;
++            this.clearRegionizedTickQueued();
 +            return false;
 +        }
 +
 +        return true;
 +    }
 +
-+    private void tickOnPlayerRegion() {
-+        int ackBlockChangesUpTo = this.takeAckBlockChangesUpTo();
-+        if (ackBlockChangesUpTo > -1) {
-+            this.send(new ClientboundBlockChangedAckPacket(ackBlockChangesUpTo));
-         }
- 
-         if (this.server.isPaused() || !this.tickPlayer()) {
-@@ -306,6 +_,12 @@
-         }
-     }
- 
++    private synchronized void clearRegionizedTickQueued() {
++        this.regionizedTickQueued = false;
++    }
++
 +    private synchronized int takeAckBlockChangesUpTo() {
 +        int result = this.ackBlockChangesUpTo;
 +        this.ackBlockChangesUpTo = -1;
 +        return result;
-+    }
-+
+     }
+ 
      private boolean tickPlayer() {
-         this.resetPosition();
-         this.player.xo = this.player.getX();
 @@ -363,12 +_,12 @@
          }
      }
@@ -955,10 +1117,14 @@
          int slot = packet.slot();
          if (Inventory.isHotbarSlot(slot) || slot == 40) {
              List<String> contents = Lists.newArrayList();
-@@ -992,206 +_,259 @@
-         }
-     }
- 
+@@ -988,210 +_,267 @@
+             Consumer<List<FilteredText>> handler = title.isPresent()
+                 ? filteredContents -> this.signBook(filteredContents.get(0), filteredContents.subList(1, filteredContents.size()), slot)
+                 : filteredContents -> this.updateBookContents(filteredContents, slot);
+-            this.filterTextPacket(contents).thenAcceptAsync(handler, this.server);
+-        }
+-    }
+-
 -    private void updateBookContents(List<FilteredText> contents, int slot) {
 -        ItemStack carried = this.player.getInventory().getItem(slot);
 -        if (carried.has(DataComponents.WRITABLE_BOOK_CONTENT)) {
@@ -981,6 +1147,14 @@
 -    }
 -
 -    private Filterable<String> filterableFromOutgoing(FilteredText text) {
++            this.filterTextPacket(contents).thenAcceptAsync(handler, this.player::queuePacketTask).whenComplete((result, throwable) -> {
++                if (throwable != null) {
++                    LOGGER.error("Failed to handle book update packet", throwable);
++                }
++            });
++        }
++    }
++
 +    private synchronized void updateBookContents(List<FilteredText> contents, int slot) {
 +        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> {
 +            ItemStack carried = this.player.getInventory().getItem(slot);
@@ -1540,7 +1714,7 @@
          if (this.hasClientLoaded()) {
              this.ackBlockChangesUpTo(packet.getSequence());
              ServerLevel level = this.player.level();
-@@ -1428,25 +_,72 @@
+@@ -1428,46 +_,100 @@
      }
  
      @Override
@@ -1625,7 +1799,19 @@
      }
  
      @Override
-@@ -1459,15 +_,18 @@
+     public void onDisconnect(DisconnectionDetails details) {
+-        LOGGER.info("{} lost connection: {}", this.player.getPlainTextName(), details.reason().getString());
+-        this.removePlayerFromWorld();
+-        super.onDisconnect(details);
++        try {
++            LOGGER.info("{} lost connection: {}", this.player.getPlainTextName(), details.reason().getString());
++            this.removePlayerFromWorld();
++            super.onDisconnect(details);
++        } finally {
++            this.packetProcessor.close();
++        }
+     }
+ 
      private void removePlayerFromWorld() {
          this.chatMessageChain.close();
          this.server.invalidateStatus();
@@ -1647,7 +1833,7 @@
          if (packetSequenceNr < 0) {
              throw new IllegalArgumentException("Expected packet sequence nr >= 0");
          } else {
-@@ -1476,22 +_,24 @@
+@@ -1476,22 +_,25 @@
      }
  
      @Override
@@ -1680,6 +1866,7 @@
      @Override
 -    public void handleChat(ServerboundChatPacket packet) {
 +    public synchronized void handleChat(ServerboundChatPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
          Optional<LastSeenMessages> unpackedLastSeen = this.unpackAndApplyLastSeen(packet.lastSeenMessages());
          if (!unpackedLastSeen.isEmpty()) {
              this.tryHandleChat(packet.message(), false, () -> {
@@ -1694,12 +1881,13 @@
                      PlayerChatMessage filteredMessage = signedMessage.withUnsignedContent(decorated).filter(filtered.mask());
                      this.broadcastChatMessage(filteredMessage);
                  });
-@@ -1514,27 +_,27 @@
+@@ -1514,27 +_,29 @@
      }
  
      @Override
 -    public void handleChatCommand(ServerboundChatCommandPacket packet) {
 +    public synchronized void handleChatCommand(ServerboundChatCommandPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
          this.tryHandleChat(packet.command(), true, () -> {
              this.performUnsignedChatCommand(packet.command());
              this.detectRateSpam();
@@ -1723,6 +1911,7 @@
      @Override
 -    public void handleSignedChatCommand(ServerboundChatCommandSignedPacket packet) {
 +    public synchronized void handleSignedChatCommand(ServerboundChatCommandSignedPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
          Optional<LastSeenMessages> unpackedLastSeen = this.unpackAndApplyLastSeen(packet.lastSeenMessages());
          if (!unpackedLastSeen.isEmpty()) {
              this.tryHandleChat(packet.command(), true, () -> {
@@ -2444,7 +2633,7 @@
      }
  
      private static <T> void addGameRuleValue(GameRules gameRules, Map<ResourceKey<GameRule<?>>, String> values, GameRule<T> rule) {
-@@ -1917,134 +_,157 @@
+@@ -1917,134 +_,163 @@
      }
  
      @Override
@@ -2700,11 +2889,20 @@
 +    @Override
 +    public synchronized void handleSignUpdate(ServerboundSignUpdatePacket packet) {
          List<String> lines = Stream.of(packet.getLines()).map(ChatFormatting::stripFormatting).collect(Collectors.toList());
-         this.filterTextPacket(lines).thenAcceptAsync(filteredLines -> this.updateSignText(packet, (List<FilteredText>)filteredLines), this.server);
-     }
- 
+-        this.filterTextPacket(lines).thenAcceptAsync(filteredLines -> this.updateSignText(packet, (List<FilteredText>)filteredLines), this.server);
+-    }
+-
 -    private void updateSignText(ServerboundSignUpdatePacket packet, List<FilteredText> lines) {
 -        this.player.resetLastActionTime();
++        this.filterTextPacket(lines)
++            .thenAcceptAsync(filteredLines -> this.updateSignText(packet, (List<FilteredText>)filteredLines), this.player::queuePacketTask)
++            .whenComplete((result, throwable) -> {
++                if (throwable != null) {
++                    LOGGER.error("Failed to handle sign update packet", throwable);
++                }
++            });
++    }
++
 +    private synchronized void updateSignText(ServerboundSignUpdatePacket packet, List<FilteredText> lines) {
 +        RegionizedWorldGuard.executeOnPlayerRegion(this.player, () -> this.updateSignTextOnRegion(packet, lines));
 +    }
@@ -2818,7 +3016,7 @@
          PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
          RemoteChatSession.Data newChatSession = packet.chatSession();
          ProfilePublicKey.Data oldProfileKey = this.chatSession != null ? this.chatSession.profilePublicKey().data() : null;
-@@ -2133,61 +_,68 @@
+@@ -2133,61 +_,69 @@
      }
  
      @Override
@@ -2881,6 +3079,7 @@
      @Override
 -    public void handleCustomPayload(ServerboundCustomPayloadPacket packet) {
 +    public synchronized void handleCustomPayload(ServerboundCustomPayloadPacket packet) {
++        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
 +        super.handleCustomPayload(packet); // Neo: Call super to invoke modded payload handling.
      }
  
@@ -2915,7 +3114,16 @@
      }
  
      @Override
-@@ -2210,21 +_,21 @@
+@@ -2206,25 +_,30 @@
+         return this.player;
+     }
+ 
++    @Override
++    public PacketProcessor getPacketProcessor() {
++        return this.packetProcessor;
++    }
++
+     public boolean hasClientLoaded() {
          return !this.waitingForRespawn && this.clientLoadedTimeoutTimer <= 0;
      }
  

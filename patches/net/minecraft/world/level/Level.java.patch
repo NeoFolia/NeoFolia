@@ -26,11 +26,12 @@
  import net.minecraft.sounds.SoundEvent;
  import net.minecraft.sounds.SoundEvents;
  import net.minecraft.sounds.SoundSource;
-@@ -87,10 +_,14 @@
+@@ -87,10 +_,15 @@
  import net.minecraft.world.phys.AABB;
  import net.minecraft.world.phys.Vec3;
  import net.minecraft.world.scores.Scoreboard;
 +import net.neoforged.neoforge.server.region.RegionKey;
++import net.neoforged.neoforge.server.region.RegionizedWorldData;
 +import net.neoforged.neoforge.server.region.RegionizedServerSettings;
 +import net.neoforged.neoforge.server.region.RegionizedTickContext;
 +import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
@@ -297,10 +298,15 @@
          }
      }
  
-@@ -452,18 +_,69 @@
+@@ -452,18 +_,78 @@
      }
  
      public void addBlockEntityTicker(TickingBlockEntity ticker) {
++        if (this.shouldStoreBlockEntityTickersByRegion()) {
++            RegionizedWorldGuard.worldDataForBlock((ServerLevel)this, ticker.getPos()).addBlockEntityTicker(ticker);
++            return;
++        }
++
 +        if (RegionizedTickContext.isRegionThread()) {
 +            this.pendingOffThreadBlockEntityTickers.add(ticker);
 +            return;
@@ -361,6 +367,10 @@
 +    }
 +
 +    private boolean shouldTickBlockEntitiesRegionized() {
++        return this.shouldStoreBlockEntityTickersByRegion();
++    }
++
++    private boolean shouldStoreBlockEntityTickersByRegion() {
 +        return this instanceof ServerLevel serverLevel
 +            && RegionizedServerSettings.regionizedBlockEntityTicksEnabled()
 +            && serverLevel.getServer().regionizedTaskDispatcher().isRunning();
@@ -372,7 +382,7 @@
  
          while (iterator.hasNext()) {
              TickingBlockEntity ticker = iterator.next();
-@@ -473,18 +_,62 @@
+@@ -473,18 +_,93 @@
                  ticker.tick();
              }
          }
@@ -381,30 +391,61 @@
 +    }
 +
 +    private void tickBlockEntitiesRegionized(ServerLevel serverLevel) {
-+        Map<RegionKey, List<TickingBlockEntity>> tickersByRegion = new LinkedHashMap<>();
-+        Iterator<TickingBlockEntity> iterator = this.blockEntityTickers.iterator();
++        this.migrateBlockEntityTickersToRegionData(serverLevel);
 +
-+        while (iterator.hasNext()) {
-+            TickingBlockEntity ticker = iterator.next();
-+            if (ticker.isRemoved()) {
-+                iterator.remove();
-+            } else if (this.shouldTickBlocksAt(ticker.getPos())) {
-+                tickersByRegion.computeIfAbsent(serverLevel.regionKeyForBlock(ticker.getPos()), key -> new ArrayList<>()).add(ticker);
-+            }
-+        }
++        Map<RegionKey, List<RegionizedWorldData>> dataByRegion = RegionizedWorldGuard.regionWorldDataByOwner(serverLevel);
 +
 +        Map<RegionKey, Runnable> tasksByRegion = new LinkedHashMap<>();
-+        tickersByRegion.forEach((region, tickers) -> tasksByRegion.put(region, () -> {
++        dataByRegion.forEach((region, dataList) -> {
++            List<RegionizedWorldData> activeData = dataList.stream().filter(RegionizedWorldData::hasBlockEntityTickers).toList();
++            if (!activeData.isEmpty()) {
++                tasksByRegion.put(region, () -> {
++                    for (RegionizedWorldData worldData : activeData) {
++                        this.tickBlockEntitiesForRegionData(serverLevel, worldData);
++                    }
++                });
++            }
++        });
++
++        serverLevel.getServer().regionizedTaskDispatcher().executeCoalescedAll("block-entity-ticks", tasksByRegion);
++    }
++
++    private void migrateBlockEntityTickersToRegionData(ServerLevel serverLevel) {
++        Iterator<TickingBlockEntity> iterator = this.blockEntityTickers.iterator();
++        while (iterator.hasNext()) {
++            TickingBlockEntity ticker = iterator.next();
++            iterator.remove();
++            if (!ticker.isRemoved()) {
++                RegionizedWorldGuard.worldDataForBlock(serverLevel, ticker.getPos()).addBlockEntityTicker(ticker);
++            }
++        }
++    }
++
++    private void tickBlockEntitiesForRegionData(ServerLevel serverLevel, RegionizedWorldData worldData) {
++        List<TickingBlockEntity> tickers = worldData.beginBlockEntityTick();
++        List<TickingBlockEntity> toRemove = new ArrayList<>();
++        try {
 +            for (TickingBlockEntity ticker : tickers) {
-+                BlockPos pos = ticker.getPos();
-+                serverLevel.ensureRegionThreadFor(pos, "block entity tick");
-+                if (!ticker.isRemoved()) {
++                if (ticker == null || ticker.isRemoved()) {
++                    toRemove.add(ticker);
++                    continue;
++                }
++
++                RegionizedWorldData currentData = RegionizedWorldGuard.worldDataForBlock(serverLevel, ticker.getPos());
++                if (currentData != worldData) {
++                    toRemove.add(ticker);
++                    currentData.addBlockEntityTicker(ticker);
++                    continue;
++                }
++
++                if (this.shouldTickBlocksAt(ticker.getPos())) {
++                    serverLevel.ensureRegionThreadFor(ticker.getPos(), "block entity tick");
 +                    ticker.tick();
 +                }
 +            }
-+        }));
-+
-+        serverLevel.getServer().regionizedTaskDispatcher().executeCoalescedAll("block-entity-ticks", tasksByRegion);
++        } finally {
++            worldData.endBlockEntityTick(toRemove);
++        }
 +    }
 +
 +    private void drainOffThreadBlockEntityUpdates() {
@@ -415,7 +456,7 @@
 +
 +        TickingBlockEntity ticker;
 +        while ((ticker = this.pendingOffThreadBlockEntityTickers.poll()) != null) {
-+            this.blockEntityTickers.add(ticker);
++            this.addBlockEntityTicker(ticker);
 +        }
      }
  
@@ -626,7 +667,7 @@
          if (this.hasChunkAt(pos)) {
              this.getChunkAt(pos).markUnsaved();
          }
-@@ -907,17 +_,20 @@
+@@ -907,17 +_,24 @@
  
      public abstract Scoreboard getScoreboard();
  
@@ -637,7 +678,8 @@
 +        // Neo: send update to vertical directions as well, after horizontal ones
 +        for (Direction direction : NEIGHBOR_UPDATE_LIST) {
              BlockPos relativePos = pos.relative(direction);
-             if (this.hasChunkAt(relativePos)) {
+-            if (this.hasChunkAt(relativePos)) {
++            if (RegionizedWorldGuard.isRegionOwnedAndLoaded(this, relativePos)) {
                  BlockState state = this.getBlockState(relativePos);
 -                if (state.is(Blocks.COMPARATOR)) {
 -                    this.neighborChanged(state, relativePos, changedBlock, null, false);
@@ -645,6 +687,10 @@
 +                state.onNeighborChange(this, relativePos, pos);
 +                if (state.isRedstoneConductor(this, relativePos)) {
                      relativePos = relativePos.relative(direction);
++                    if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(this, relativePos)) {
++                        continue;
++                    }
++
                      state = this.getBlockState(relativePos);
 -                    if (state.is(Blocks.COMPARATOR)) {
 +                    // Neo: send to any blockstate that wants weak changes, but exclude vanilla comparators from vertical updates

@@ -1,5 +1,13 @@
 --- a/net/minecraft/world/level/block/TripWireBlock.java
 +++ b/net/minecraft/world/level/block/TripWireBlock.java
+@@ -26,6 +_,7 @@
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ 
+ public class TripWireBlock extends Block {
+     public static final MapCodec<TripWireBlock> CODEC = RecordCodecBuilder.mapCodec(
 @@ -113,7 +_,7 @@
  
      @Override
@@ -9,3 +17,14 @@
              level.setBlock(pos, state.setValue(DISARMED, true), 260);
              level.gameEvent(player, GameEvent.SHEAR, pos);
          }
+@@ -125,6 +_,10 @@
+         for (Direction direction : new Direction[]{Direction.SOUTH, Direction.WEST}) {
+             for (int i = 1; i < 42; i++) {
+                 BlockPos testPos = pos.relative(direction, i);
++                if (!RegionizedWorldGuard.isRegionOwnedAndLoaded(level, testPos)) {
++                    break;
++                }
++
+                 BlockState block = level.getBlockState(testPos);
+                 if (block.is(this.hook)) {
+                     if (block.getValue(TripWireHookBlock.FACING) == direction.getOpposite()) {

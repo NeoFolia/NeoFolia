@@ -1,5 +1,21 @@
 --- a/net/minecraft/world/level/saveddata/maps/MapItemSavedData.java
 +++ b/net/minecraft/world/level/saveddata/maps/MapItemSavedData.java
+@@ -24,6 +_,7 @@
+ import net.minecraft.network.protocol.game.ClientboundMapItemDataPacket;
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.resources.ResourceKey;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.datafix.DataFixTypes;
+@@ -38,6 +_,7 @@
+ import net.minecraft.world.level.LevelAccessor;
+ import net.minecraft.world.level.saveddata.SavedData;
+ import net.minecraft.world.level.saveddata.SavedDataType;
++import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class MapItemSavedData extends SavedData {
 @@ -137,7 +_,7 @@
          return new MapItemSavedData(0, 0, scale, false, false, isLocked, dimension);
      }
@@ -9,12 +25,25 @@
          MapItemSavedData result = new MapItemSavedData(
              this.centerX, this.centerZ, this.scale, this.trackingPosition, this.unlimitedTracking, true, this.dimension
          );
-@@ -157,7 +_,7 @@
+@@ -148,7 +_,7 @@
+         return result;
+     }
+ 
+-    public MapItemSavedData scaled() {
++    public synchronized MapItemSavedData scaled() {
+         return createFresh(this.centerX, this.centerZ, (byte)Mth.clamp(this.scale + 1, 0, 4), this.trackingPosition, this.unlimitedTracking, this.dimension);
+     }
+ 
+@@ -157,7 +_,11 @@
          return stack -> stack == mapStack ? true : stack.is(mapStack.getItem()) && Objects.equals(mapId, stack.get(DataComponents.MAP_ID));
      }
  
 -    public void tickCarriedBy(Player tickingPlayer, ItemStack itemStack, @Nullable ItemFrame placedInFrame) {
 +    public synchronized void tickCarriedBy(Player tickingPlayer, ItemStack itemStack, @Nullable ItemFrame placedInFrame) {
++        if (tickingPlayer.level() instanceof ServerLevel serverLevel && serverLevel.getServer().regionizedTaskDispatcher().isRunning()) {
++            RegionizedWorldGuard.ensureRegionThreadFor(serverLevel, tickingPlayer.chunkPosition(), "Ticking map player in incorrect region");
++        }
++
          if (!this.carriedByPlayers.containsKey(tickingPlayer)) {
              MapItemSavedData.HoldingPlayer holdingPlayer = new MapItemSavedData.HoldingPlayer(tickingPlayer);
              this.carriedByPlayers.put(tickingPlayer, holdingPlayer);
@@ -74,6 +103,20 @@
          double xPos = pos.getX() + 0.5;
          double zPos = pos.getZ() + 0.5;
          int scale = 1 << this.scale;
+@@ -380,6 +_,13 @@
+         double yd = (zPos - this.centerZ) / scale;
+         int halfSize = 63;
+         if (xd >= -63.0 && yd >= -63.0 && xd <= 63.0 && yd <= 63.0) {
++            if (level instanceof ServerLevel serverLevel
++                && serverLevel.getServer().regionizedTaskDispatcher().isRunning()
++                && (!RegionizedWorldGuard.isRegionThreadFor(serverLevel, pos)
++                    || serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null)) {
++                return false;
++            }
++
+             MapBanner banner = MapBanner.fromWorld(level, pos);
+             if (banner == null) {
+                 return false;
 @@ -402,7 +_,7 @@
          return false;
      }
@@ -153,3 +196,16 @@
              } else {
                  decorations = null;
              }
+@@ -592,10 +_,12 @@
+         }
+ 
+         public void applyToMap(MapItemSavedData map) {
++            synchronized (map) {
+             for (int x = 0; x < this.width; x++) {
+                 for (int y = 0; y < this.height; y++) {
+                     map.setColor(this.startX + x, this.startY + y, this.mapColors[x + y * this.width]);
+                 }
++            }
+             }
+         }
+     }

@@ -875,8 +875,13 @@
      protected boolean couldAcceptPassenger() {
          return true;
      }
-@@ -2531,13 +_,8 @@
-                 if (this.portalProcess.processPortalTeleportation(level, this, this.canUsePortal(false))) {
+@@ -2528,16 +_,12 @@
+         if (this.level() instanceof ServerLevel level) {
+             this.processPortalCooldown();
+             if (this.portalProcess != null) {
+-                if (this.portalProcess.processPortalTeleportation(level, this, this.canUsePortal(false))) {
++                boolean canUsePortal = this.canUsePortal(false);
++                if (this.portalProcess.processPortalTeleportation(level, this, canUsePortal)) {
                      ProfilerFiller profiler = Profiler.get();
                      profiler.push("portal");
 -                    this.setPortalCooldown();
@@ -891,7 +896,7 @@
                      }
  
                      profiler.pop();
-@@ -2548,6 +_,21 @@
+@@ -2548,6 +_,32 @@
          }
      }
  
@@ -901,11 +906,22 @@
 +        }
 +
 +        this.setPortalCooldown();
-+        TeleportTransition teleportTransition = this.portalProcess.getPortalDestination(level, this);
++        PortalProcessor portalProcess = this.portalProcess;
++        TeleportTransition teleportTransition = portalProcess.getPortalDestination(level, this);
 +        if (teleportTransition != null) {
 +            ServerLevel newLevel = teleportTransition.newLevel();
-+            if (level.isAllowedToEnterPortal(newLevel) && (newLevel.dimension() == level.dimension() || this.canTeleport(level, newLevel))) {
-+                this.teleport(teleportTransition);
++            boolean allowedToEnter = level.isAllowedToEnterPortal(newLevel);
++            boolean canTeleportToLevel = newLevel.dimension() == level.dimension() || this.canTeleport(level, newLevel);
++            if (allowedToEnter && canTeleportToLevel) {
++                this.portalProcess = null;
++                Entity result = this.teleport(teleportTransition);
++                if (result != null) {
++                    result.setPortalCooldown();
++                    result.portalProcess = null;
++                } else if (!this.isRemoved()) {
++                    this.setPortalCooldown();
++                    this.portalProcess = null;
++                }
 +            }
 +        }
 +    }

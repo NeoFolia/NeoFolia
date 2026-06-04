@@ -1,22 +1,13 @@
 --- a/net/minecraft/world/entity/ai/sensing/PlayerSensor.java
 +++ b/net/minecraft/world/entity/ai/sensing/PlayerSensor.java
-@@ -12,6 +_,7 @@
- import net.minecraft.world.entity.ai.attributes.Attributes;
- import net.minecraft.world.entity.ai.memory.MemoryModuleType;
- import net.minecraft.world.entity.player.Player;
-+import net.neoforged.neoforge.server.region.RegionizedWorldGuard;
- 
- public class PlayerSensor extends Sensor<LivingEntity> {
-     @Override
-@@ -26,18 +_,19 @@
+@@ -26,18 +_,18 @@
  
      @Override
      protected void doTick(ServerLevel level, LivingEntity body) {
 -        List<Player> players = level.players()
-+        List<Player> players = List.copyOf(level.players())
++        List<Player> players = List.copyOf(level.getLocalPlayers())
              .stream()
              .filter(EntitySelector.NO_SPECTATORS)
-+            .filter(player -> RegionizedWorldGuard.restrictEntityToCurrentRegion(level, player) != null)
              .filter(player -> body.closerThan(player, this.getFollowDistance(body)))
              .sorted(Comparator.comparingDouble(body::distanceToSqr))
              .collect(Collectors.toList());

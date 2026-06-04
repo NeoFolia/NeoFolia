@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/chunk/status/ChunkStatusTasks.java
 +++ b/net/minecraft/world/level/chunk/status/ChunkStatusTasks.java
-@@ -189,11 +_,22 @@
+@@ -189,13 +_,24 @@
              }
  
              levelChunk.setFullStatus(holder::getFullStatus);
@@ -21,5 +21,8 @@
 +                holder.currentlyLoading = null; // Neo: Stop bypassing the future chain.
 +            }
              return levelChunk;
-         }, context.mainThreadExecutor());
+-        }, context.mainThreadExecutor());
++        }, context.level().getChunkSource().chunkRegionExecutor(pos));
      }
+ 
+     private static void postLoadProtoChunk(ServerLevel level, ValueInput.ValueInputList entities) {
